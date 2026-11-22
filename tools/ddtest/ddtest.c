@@ -9,8 +9,8 @@
  *
  * Command line (all optional):
  *   --size WxH  --width N  --height N  --bpp 8|16|24|32  --refresh HZ  --fps N
- *   --present flip|blt|lock|windowed  --pattern NAME|NUMBER  --image FILE  --fit
- *   --start          apply the settings straight away
+ *   --present flip|blt|lock|windowed  --pattern NAME|NUMBER  --image FILE
+ *   --start          run straight away
  *   --dump DIR       save every pattern (or just --pattern) as PNG files and exit,
  *                    without using DirectDraw; --frame N picks the animation frame
  *   --frames N       with --start: exit after N frames (exit code 0), or with
@@ -21,12 +21,21 @@
 #include "ddtest.h"
 
 #include <commdlg.h>
+#include <math.h>
 #include <windowsx.h>
 #include <mmsystem.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+/* Current-looking controls (and drop-down hint text) from Common Controls 6 */
+#pragma comment(linker, "/manifestdependency:\"type='win32' name='Microsoft.Windows.Common-Controls' " \
+                        "version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
+
+#ifndef CB_SETCUEBANNER
+#define CB_SETCUEBANNER 0x1703
+#endif
 
 #include <initguid.h>
 #include <ddraw.h>
@@ -36,11 +45,13 @@
 
 enum { PRESENT_FLIP, PRESENT_BLT, PRESENT_LOCK, PRESENT_WINDOWED, PRESENT_COUNT };
 
+/* What the program asks DirectDraw for. cnc-ddraw follows it with
+   windowed=auto; windowed=true/false override it. */
 static const char* PRESENT_NAMES[PRESENT_COUNT] = {
-    "Fullscreen: page flipping (primary + back buffer)",
-    "Fullscreen: draw off-screen, Blt to the primary surface",
-    "Fullscreen: lock and write the primary surface directly",
-    "Windowed: draw off-screen, Blt to the window",
+    "Exclusive fullscreen, page flipping",
+    "Exclusive fullscreen, Blt to the primary surface",
+    "Exclusive fullscreen, write the primary surface",
+    "Windowed (normal cooperative level), Blt to the window",
 };
 
 static const char* PRESENT_SHORT[PRESENT_COUNT] = { "flip", "blt", "lock", "windowed" };
@@ -58,7 +69,7 @@ typedef struct Settings
 {
     int width, height, bpp, refresh, fps;
     int present, pattern;
-    BOOL info, mouse, image_fit;
+    BOOL info, mouse;
     char image_path[MAX_PATH];
 } Settings;
 
@@ -73,7 +84,6 @@ static void settings_default(Settings* s)
     s->pattern = PAT_COLOR_BARS;
     s->info = TRUE;
     s->mouse = TRUE;
-    s->image_fit = TRUE;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -81,13 +91,22 @@ static void settings_default(Settings* s)
 
 enum
 {
-    ID_APPLY = IDOK,
+    ID_RUN = IDOK,
     ID_STOP = 1001,
-    ID_WIDTH, ID_HEIGHT, ID_BPP, ID_REFRESH, ID_FPS,
-    ID_PRESENT, ID_PATTERN, ID_INFO, ID_MOUSE,
-    ID_IMAGE, ID_BROWSE, ID_FIT, ID_IMGSIZE,
+    ID_RES, ID_WIDTH, ID_HEIGHT, ID_REFRESH, ID_FPS,
+    ID_PATTERN, ID_INFO, ID_MOUSE,
+    ID_IMAGE, ID_BROWSE, ID_IMGSIZE,
     ID_MODES, ID_QUERY, ID_STATUS,
+    ID_BPP0 = 1100,     /* radio buttons, one per BPP_VALUES entry */
+    ID_PRESENT0 = 1110, /* radio buttons, one per presentation method */
 };
+
+/* Posted to the panel when a text box loses the focus, so its value is
+   applied once the focus has settled */
+#define WM_APP_COMMIT (WM_APP + 1)
+
+/* Posted to the panel when the test window has been resized to (wParam, lParam) */
+#define WM_APP_RESIZED (WM_APP + 2)
 
 #define TIMER_STATUS 1
 #define MAX_CLICKS 16
@@ -95,14 +114,27 @@ enum
 
 typedef struct Mode { int w, h, bpp, hz; } Mode;
 
+/* The resolution list; anything else is "Custom" */
+static const SIZE RESOLUTIONS[] = {
+    { 320, 200 }, { 320, 240 }, { 400, 300 }, { 512, 384 }, { 640, 400 }, { 640, 480 },
+    { 800, 600 }, { 1024, 768 }, { 1152, 864 }, { 1280, 720 }, { 1280, 960 }, { 1280, 1024 },
+    { 1366, 768 }, { 1600, 1200 }, { 1920, 1080 }, { 1920, 1200 }, { 2560, 1440 }, { 3840, 2160 },
+};
+#define RES_COUNT ((int)(sizeof(RESOLUTIONS) / sizeof(RESOLUTIONS[0])))
+#define RES_CUSTOM RES_COUNT /* the last entry in the list */
+
 static struct
 {
     HINSTANCE inst;
     HFONT font;
     HWND panel, display;
-    HWND ed_width, ed_height, cb_bpp, ed_refresh, ed_fps;
-    HWND cb_present, cb_pattern, chk_info, chk_mouse;
-    HWND ed_image, chk_fit, cb_modes, st_status;
+    HWND cb_res, ed_width, ed_height, rb_bpp[BPP_COUNT], ed_refresh, ed_fps;
+    HWND rb_present[PRESENT_COUNT], cb_pattern, chk_info, chk_mouse;
+    HWND ed_image, cb_modes, st_status;
+    HWND bt_browse, bt_imgsize, bt_query, bt_run, bt_stop;
+    HWND lb_size, lb_x, lb_bpp, lb_refresh, lb_hz, lb_fps, lb_fps_unit;
+    HWND lb_present, st_present_note, lb_pattern, lb_image, st_image_note, lb_modes, st_help;
+    int dpi;
 
     char exe_dir[MAX_PATH];
     char ini_path[MAX_PATH];
@@ -118,8 +150,16 @@ static struct
     BOOL pal_dirty;
     LPDIRECTDRAWCLIPPER clipper;
     DDPIXELFORMAT pf;
+    int primary_bpp;
 
     BOOL running;
+    BOOL unload_pending;
+    BOOL restart_pending; /* run again once ddraw.dll is unloaded */
+    int pan_x, pan_y;     /* image patterns: Ctrl+arrows move the picture */
+    POINT window_pos;     /* where the next windowed test window goes, if have_window_pos */
+    BOOL have_window_pos;
+    double native_aspect; /* the desktop's width/height: a fullscreen picture fills that shape */
+    HWND restart_focus;   /* the panel control to give the focus back to after it */
     Settings cur;
     Canvas canvas;
     uint32_t base_pal[256];
@@ -129,7 +169,7 @@ static struct
     char image_loaded_path[MAX_PATH];
 
     uint32_t frame;
-    LARGE_INTEGER qpf, fps_t0, next_frame;
+    LARGE_INTEGER qpf, fps_t0, next_frame, run_t0;
     int fps_frames;
     double fps;
 
@@ -146,6 +186,7 @@ static struct
 } g;
 
 static void update_status(void);
+static void pan_image(int dx, int dy);
 
 static void set_error(const char* fmt, ...)
 {
@@ -165,6 +206,7 @@ static const char* dderr_name(HRESULT hr)
     case DD_OK: return "DD_OK";
     case DDERR_ALREADYINITIALIZED: return "DDERR_ALREADYINITIALIZED";
     case DDERR_CANTCREATEDC: return "DDERR_CANTCREATEDC";
+    case DDERR_EXCEPTION: return "DDERR_EXCEPTION";
     case DDERR_EXCLUSIVEMODEALREADYSET: return "DDERR_EXCLUSIVEMODEALREADYSET";
     case DDERR_GENERIC: return "DDERR_GENERIC";
     case DDERR_HWNDALREADYSET: return "DDERR_HWNDALREADYSET";
@@ -198,6 +240,19 @@ static const char* dderr_name(HRESULT hr)
         buf[sizeof(buf) - 1] = '\0';
         return buf;
     }
+}
+
+static void append_error(const char* fmt, ...)
+{
+    size_t len = strlen(g.error);
+    if (len >= sizeof(g.error) - 1)
+        return;
+
+    va_list ap;
+    va_start(ap, fmt);
+    _vsnprintf(g.error + len, sizeof(g.error) - 1 - len, fmt, ap);
+    g.error[sizeof(g.error) - 1] = '\0';
+    va_end(ap);
 }
 
 static BOOL dd_ok(HRESULT hr, const char* what)
@@ -248,6 +303,20 @@ static BOOL load_ddraw(void)
     }
 
     return TRUE;
+}
+
+/* Unloading after every run makes the next Run start like a new game: the
+   DLL reads its settings again and forgets runtime changes such as Alt+Enter.
+   It's done from the main loop, never inside a window message, because a
+   wrapper's own window procedure may still be on the call stack. */
+static void unload_ddraw(void)
+{
+    if (!g.ddraw_mod)
+        return;
+
+    FreeLibrary(g.ddraw_mod);
+    g.ddraw_mod = NULL;
+    g.DirectDrawCreateEx = NULL;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -418,6 +487,28 @@ static void pf_for_bpp(int bpp, DDPIXELFORMAT* pf)
     }
 }
 
+/* Every DirectDraw session gets a new test window, the way every game start
+   does, so nothing a wrapper did to the last one carries over */
+static BOOL create_display(void)
+{
+    if (!g.display)
+        g.display = CreateWindowExA(0, "DDTestDisplay", "ddtest", WS_POPUP, 0, 0, 640, 480, NULL, NULL, g.inst, NULL);
+
+    if (!g.display)
+        set_error("Couldn't create the test window (error %lu)", GetLastError());
+
+    return g.display != NULL;
+}
+
+static void destroy_display(void)
+{
+    HWND h = g.display;
+    g.display = NULL;
+
+    if (h)
+        DestroyWindow(h);
+}
+
 static void setup_window(const Settings* s, BOOL fullscreen)
 {
     char title[128];
@@ -433,7 +524,8 @@ static void setup_window(const Settings* s, BOOL fullscreen)
     }
     else
     {
-        DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
+        /* Resizable: a new size is a new resolution (see WM_EXITSIZEMOVE) */
+        DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_THICKFRAME;
         RECT r = { 0, 0, s->width, s->height };
         AdjustWindowRectEx(&r, style, FALSE, 0);
 
@@ -443,8 +535,19 @@ static void setup_window(const Settings* s, BOOL fullscreen)
         int ww = r.right - r.left, wh = r.bottom - r.top;
         int x = work.left + ((work.right - work.left) - ww) / 2;
         int y = work.top + ((work.bottom - work.top) - wh) / 2;
-        if (x < work.left) x = work.left;
-        if (y < work.top) y = work.top;
+
+        /* After the user resized the window, the new one goes where that was */
+        if (g.have_window_pos)
+        {
+            x = g.window_pos.x;
+            y = g.window_pos.y;
+            g.have_window_pos = FALSE;
+        }
+        else
+        {
+            if (x < work.left) x = work.left;
+            if (y < work.top) y = work.top;
+        }
 
         SetWindowLongA(g.display, GWL_STYLE, style | WS_VISIBLE);
         SetWindowPos(g.display, HWND_TOP, x, y, ww, wh, SWP_FRAMECHANGED | SWP_SHOWWINDOW);
@@ -510,6 +613,7 @@ static BOOL create_surfaces(const Settings* s)
         ZeroMemory(&primary_pf, sizeof(primary_pf));
         primary_pf.dwSize = sizeof(primary_pf);
         IDirectDrawSurface7_GetPixelFormat(g.primary, &primary_pf);
+        g.primary_bpp = (int)primary_pf.dwRGBBitCount;
 
         ZeroMemory(&sd, sizeof(sd));
         sd.dwSize = sizeof(sd);
@@ -573,7 +677,13 @@ static BOOL start(const Settings* s)
     release_surfaces();
 
     if (g.dd && g.dd_fullscreen != fullscreen)
+    {
         release_dd();
+        destroy_display();
+    }
+
+    if (!create_display())
+        return FALSE;
 
     setup_window(s, fullscreen);
 
@@ -595,7 +705,14 @@ static BOOL start(const Settings* s)
     {
         hr = IDirectDraw7_SetDisplayMode(g.dd, (DWORD)s->width, (DWORD)s->height, (DWORD)s->bpp, (DWORD)s->refresh, 0);
         if (!dd_ok(hr, "SetDisplayMode"))
+        {
+            if (s->bpp == 24)
+                append_error(". This ddraw.dll has no 24-bit display modes: cnc-ddraw doesn't offer them, "
+                             "and neither does Windows' own DirectDraw on current graphics cards.");
+            else if (hr == DDERR_INVALIDMODE || hr == DDERR_UNSUPPORTEDMODE)
+                append_error(". This ddraw.dll doesn't offer that mode; Query lists the ones it does.");
             return FALSE;
+        }
 
         /* Like most games: cover the screen, which is now the new mode's size */
         SetWindowPos(g.display, HWND_TOP, 0, 0, s->width, s->height, SWP_SHOWWINDOW);
@@ -617,6 +734,7 @@ static BOOL start(const Settings* s)
     g.click_next = 0;
     g.next_frame.QuadPart = 0;
     QueryPerformanceCounter(&g.fps_t0);
+    g.run_t0 = g.fps_t0;
     return TRUE;
 }
 
@@ -624,9 +742,8 @@ static void stop(void)
 {
     release_dd();
     g.running = FALSE;
-
-    if (g.display)
-        ShowWindow(g.display, SW_HIDE);
+    destroy_display();
+    g.unload_pending = TRUE;
 
     if (g.panel && IsWindow(g.panel))
         SetForegroundWindow(g.panel);
@@ -659,7 +776,17 @@ static void draw_info(Canvas* c)
     line[sizeof(line) - 1] = '\0';
     y += cv_label(c, 3, y, ts, WHITE, BLACK, line);
 
-    cv_label(c, 3, y, ts, COL(160, 160, 160), BLACK, "Esc: stop  Left/Right: pattern  I: info  M: mouse");
+    if (g.cur.pattern == PAT_TEST_IMAGE || g.cur.pattern == PAT_IMAGE)
+    {
+        _snprintf(line, sizeof(line) - 1, "Picture moved %d, %d from centred", g.pan_x, g.pan_y);
+        line[sizeof(line) - 1] = '\0';
+        y += cv_label(c, 3, y, ts, WHITE, BLACK, line);
+    }
+
+    cv_label(c, 3, y, ts, COL(160, 160, 160), BLACK,
+             g.cur.pattern == PAT_TEST_IMAGE || g.cur.pattern == PAT_IMAGE
+                 ? "Esc: stop  Left/Right: pattern  Ctrl+arrows: move (+Shift: 1 pixel)  I: info  M: mouse"
+                 : "Esc: stop  Left/Right: pattern  I: info  M: mouse");
 }
 
 static void draw_mouse(Canvas* c)
@@ -712,12 +839,26 @@ static void render_frame(void)
     PatternContext ctx;
     ZeroMemory(&ctx, sizeof(ctx));
     ctx.frame = g.frame;
+    pan_image(0, 0); /* keep it within the picture after a resolution change */
+    ctx.pan_x = g.pan_x;
+    ctx.pan_y = g.pan_y;
     ctx.palette = g.base_pal;
     ctx.hw_palette = (g.pf.dwFlags & DDPF_PALETTEINDEXED8) != 0;
     ctx.image = g.image;
     ctx.image_w = g.image_w;
     ctx.image_h = g.image_h;
-    ctx.image_fit = g.cur.image_fit;
+
+    /* The shape of the screen the picture fills, for the patterns that should
+       look round or square. Windowed: the window, so square pixels.
+       Fullscreen: the display, when the mode has its shape (a 1280 x 720
+       mode on a 16:9 display); any other mode is taken to be shown on a
+       4:3 screen, as in the days of these games. */
+    double mode_aspect = (double)g.cur.width / g.cur.height;
+    if (g.cur.present == PRESENT_WINDOWED ||
+        (g.native_aspect > 0 && fabs(mode_aspect - g.native_aspect) < 0.01))
+        g.canvas.screen_aspect = mode_aspect;
+    else
+        g.canvas.screen_aspect = 0; /* 4:3 */
 
     pattern_draw(g.cur.pattern, &g.canvas, &ctx);
 
@@ -810,6 +951,10 @@ static void render_frame(void)
     }
     else if (hr != DDERR_WASSTILLDRAWING && !dd_ok(hr, g.cur.present == PRESENT_FLIP ? "Flip" : "Blt"))
     {
+        if (g.cur.present == PRESENT_WINDOWED && g.primary_bpp != (int)g.pf.dwRGBBitCount)
+            append_error(". This DirectDraw can't Blt from a %d-bit surface to the %d-bit desktop; "
+                         "Windows' own DirectDraw doesn't convert between bit depths.",
+                         (int)g.pf.dwRGBBitCount, g.primary_bpp);
         stop();
         return;
     }
@@ -866,7 +1011,6 @@ static void settings_load(Settings* s)
     s->pattern = GetPrivateProfileIntA(sec, "pattern", s->pattern, g.ini_path);
     s->info = GetPrivateProfileIntA(sec, "info", s->info, g.ini_path) != 0;
     s->mouse = GetPrivateProfileIntA(sec, "mouse", s->mouse, g.ini_path) != 0;
-    s->image_fit = GetPrivateProfileIntA(sec, "image_fit", s->image_fit, g.ini_path) != 0;
     GetPrivateProfileStringA(sec, "image", "", s->image_path, sizeof(s->image_path), g.ini_path);
 
     if (s->present < 0 || s->present >= PRESENT_COUNT) s->present = PRESENT_FLIP;
@@ -892,7 +1036,6 @@ static void settings_save(const Settings* s)
     write_int("pattern", s->pattern);
     write_int("info", s->info);
     write_int("mouse", s->mouse);
-    write_int("image_fit", s->image_fit);
     WritePrivateProfileStringA("ddtest", "image", s->image_path, g.ini_path);
 }
 
@@ -905,9 +1048,9 @@ static const char* USAGE =
     "  --present flip|blt|lock|windowed\n"
     "  --pattern NAME|NUMBER\n"
     "      bars, ramps, grid, pixels, geometry, dither, text,\n"
-    "      motion, interlaced, palette, white, image\n"
-    "  --image FILE, --fit\n"
-    "  --start             apply the settings straight away\n"
+    "      motion, interlaced, palette, white, testimage, image\n"
+    "  --image FILE        image file for the image pattern (shown 1:1)\n"
+    "  --start             run straight away\n"
     "  --dump DIR          save the patterns as PNG files and exit\n"
     "  --frame N           animation frame for --dump\n"
     "  --frames N          with --start: exit after N frames\n"
@@ -922,7 +1065,6 @@ static BOOL parse_args(Settings* s, BOOL* start_now, char* dump_dir, uint32_t* f
         BOOL takes_value = TRUE;
 
         if (_stricmp(a, "--start") == 0) { *start_now = TRUE; takes_value = FALSE; }
-        else if (_stricmp(a, "--fit") == 0) { s->image_fit = TRUE; takes_value = FALSE; }
         else if (_stricmp(a, "--help") == 0 || _stricmp(a, "/?") == 0)
         {
             MessageBoxA(NULL, USAGE, "ddtest", MB_OK | MB_ICONINFORMATION);
@@ -1048,7 +1190,6 @@ static int run_dump(const Settings* s, const char* dir, uint32_t frame, int only
         ctx.image = g.image;
         ctx.image_w = g.image_w;
         ctx.image_h = g.image_h;
-        ctx.image_fit = s->image_fit;
 
         Canvas* c = &g.canvas;
         pattern_draw(p, c, &ctx);
@@ -1093,22 +1234,92 @@ static int run_dump(const Settings* s, const char* dir, uint32_t frame, int only
 /* ---------------------------------------------------------------------- */
 /* Control panel                                                           */
 
-static HWND add_control(const char* cls, const char* text, DWORD style, int x, int y, int w, int h, int id)
+/* The panel is laid out from the font's measured size at the window's DPI, so
+   it stays readable at any display scaling. (cnc-ddraw makes the process
+   DPI-aware when it loads; Windows' own ddraw.dll doesn't, and then Windows
+   scales the whole panel.) */
+
+static const char* HELP_TEXT =
+    "During a run, changes apply straight away; typed values when you press Enter or leave the box. "
+    "In the test window: Esc or closing it stops, Left/Right change the pattern, Ctrl+arrows move "
+    "an image (with Shift, a pixel at a time), I and M toggle the overlays, left click marks a point, "
+    "right click clears the marks.";
+
+static const char* PRESENT_NOTE =
+    "This is what the program asks DirectDraw for. cnc-ddraw follows it with windowed=auto "
+    "(the default); windowed=true or false in ddraw.ini force a window or fullscreen.";
+
+static const char* IMAGE_NOTE = "Shown 1:1, centred and cropped";
+
+static int window_dpi(HWND hwnd)
+{
+    static UINT (WINAPI* get_dpi_for_window)(HWND);
+    static BOOL looked_up;
+
+    if (!looked_up)
+    {
+        looked_up = TRUE;
+        get_dpi_for_window = (UINT (WINAPI*)(HWND))GetProcAddress(GetModuleHandleA("user32.dll"), "GetDpiForWindow");
+    }
+
+    if (get_dpi_for_window && hwnd)
+    {
+        UINT dpi = get_dpi_for_window(hwnd);
+        if (dpi)
+            return (int)dpi;
+    }
+
+    HDC dc = GetDC(NULL);
+    int dpi = GetDeviceCaps(dc, LOGPIXELSY);
+    ReleaseDC(NULL, dc);
+    return dpi > 0 ? dpi : 96;
+}
+
+static HFONT create_ui_font(int dpi)
+{
+    static BOOL (WINAPI* spi_for_dpi)(UINT, UINT, PVOID, UINT, UINT);
+    static BOOL looked_up;
+
+    if (!looked_up)
+    {
+        looked_up = TRUE;
+        spi_for_dpi = (BOOL (WINAPI*)(UINT, UINT, PVOID, UINT, UINT))
+            GetProcAddress(GetModuleHandleA("user32.dll"), "SystemParametersInfoForDpi");
+    }
+
+    NONCLIENTMETRICSW ncm;
+    ZeroMemory(&ncm, sizeof(ncm));
+    ncm.cbSize = sizeof(ncm);
+
+    if (spi_for_dpi && spi_for_dpi(SPI_GETNONCLIENTMETRICS, sizeof(ncm), &ncm, 0, (UINT)dpi))
+        return CreateFontIndirectW(&ncm.lfMessageFont);
+
+    /* Older Windows: the system DPI's metrics, scaled to this DPI */
+    SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, sizeof(ncm), &ncm, 0);
+    ncm.lfMessageFont.lfHeight = MulDiv(ncm.lfMessageFont.lfHeight, dpi, window_dpi(NULL));
+    return CreateFontIndirectW(&ncm.lfMessageFont);
+}
+
+/* Every control starts a new group except radio buttons, so the arrow keys
+   move between the radio buttons of one group and Tab leaves it. The first
+   radio button of a group passes WS_GROUP itself. */
+static HWND add_control(const char* cls, const char* text, DWORD style, int id)
 {
     DWORD ex = (strcmp(cls, "EDIT") == 0) ? WS_EX_CLIENTEDGE : 0;
-    HWND hwnd = CreateWindowExA(ex, cls, text, WS_CHILD | WS_VISIBLE | style, x, y, w, h,
+    BOOL radio = strcmp(cls, "BUTTON") == 0 && (style & BS_TYPEMASK) == BS_AUTORADIOBUTTON;
+    if (!radio)
+        style |= WS_GROUP;
+
+    HWND hwnd = CreateWindowExA(ex, cls, text, WS_CHILD | WS_VISIBLE | style, 0, 0, 10, 10,
                                 g.panel, (HMENU)(INT_PTR)id, g.inst, NULL);
-    SendMessageA(hwnd, WM_SETFONT, (WPARAM)g.font, TRUE);
+    SendMessageA(hwnd, WM_SETFONT, (WPARAM)g.font, FALSE);
     return hwnd;
 }
 
-static HWND add_label(const char* text, int x, int y, int w)
+static HWND add_label(const char* text)
 {
-    return add_control("STATIC", text, SS_LEFT | SS_NOPREFIX, x, y + 3, w, 18, -1);
+    return add_control("STATIC", text, SS_LEFT | SS_NOPREFIX, -1);
 }
-
-#define PANEL_W 500
-#define PANEL_H 400
 
 static void create_controls(void)
 {
@@ -1117,96 +1328,339 @@ static void create_controls(void)
     const DWORD combo = WS_TABSTOP | WS_VSCROLL | CBS_DROPDOWNLIST;
     const DWORD check = WS_TABSTOP | BS_AUTOCHECKBOX;
     const DWORD button = WS_TABSTOP | BS_PUSHBUTTON;
+    const DWORD radio = BS_AUTORADIOBUTTON;
+    const DWORD first_radio = radio | WS_GROUP | WS_TABSTOP;
 
-    int y = 12;
-    add_label("Width:", 12, y, 44);
-    g.ed_width = add_control("EDIT", "", number, 58, y, 58, 22, ID_WIDTH);
-    add_label("Height:", 128, y, 46);
-    g.ed_height = add_control("EDIT", "", number, 176, y, 58, 22, ID_HEIGHT);
-    add_label("Bit depth:", 248, y, 60);
-    g.cb_bpp = add_control("COMBOBOX", "", combo, 310, y, 70, 200, ID_BPP);
+    /* Created in tab order */
+    g.lb_size = add_label("Resolution:");
+    g.cb_res = add_control("COMBOBOX", "", combo, ID_RES);
+    for (int i = 0; i < RES_COUNT; i++)
+    {
+        char buf[32];
+        _snprintf(buf, sizeof(buf) - 1, "%ld x %ld", RESOLUTIONS[i].cx, RESOLUTIONS[i].cy);
+        buf[sizeof(buf) - 1] = '\0';
+        ComboBox_AddString(g.cb_res, buf);
+    }
+    ComboBox_AddString(g.cb_res, "Custom");
+
+    /* The size itself; picking from the list fills these in */
+    g.ed_width = add_control("EDIT", "", number, ID_WIDTH);
+    g.lb_x = add_label("x");
+    g.ed_height = add_control("EDIT", "", number, ID_HEIGHT);
+
+    g.lb_bpp = add_label("Bit depth:");
     for (int i = 0; i < BPP_COUNT; i++)
     {
-        char buf[8];
-        _snprintf(buf, sizeof(buf) - 1, "%d", BPP_VALUES[i]);
+        char buf[16];
+        _snprintf(buf, sizeof(buf) - 1, "%d-bit", BPP_VALUES[i]);
         buf[sizeof(buf) - 1] = '\0';
-        ComboBox_AddString(g.cb_bpp, buf);
+        g.rb_bpp[i] = add_control("BUTTON", buf, i == 0 ? first_radio : radio, ID_BPP0 + i);
     }
 
-    y += 32;
-    add_label("Refresh rate:", 12, y, 78);
-    g.ed_refresh = add_control("EDIT", "", number, 92, y, 50, 22, ID_REFRESH);
-    add_label("Hz (0 = default)", 148, y, 100);
-    add_label("Frame limit:", 260, y, 70);
-    g.ed_fps = add_control("EDIT", "", number, 332, y, 50, 22, ID_FPS);
-    add_label("fps (0 = none)", 388, y, 100);
+    g.lb_refresh = add_label("Refresh rate:");
+    g.ed_refresh = add_control("EDIT", "", number, ID_REFRESH);
+    g.lb_hz = add_label("Hz  (0 = default)");
 
-    y += 32;
-    add_label("Presentation:", 12, y, 78);
-    g.cb_present = add_control("COMBOBOX", "", combo, 92, y, 396, 200, ID_PRESENT);
+    g.lb_fps = add_label("Frame limit:");
+    g.ed_fps = add_control("EDIT", "", number, ID_FPS);
+    g.lb_fps_unit = add_label("fps  (0 = none; page flipping also waits for vsync)");
+
+    g.lb_present = add_label("Presentation:");
     for (int i = 0; i < PRESENT_COUNT; i++)
-        ComboBox_AddString(g.cb_present, PRESENT_NAMES[i]);
+        g.rb_present[i] = add_control("BUTTON", PRESENT_NAMES[i], i == 0 ? first_radio : radio, ID_PRESENT0 + i);
+    g.st_present_note = add_label(PRESENT_NOTE);
 
-    y += 32;
-    add_label("Pattern:", 12, y, 78);
-    g.cb_pattern = add_control("COMBOBOX", "", combo, 92, y, 220, 300, ID_PATTERN);
+    g.lb_pattern = add_label("Pattern:");
+    g.cb_pattern = add_control("COMBOBOX", "", combo, ID_PATTERN);
     for (int i = 0; i < PAT_COUNT; i++)
         ComboBox_AddString(g.cb_pattern, pattern_name(i));
-    g.chk_info = add_control("BUTTON", "Info text", check, 324, y + 2, 76, 20, ID_INFO);
-    g.chk_mouse = add_control("BUTTON", "Crosshair", check, 404, y + 2, 84, 20, ID_MOUSE);
+    g.chk_info = add_control("BUTTON", "Info text", check, ID_INFO);
+    g.chk_mouse = add_control("BUTTON", "Crosshair", check, ID_MOUSE);
 
-    y += 32;
-    add_label("Image file:", 12, y, 78);
-    g.ed_image = add_control("EDIT", "", edit, 92, y, 312, 22, ID_IMAGE);
-    add_control("BUTTON", "Browse...", button, 410, y - 1, 78, 24, ID_BROWSE);
+    g.lb_image = add_label("Image file:");
+    g.ed_image = add_control("EDIT", "", edit, ID_IMAGE);
+    g.bt_browse = add_control("BUTTON", "Browse...", button, ID_BROWSE);
+    g.bt_imgsize = add_control("BUTTON", "Use image size", button, ID_IMGSIZE);
+    g.st_image_note = add_label(IMAGE_NOTE);
 
-    y += 32;
-    g.chk_fit = add_control("BUTTON", "Scale image to fit", check, 92, y + 2, 150, 20, ID_FIT);
-    add_control("BUTTON", "Use image size", button, 250, y - 1, 110, 24, ID_IMGSIZE);
+    g.lb_modes = add_label("DirectDraw modes:");
+    g.cb_modes = add_control("COMBOBOX", "", combo, ID_MODES);
+    SendMessageW(g.cb_modes, CB_SETCUEBANNER, 0, (LPARAM)L"Press List for the modes ddraw.dll offers");
+    g.bt_query = add_control("BUTTON", "List", button, ID_QUERY);
 
-    y += 32;
-    add_label("Display modes:", 12, y, 80);
-    g.cb_modes = add_control("COMBOBOX", "", combo, 92, y, 312, 300, ID_MODES);
-    add_control("BUTTON", "Query", button, 410, y - 1, 78, 24, ID_QUERY);
+    g.bt_run = add_control("BUTTON", "Run", WS_TABSTOP | BS_DEFPUSHBUTTON, ID_RUN);
+    g.bt_stop = add_control("BUTTON", "Stop", button, ID_STOP);
 
-    y += 40;
-    add_control("BUTTON", "Apply", WS_TABSTOP | BS_DEFPUSHBUTTON, 92, y, 96, 28, ID_APPLY);
-    add_control("BUTTON", "Stop", button, 196, y, 96, 28, ID_STOP);
+    g.st_help = add_label(HELP_TEXT);
+    g.st_status = add_control("STATIC", "", SS_LEFT | SS_NOPREFIX | SS_SUNKEN, ID_STATUS);
+}
 
-    y += 38;
-    add_control("STATIC",
-                "In the test window: Esc stops, Left/Right change the pattern, I and M toggle the overlays,\n"
-                "left click marks a point, right click clears the marks.",
-                SS_LEFT | SS_NOPREFIX, 12, y, 476, 34, -1);
+static int text_w(HDC dc, const char* s)
+{
+    SIZE sz;
+    GetTextExtentPoint32A(dc, s, (int)strlen(s), &sz);
+    return sz.cx;
+}
 
-    y += 40;
-    g.st_status = add_control("STATIC", "", SS_LEFT | SS_NOPREFIX | SS_SUNKEN, 12, y, 476, 60, ID_STATUS);
+static int text_h(HDC dc, const char* s, int width)
+{
+    RECT r = { 0, 0, width, 0 };
+    DrawTextA(dc, s, -1, &r, DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX);
+    return r.bottom;
+}
+
+static int imax(int a, int b)
+{
+    return a > b ? a : b;
+}
+
+static void place(HWND h, int x, int y, int w, int hh)
+{
+    SetWindowPos(h, NULL, x, y, w, hh, SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
+/* Positions every control and returns the client size the panel needs */
+static SIZE layout_controls(void)
+{
+    int dpi = g.dpi;
+#define S(v) MulDiv((v), dpi, 96)
+
+    HDC dc = GetDC(g.panel);
+    HGDIOBJ old_font = SelectObject(dc, g.font);
+    TEXTMETRICA tm;
+    GetTextMetricsA(dc, &tm);
+
+    int line = tm.tmHeight;
+    int margin = S(12), gap = S(8), small_gap = S(5);
+
+    /* Edits and buttons match the height Windows gives drop-down lists for this font */
+    RECT rc;
+    GetWindowRect(g.cb_res, &rc);
+    int ch = imax(line + S(8), rc.bottom - rc.top);
+    int row = ch + S(7);
+    int text_dy = (ch - line) / 2;
+
+    /* Single-line edits draw their text at the top, so they're only as tall as
+       the text needs and centred in the row */
+    int eh = line + S(7);
+    int edy = (ch - eh) / 2;
+
+    const char* labels[] = { "Resolution:", "Bit depth:", "Refresh rate:", "Frame limit:", "Presentation:",
+                             "Pattern:", "Image file:", "DirectDraw modes:" };
+    int label_w = 0;
+    for (int i = 0; i < (int)(sizeof(labels) / sizeof(labels[0])); i++)
+        label_w = imax(label_w, text_w(dc, labels[i]));
+    label_w += gap;
+
+    int fx = margin + label_w;
+    int system_dpi = window_dpi(NULL);
+    int arrow = MulDiv(GetSystemMetrics(SM_CXVSCROLL), dpi, system_dpi) + S(12);
+    int check_w = MulDiv(GetSystemMetrics(SM_CXMENUCHECK), dpi, system_dpi) + S(8);
+    int num_w = text_w(dc, "00000") + S(14);
+    int btn_pad = S(14);
+    int btn_w = imax(imax(text_w(dc, "Browse..."), text_w(dc, "Query")), text_w(dc, "Run")) + 2 * btn_pad;
+
+    int res_w = text_w(dc, "3840 x 2160") + arrow + S(12);
+    int radio_gap = 3 * gap;
+    int radio_h = imax(line, MulDiv(GetSystemMetrics(SM_CYMENUCHECK), dpi, system_dpi)) + S(6);
+
+    int field_w = tm.tmAveCharWidth * 52;
+    for (int i = 0; i < PRESENT_COUNT; i++)
+        field_w = imax(field_w, check_w + text_w(dc, PRESENT_NAMES[i]));
+    for (int i = 0; i < PAT_COUNT; i++)
+        field_w = imax(field_w, text_w(dc, pattern_name(i)) + arrow + S(12));
+
+    int full_w = fx + field_w - margin;
+    int y = margin;
+
+    /* Resolution, and the custom size next to it */
+    place(g.lb_size, margin, y + text_dy, label_w, line);
+    int x = fx;
+    place(g.cb_res, x, y, res_w, ch + line * (RES_COUNT + 2));
+    x += res_w + 2 * gap;
+    place(g.ed_width, x, y + edy, num_w, eh);
+    x += num_w + small_gap;
+    place(g.lb_x, x, y + text_dy, text_w(dc, "x"), line);
+    x += text_w(dc, "x") + small_gap;
+    place(g.ed_height, x, y + edy, num_w, eh);
+    y += row;
+
+    place(g.lb_bpp, margin, y + text_dy, label_w, line);
+    x = fx;
+    for (int i = 0; i < BPP_COUNT; i++)
+    {
+        char buf[16];
+        GetWindowTextA(g.rb_bpp[i], buf, sizeof(buf));
+        int w = check_w + text_w(dc, buf);
+        place(g.rb_bpp[i], x, y + (ch - radio_h) / 2, w, radio_h);
+        x += w + radio_gap;
+    }
+    y += row;
+
+    place(g.lb_refresh, margin, y + text_dy, label_w, line);
+    place(g.ed_refresh, fx, y + edy, num_w, eh);
+    place(g.lb_hz, fx + num_w + gap, y + text_dy, field_w - num_w - gap, line);
+    y += row;
+
+    place(g.lb_fps, margin, y + text_dy, label_w, line);
+    place(g.ed_fps, fx, y + edy, num_w, eh);
+    place(g.lb_fps_unit, fx + num_w + gap, y + text_dy, field_w - num_w - gap, line);
+    y += row;
+
+    /* Presentation, with a note on what it means under a wrapper */
+    place(g.lb_present, margin, y + (radio_h - line) / 2, label_w, line);
+    for (int i = 0; i < PRESENT_COUNT; i++)
+    {
+        place(g.rb_present[i], fx, y, field_w, radio_h);
+        y += radio_h;
+    }
+    y += small_gap;
+    int note_h = text_h(dc, PRESENT_NOTE, field_w);
+    place(g.st_present_note, fx, y, field_w, note_h);
+    y += note_h + S(10);
+
+    place(g.lb_pattern, margin, y + text_dy, label_w, line);
+    place(g.cb_pattern, fx, y, field_w, ch + line * (PAT_COUNT + 1));
+    y += row;
+
+    int info_w = check_w + text_w(dc, "Info text");
+    place(g.chk_info, fx, y, info_w, ch);
+    place(g.chk_mouse, fx + info_w + 3 * gap, y, check_w + text_w(dc, "Crosshair"), ch);
+    y += row;
+
+    place(g.lb_image, margin, y + text_dy, label_w, line);
+    place(g.ed_image, fx, y + edy, field_w - btn_w - gap, eh);
+    place(g.bt_browse, fx + field_w - btn_w, y, btn_w, ch);
+    y += row;
+
+    int size_w = text_w(dc, "Use image size") + 2 * btn_pad;
+    place(g.bt_imgsize, fx, y, size_w, ch);
+    place(g.st_image_note, fx + size_w + gap, y + text_dy, field_w - size_w - gap, line);
+    y += row;
+
+    place(g.lb_modes, margin, y + text_dy, label_w, line);
+    place(g.cb_modes, fx, y, field_w - btn_w - gap, ch + line * 16);
+    place(g.bt_query, fx + field_w - btn_w, y, btn_w, ch);
+    y += row + S(6);
+
+    int big_w = btn_w + S(16), big_h = ch + S(6);
+    place(g.bt_run, fx, y, big_w, big_h);
+    place(g.bt_stop, fx + big_w + gap, y, big_w, big_h);
+    y += big_h + S(14);
+
+    int help_h = text_h(dc, HELP_TEXT, full_w);
+    place(g.st_help, margin, y, full_w, help_h);
+    y += help_h + gap;
+
+    /* State, the ddraw.dll path and the last error; the last two may wrap */
+    int status_h = line * 5 + S(6);
+    place(g.st_status, margin, y, full_w, status_h);
+    y += status_h + margin;
+
+    SelectObject(dc, old_font);
+    ReleaseDC(g.panel, dc);
+
+    SIZE size = { fx + field_w + margin, y };
+    return size;
+#undef S
+}
+
+/* Sizes the panel to fit its controls; pos is the top-left corner to use, or NULL to keep it */
+static void layout_panel(const POINT* pos)
+{
+    static BOOL (WINAPI* adjust_for_dpi)(LPRECT, DWORD, BOOL, DWORD, UINT);
+    static BOOL looked_up;
+
+    if (!looked_up)
+    {
+        looked_up = TRUE;
+        adjust_for_dpi = (BOOL (WINAPI*)(LPRECT, DWORD, BOOL, DWORD, UINT))
+            GetProcAddress(GetModuleHandleA("user32.dll"), "AdjustWindowRectExForDpi");
+    }
+
+    SIZE client = layout_controls();
+
+    DWORD style = (DWORD)GetWindowLongA(g.panel, GWL_STYLE);
+    DWORD ex_style = (DWORD)GetWindowLongA(g.panel, GWL_EXSTYLE);
+    RECT r = { 0, 0, client.cx, client.cy };
+
+    if (adjust_for_dpi)
+        adjust_for_dpi(&r, style, FALSE, ex_style, (UINT)g.dpi);
+    else
+        AdjustWindowRectEx(&r, style, FALSE, ex_style);
+
+    UINT flags = SWP_NOZORDER | SWP_NOACTIVATE | (pos ? 0 : SWP_NOMOVE);
+    SetWindowPos(g.panel, NULL, pos ? pos->x : 0, pos ? pos->y : 0, r.right - r.left, r.bottom - r.top, flags);
+    InvalidateRect(g.panel, NULL, TRUE);
+}
+
+static void panel_dpi_changed(int dpi, const RECT* suggested)
+{
+    g.dpi = dpi;
+
+    HFONT old = g.font;
+    g.font = create_ui_font(dpi);
+    for (HWND h = GetWindow(g.panel, GW_CHILD); h; h = GetWindow(h, GW_HWNDNEXT))
+        SendMessageA(h, WM_SETFONT, (WPARAM)g.font, FALSE);
+    if (old)
+        DeleteObject(old);
+
+    POINT pos = { suggested->left, suggested->top };
+    layout_panel(&pos);
+}
+
+static void set_int_text(HWND edit, int value)
+{
+    char buf[16];
+    _snprintf(buf, sizeof(buf) - 1, "%d", value);
+    buf[sizeof(buf) - 1] = '\0';
+    SetWindowTextA(edit, buf);
+}
+
+/* The width and height boxes hold the size; the list shows the matching
+   entry, or "Custom" for any other size */
+static void sync_resolution_list(void)
+{
+    char buf[32];
+    GetWindowTextA(g.ed_width, buf, sizeof(buf));
+    long w = strtol(buf, NULL, 10);
+    GetWindowTextA(g.ed_height, buf, sizeof(buf));
+    long h = strtol(buf, NULL, 10);
+
+    int index = RES_CUSTOM;
+    for (int i = 0; i < RES_COUNT; i++)
+        if (RESOLUTIONS[i].cx == w && RESOLUTIONS[i].cy == h)
+            index = i;
+
+    if (ComboBox_GetCurSel(g.cb_res) != index)
+        ComboBox_SetCurSel(g.cb_res, index);
+}
+
+static void set_resolution(int w, int h)
+{
+    set_int_text(g.ed_width, w);
+    set_int_text(g.ed_height, h);
+    sync_resolution_list();
+}
+
+static void set_bpp(int bpp)
+{
+    for (int i = 0; i < BPP_COUNT; i++)
+        Button_SetCheck(g.rb_bpp[i], BPP_VALUES[i] == bpp ? BST_CHECKED : BST_UNCHECKED);
 }
 
 static void write_panel(const Settings* s)
 {
-    char buf[16];
+    set_resolution(s->width, s->height);
+    set_bpp(s->bpp);
+    set_int_text(g.ed_refresh, s->refresh);
+    set_int_text(g.ed_fps, s->fps);
 
-    _snprintf(buf, sizeof(buf) - 1, "%d", s->width); buf[sizeof(buf) - 1] = '\0';
-    SetWindowTextA(g.ed_width, buf);
-    _snprintf(buf, sizeof(buf) - 1, "%d", s->height); buf[sizeof(buf) - 1] = '\0';
-    SetWindowTextA(g.ed_height, buf);
-    _snprintf(buf, sizeof(buf) - 1, "%d", s->refresh); buf[sizeof(buf) - 1] = '\0';
-    SetWindowTextA(g.ed_refresh, buf);
-    _snprintf(buf, sizeof(buf) - 1, "%d", s->fps); buf[sizeof(buf) - 1] = '\0';
-    SetWindowTextA(g.ed_fps, buf);
-
-    int bpp_index = 0;
-    for (int i = 0; i < BPP_COUNT; i++)
-        if (BPP_VALUES[i] == s->bpp)
-            bpp_index = i;
-    ComboBox_SetCurSel(g.cb_bpp, bpp_index);
-
-    ComboBox_SetCurSel(g.cb_present, s->present);
+    for (int i = 0; i < PRESENT_COUNT; i++)
+        Button_SetCheck(g.rb_present[i], i == s->present ? BST_CHECKED : BST_UNCHECKED);
     ComboBox_SetCurSel(g.cb_pattern, s->pattern);
     Button_SetCheck(g.chk_info, s->info ? BST_CHECKED : BST_UNCHECKED);
     Button_SetCheck(g.chk_mouse, s->mouse ? BST_CHECKED : BST_UNCHECKED);
-    Button_SetCheck(g.chk_fit, s->image_fit ? BST_CHECKED : BST_UNCHECKED);
     SetWindowTextA(g.ed_image, s->image_path);
 }
 
@@ -1232,21 +1686,25 @@ static BOOL read_panel(Settings* s)
 {
     if (!read_int(g.ed_width, "Width", 1, MAX_DIMENSION, &s->width)) return FALSE;
     if (!read_int(g.ed_height, "Height", 1, MAX_DIMENSION, &s->height)) return FALSE;
+
     if (!read_int(g.ed_refresh, "Refresh rate", 0, 1000, &s->refresh)) return FALSE;
     if (!read_int(g.ed_fps, "Frame limit", 0, 10000, &s->fps)) return FALSE;
 
-    int bpp_index = ComboBox_GetCurSel(g.cb_bpp);
-    s->bpp = BPP_VALUES[bpp_index >= 0 ? bpp_index : 0];
+    s->bpp = BPP_VALUES[0];
+    for (int i = 0; i < BPP_COUNT; i++)
+        if (Button_GetCheck(g.rb_bpp[i]) == BST_CHECKED)
+            s->bpp = BPP_VALUES[i];
 
-    s->present = ComboBox_GetCurSel(g.cb_present);
-    if (s->present < 0) s->present = PRESENT_FLIP;
+    s->present = PRESENT_FLIP;
+    for (int i = 0; i < PRESENT_COUNT; i++)
+        if (Button_GetCheck(g.rb_present[i]) == BST_CHECKED)
+            s->present = i;
 
     s->pattern = ComboBox_GetCurSel(g.cb_pattern);
     if (s->pattern < 0) s->pattern = PAT_COLOR_BARS;
 
     s->info = Button_GetCheck(g.chk_info) == BST_CHECKED;
     s->mouse = Button_GetCheck(g.chk_mouse) == BST_CHECKED;
-    s->image_fit = Button_GetCheck(g.chk_fit) == BST_CHECKED;
     GetWindowTextA(g.ed_image, s->image_path, sizeof(s->image_path));
     return TRUE;
 }
@@ -1255,6 +1713,12 @@ static void update_status(void)
 {
     if (!g.st_status || !IsWindow(g.st_status))
         return;
+
+    /* Run while stopped, Stop while running */
+    if (IsWindowEnabled(g.bt_run) == g.running)
+        EnableWindow(g.bt_run, !g.running);
+    if (IsWindowEnabled(g.bt_stop) != g.running)
+        EnableWindow(g.bt_stop, g.running);
 
     char state[256];
     if (g.running)
@@ -1276,10 +1740,15 @@ static void update_status(void)
         SetWindowTextA(g.st_status, text);
 }
 
-static void apply(void)
+/* Run starts a test with the panel's settings. The button is disabled during
+   a run, so every run starts fresh: a new test window and a newly loaded
+   ddraw.dll, like a game being started. */
+static void run(void)
 {
-    Settings s;
+    if (g.running)
+        return;
 
+    Settings s;
     g.error[0] = '\0';
 
     if (!read_panel(&s))
@@ -1294,29 +1763,115 @@ static void apply(void)
     if (strcmp(s.image_path, g.image_loaded_path) != 0)
         load_image_file(s.image_path);
 
-    BOOL restart = !g.running ||
-        s.width != g.cur.width || s.height != g.cur.height || s.bpp != g.cur.bpp ||
-        s.refresh != g.cur.refresh || s.present != g.cur.present;
-
-    if (restart)
+    g.cur = s;
+    if (!start(&s))
     {
-        g.cur = s;
-        if (!start(&s))
-        {
-            char err[sizeof(g.error)];
-            strcpy(err, g.error);
-            stop();
-            strcpy(g.error, err);
-            update_status();
-            return;
-        }
+        char err[sizeof(g.error)];
+        strcpy(err, g.error);
+        stop();
+        strcpy(g.error, err);
+        update_status();
+        return;
     }
 
-    g.cur = s;
     g.running = TRUE;
     SetForegroundWindow(g.display);
     SetFocus(g.display);
     update_status();
+}
+
+/* Applies the panel to a running test, the way a game changes its settings.
+   The pattern, overlays, frame limit and image just change. Fullscreen, a new
+   resolution, bit depth or refresh rate, or another fullscreen presentation,
+   is a mode change on the same DirectDraw object; windowed, so is a new bit
+   depth. Switching between windowed and fullscreen, or a new windowed size,
+   starts over as a fresh run. When stopped, the panel is only read on Run. */
+static void apply_live(void)
+{
+    if (!g.running)
+        return;
+
+    Settings s;
+    g.error[0] = '\0';
+
+    if (!read_panel(&s))
+    {
+        update_status();
+        return;
+    }
+
+    if (!g.quit_after_frames)
+        settings_save(&s);
+
+    if (strcmp(s.image_path, g.image_loaded_path) != 0)
+        load_image_file(s.image_path);
+
+    BOOL was_windowed = g.cur.present == PRESENT_WINDOWED;
+    BOOL windowed = s.present == PRESENT_WINDOWED;
+    BOOL mode_change = s.width != g.cur.width || s.height != g.cur.height || s.bpp != g.cur.bpp ||
+                       s.present != g.cur.present || (!windowed && s.refresh != g.cur.refresh);
+
+    if (!mode_change)
+    {
+        g.cur = s;
+        update_status();
+        return;
+    }
+
+    /* A wrapper may take a windowed program's window size as its mode, once,
+       when the program sets its cooperative level (cnc-ddraw does), so a new
+       windowed size starts over too */
+    BOOL new_window_size = windowed && (s.width != g.cur.width || s.height != g.cur.height);
+
+    /* Windowed, the panel keeps the focus so you can go on changing things;
+       fullscreen, the test window needs it */
+    HWND focus = GetFocus();
+    if (!focus || !IsChild(g.panel, focus))
+        focus = NULL;
+
+    if (windowed != was_windowed || new_window_size)
+    {
+        g.restart_focus = windowed ? focus : NULL;
+        stop();
+        g.restart_pending = TRUE;
+        return;
+    }
+
+    g.cur = s;
+    if (!start(&s))
+    {
+        char err[sizeof(g.error)];
+        strcpy(err, g.error);
+        stop();
+        strcpy(g.error, err);
+        update_status();
+        return;
+    }
+
+    if (windowed && focus)
+    {
+        SetForegroundWindow(g.panel);
+        SetFocus(focus);
+    }
+
+    update_status();
+}
+
+static BOOL is_text_box(HWND h)
+{
+    return h && (h == g.ed_width || h == g.ed_height || h == g.ed_refresh || h == g.ed_fps || h == g.ed_image);
+}
+
+/* A text box lost the focus. The custom width and height count as one
+   field, so going from one to the other doesn't change the mode twice. */
+static void commit_text_box(HWND from)
+{
+    HWND to = GetFocus();
+    BOOL size_box = from == g.ed_width || from == g.ed_height;
+    if (size_box && (to == g.ed_width || to == g.ed_height))
+        return;
+
+    apply_live();
 }
 
 static void browse_image(void)
@@ -1335,7 +1890,10 @@ static void browse_image(void)
     ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_HIDEREADONLY;
 
     if (GetOpenFileNameA(&ofn))
+    {
         SetWindowTextA(g.ed_image, path);
+        apply_live();
+    }
 }
 
 static void use_image_size(void)
@@ -1349,11 +1907,8 @@ static void use_image_size(void)
         set_error("Choose an image file first");
     else if (load_image_file(path))
     {
-        char buf[16];
-        _snprintf(buf, sizeof(buf) - 1, "%d", g.image_w); buf[sizeof(buf) - 1] = '\0';
-        SetWindowTextA(g.ed_width, buf);
-        _snprintf(buf, sizeof(buf) - 1, "%d", g.image_h); buf[sizeof(buf) - 1] = '\0';
-        SetWindowTextA(g.ed_height, buf);
+        set_resolution(g.image_w, g.image_h);
+        apply_live();
     }
 
     update_status();
@@ -1413,8 +1968,11 @@ static void query_modes(void)
     HRESULT hr = IDirectDraw7_EnumDisplayModes(dd, DDEDM_REFRESHRATES, NULL, NULL, enum_modes_cb);
     dd_ok(hr, "EnumDisplayModes");
 
+    /* Unload again when stopped, so the next Run still gets a fresh ddraw.dll */
     if (temporary)
         IDirectDraw7_Release(dd);
+    if (!g.running)
+        g.unload_pending = TRUE;
 
     qsort(g.modes, (size_t)g.mode_count, sizeof(Mode), compare_modes);
 
@@ -1444,18 +2002,26 @@ static void use_mode(int index)
         return;
 
     const Mode* m = &g.modes[index];
-    char buf[16];
+    set_resolution(m->w, m->h);
+    set_int_text(g.ed_refresh, m->hz);
+    set_bpp(m->bpp);
+    apply_live();
+}
 
-    _snprintf(buf, sizeof(buf) - 1, "%d", m->w); buf[sizeof(buf) - 1] = '\0';
-    SetWindowTextA(g.ed_width, buf);
-    _snprintf(buf, sizeof(buf) - 1, "%d", m->h); buf[sizeof(buf) - 1] = '\0';
-    SetWindowTextA(g.ed_height, buf);
-    _snprintf(buf, sizeof(buf) - 1, "%d", m->hz); buf[sizeof(buf) - 1] = '\0';
-    SetWindowTextA(g.ed_refresh, buf);
+/* Moves the picture of an image pattern, as far as its edges */
+static void pan_image(int dx, int dy)
+{
+    int iw = 0, ih = 0;
+    if (g.cur.pattern == PAT_TEST_IMAGE)
+        testimage_get(&iw, &ih);
+    else if (g.cur.pattern == PAT_IMAGE && g.image)
+        iw = g.image_w, ih = g.image_h;
+    else
+        return;
 
-    for (int i = 0; i < BPP_COUNT; i++)
-        if (BPP_VALUES[i] == m->bpp)
-            ComboBox_SetCurSel(g.cb_bpp, i);
+    g.pan_x += dx;
+    g.pan_y += dy;
+    image_pan_clamp(iw, ih, g.cur.width, g.cur.height, &g.pan_x, &g.pan_y);
 }
 
 static void change_pattern(int delta)
@@ -1470,31 +2036,92 @@ static LRESULT CALLBACK panel_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     {
     case WM_CREATE:
         g.panel = hwnd;
+        g.dpi = window_dpi(hwnd);
+        g.font = create_ui_font(g.dpi);
         create_controls();
+        layout_panel(NULL);
         SetTimer(hwnd, TIMER_STATUS, 500, NULL);
+        return 0;
+
+    case 0x02E0: /* WM_DPICHANGED: moved to a monitor with a different scale */
+        panel_dpi_changed(HIWORD(wp), (const RECT*)lp);
         return 0;
 
     case WM_TIMER:
         update_status();
         return 0;
 
-    case WM_COMMAND:
-        switch (LOWORD(wp))
+    case WM_APP_RESIZED:
+        if (g.running)
         {
-        case ID_APPLY: apply(); return 0;
+            set_resolution((int)wp, (int)lp);
+            apply_live();
+        }
+        return 0;
+
+    case WM_APP_COMMIT:
+        commit_text_box((HWND)lp);
+        return 0;
+
+    case WM_COMMAND:
+    {
+        int id = LOWORD(wp), code = HIWORD(wp);
+
+        if (id >= ID_BPP0 && id < ID_BPP0 + BPP_COUNT && code == BN_CLICKED)
+        {
+            apply_live();
+            return 0;
+        }
+
+        if (id >= ID_PRESENT0 && id < ID_PRESENT0 + PRESENT_COUNT && code == BN_CLICKED)
+        {
+            apply_live();
+            return 0;
+        }
+
+        switch (id)
+        {
+        case ID_RUN: g.pan_x = g.pan_y = 0; g.have_window_pos = FALSE; run(); return 0;
         case ID_STOP: g.error[0] = '\0'; stop(); return 0;
         case ID_BROWSE: browse_image(); return 0;
         case ID_IMGSIZE: use_image_size(); return 0;
         case ID_QUERY: query_modes(); return 0;
 
         case ID_MODES:
-            if (HIWORD(wp) == CBN_SELCHANGE)
+            if (code == CBN_SELCHANGE)
                 use_mode(ComboBox_GetCurSel(g.cb_modes));
             return 0;
 
-        /* These take effect immediately; everything else waits for Apply */
+        case ID_RES:
+            if (code == CBN_SELCHANGE)
+            {
+                int res = ComboBox_GetCurSel(g.cb_res);
+                if (res == RES_CUSTOM)
+                {
+                    /* Type a size into the boxes */
+                    SetFocus(g.ed_width);
+                    Edit_SetSel(g.ed_width, 0, -1);
+                }
+                else if (res >= 0)
+                {
+                    set_resolution((int)RESOLUTIONS[res].cx, (int)RESOLUTIONS[res].cy);
+                    apply_live();
+                }
+            }
+            return 0;
+
+        /* Text boxes apply when you press Enter or leave them, not on every
+           key; the resolution list follows the size as it's typed */
+        case ID_WIDTH: case ID_HEIGHT: case ID_REFRESH: case ID_FPS: case ID_IMAGE:
+            if (code == EN_CHANGE && (id == ID_WIDTH || id == ID_HEIGHT))
+                sync_resolution_list();
+            else if (code == EN_KILLFOCUS)
+                PostMessageA(hwnd, WM_APP_COMMIT, 0, (LPARAM)lp);
+            return 0;
+
+        /* These never need anything else from the panel */
         case ID_PATTERN:
-            if (HIWORD(wp) == CBN_SELCHANGE && g.running)
+            if (code == CBN_SELCHANGE && g.running)
                 g.cur.pattern = ComboBox_GetCurSel(g.cb_pattern);
             return 0;
         case ID_INFO:
@@ -1503,11 +2130,9 @@ static LRESULT CALLBACK panel_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         case ID_MOUSE:
             if (g.running) g.cur.mouse = Button_GetCheck(g.chk_mouse) == BST_CHECKED;
             return 0;
-        case ID_FIT:
-            if (g.running) g.cur.image_fit = Button_GetCheck(g.chk_fit) == BST_CHECKED;
-            return 0;
         }
         break;
+    }
 
     case WM_CLOSE:
         DestroyWindow(hwnd);
@@ -1533,10 +2158,20 @@ static LRESULT CALLBACK display_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             stop();
             return 0;
         case VK_RIGHT:
-            change_pattern(1);
-            return 0;
         case VK_LEFT:
-            change_pattern(-1);
+        case VK_UP:
+        case VK_DOWN:
+            if (GetKeyState(VK_CONTROL) < 0)
+            {
+                /* Move the picture: 32 pixels a press, 1 with Shift */
+                int step = GetKeyState(VK_SHIFT) < 0 ? 1 : 32;
+                pan_image(wp == VK_RIGHT ? step : wp == VK_LEFT ? -step : 0,
+                          wp == VK_DOWN ? step : wp == VK_UP ? -step : 0);
+            }
+            else if (wp == VK_RIGHT || wp == VK_LEFT)
+            {
+                change_pattern(wp == VK_RIGHT ? 1 : -1);
+            }
             return 0;
         case 'I':
             g.cur.info = !g.cur.info;
@@ -1582,6 +2217,32 @@ static LRESULT CALLBACK display_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         return 0;
     }
 
+    case WM_EXITSIZEMOVE:
+        /* The user resized the window: a windowed program shows its window
+           1:1, so the new size is the new resolution. GetWindowInfo gives
+           the real size; a wrapper may answer GetClientRect with the mode. */
+        if (g.running && g.cur.present == PRESENT_WINDOWED)
+        {
+            WINDOWINFO wi;
+            ZeroMemory(&wi, sizeof(wi));
+            wi.cbSize = sizeof(wi);
+
+            if (GetWindowInfo(hwnd, &wi))
+            {
+                int w = wi.rcClient.right - wi.rcClient.left;
+                int h = wi.rcClient.bottom - wi.rcClient.top;
+
+                if (w > 0 && h > 0 && (w != g.cur.width || h != g.cur.height))
+                {
+                    g.window_pos.x = wi.rcWindow.left;
+                    g.window_pos.y = wi.rcWindow.top;
+                    g.have_window_pos = TRUE;
+                    PostMessageA(g.panel, WM_APP_RESIZED, (WPARAM)w, (LPARAM)h);
+                }
+            }
+        }
+        break;
+
     case WM_CLOSE:
         stop();
         return 0;
@@ -1601,6 +2262,101 @@ static void clamp_settings(Settings* s)
     if (s->bpp != 8 && s->bpp != 16 && s->bpp != 24 && s->bpp != 32) s->bpp = 8;
     if (s->refresh < 0) s->refresh = 0;
     if (s->fps < 0) s->fps = 0;
+}
+
+static void write_run_log(void)
+{
+    if (!g.log_path[0])
+        return;
+
+    FILE* f = fopen(g.log_path, "w");
+    if (!f)
+        return;
+
+    if (g.running)
+    {
+        /* The average over the whole run: a short run without a frame limit
+           can end before the half-second rolling figure is first measured */
+        LARGE_INTEGER now;
+        QueryPerformanceCounter(&now);
+        double secs = (double)(now.QuadPart - g.run_t0.QuadPart) / (double)g.qpf.QuadPart;
+        fprintf(f, "ok: %u frames, %d x %d, %d-bit, %s, %.1f fps\nddraw.dll: %s\n", g.frame,
+                g.cur.width, g.cur.height, g.cur.bpp, PRESENT_SHORT[g.cur.present],
+                secs > 0 ? g.frame / secs : 0.0, g.ddraw_path);
+    }
+    else
+        fprintf(f, "error: %s\nddraw.dll: %s\n", g.error[0] ? g.error : "stopped", g.ddraw_path);
+
+    fclose(f);
+}
+
+enum { STEP_CONTINUE, STEP_QUIT, STEP_FRAMES_DONE };
+
+/* One pass of the main loop. It's kept out of line, and unloading ddraw.dll
+   is the last thing it does, because a wrapper like cnc-ddraw patches this
+   program's imports (PeekMessageA and others) while it's loaded: a loop that
+   kept such an address in a register would go on calling the unloaded DLL. */
+static __declspec(noinline) int main_loop_step(MSG* msg)
+{
+    /* Switching between windowed and fullscreen during a run: start over
+       with a freshly loaded ddraw.dll, as a new game would. The last pass
+       unloaded the old one. */
+    if (g.restart_pending)
+    {
+        g.restart_pending = FALSE;
+        run();
+
+        if (g.running && g.restart_focus)
+        {
+            SetForegroundWindow(g.panel);
+            SetFocus(g.restart_focus);
+        }
+        g.restart_focus = NULL;
+    }
+
+    if (g.quit_after_frames && (!g.running || g.frame >= g.quit_after_frames))
+        return STEP_FRAMES_DONE;
+
+    while (PeekMessageA(msg, NULL, 0, 0, PM_REMOVE))
+    {
+        if (msg->message == WM_QUIT)
+            return STEP_QUIT;
+
+        /* Enter in a text box applies it to a running test, or runs one */
+        if (msg->message == WM_KEYDOWN && msg->wParam == VK_RETURN && is_text_box(msg->hwnd))
+        {
+            if (g.running)
+                apply_live();
+            else
+                run();
+            continue;
+        }
+
+        if (!IsDialogMessageA(g.panel, msg))
+        {
+            TranslateMessage(msg);
+            DispatchMessageA(msg);
+        }
+    }
+
+    if (g.running)
+    {
+        render_frame();
+        wait_for_next_frame();
+    }
+    else if (!g.unload_pending)
+    {
+        WaitMessage();
+    }
+
+    if (g.unload_pending)
+    {
+        g.unload_pending = FALSE;
+        if (!g.running && !g.dd)
+            unload_ddraw();
+    }
+
+    return STEP_CONTINUE;
 }
 
 int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
@@ -1645,13 +2401,15 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
         return rc;
     }
 
-    load_ddraw();
+    /* The desktop mode is the display's own shape (asked before a wrapper is
+       loaded, as one may change what EnumDisplaySettings reports) */
+    DEVMODEA dm;
+    ZeroMemory(&dm, sizeof(dm));
+    dm.dmSize = sizeof(dm);
+    if (EnumDisplaySettingsA(NULL, ENUM_REGISTRY_SETTINGS, &dm) && dm.dmPelsWidth && dm.dmPelsHeight)
+        g.native_aspect = (double)dm.dmPelsWidth / dm.dmPelsHeight;
 
-    NONCLIENTMETRICSA ncm;
-    ZeroMemory(&ncm, sizeof(ncm));
-    ncm.cbSize = sizeof(ncm);
-    SystemParametersInfoA(SPI_GETNONCLIENTMETRICS, sizeof(ncm), &ncm, 0);
-    g.font = CreateFontIndirectA(&ncm.lfMessageFont);
+    load_ddraw();
 
     WNDCLASSA wc;
     ZeroMemory(&wc, sizeof(wc));
@@ -1668,18 +2426,12 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
     wc.lpszClassName = "DDTestDisplay";
     RegisterClassA(&wc);
 
-    g.display = CreateWindowExA(0, "DDTestDisplay", "ddtest", WS_POPUP, 0, 0, 640, 480,
-                                NULL, NULL, inst, NULL);
+    /* The panel sizes itself to its contents when it's created */
+    CreateWindowExA(0, "DDTestPanel", "ddtest - DirectDraw test patterns",
+                    WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
+                    CW_USEDEFAULT, CW_USEDEFAULT, 400, 300, NULL, NULL, inst, NULL);
 
-    DWORD panel_style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
-    RECT r = { 0, 0, PANEL_W, PANEL_H };
-    AdjustWindowRectEx(&r, panel_style, FALSE, 0);
-
-    CreateWindowExA(0, "DDTestPanel", "ddtest - DirectDraw test patterns", panel_style,
-                    CW_USEDEFAULT, CW_USEDEFAULT, r.right - r.left, r.bottom - r.top,
-                    NULL, NULL, inst, NULL);
-
-    if (!g.panel || !g.display)
+    if (!g.panel)
         return 1;
 
     write_panel(&s);
@@ -1688,7 +2440,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
     UpdateWindow(g.panel);
 
     if (start_now)
-        apply();
+        run();
 
     int exit_code = 0;
     MSG msg;
@@ -1696,54 +2448,21 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
 
     for (;;)
     {
-        if (g.quit_after_frames && (!g.running || g.frame >= g.quit_after_frames))
+        int step = main_loop_step(&msg);
+        if (step == STEP_QUIT)
+            break;
+
+        if (step == STEP_FRAMES_DONE)
         {
             exit_code = g.running ? 0 : 3;
-
-            if (g.log_path[0])
-            {
-                FILE* f = fopen(g.log_path, "w");
-                if (f)
-                {
-                    if (g.running)
-                        fprintf(f, "ok: %u frames, %d x %d, %d-bit, %s, %.1f fps\nddraw.dll: %s\n", g.frame,
-                                g.cur.width, g.cur.height, g.cur.bpp, PRESENT_SHORT[g.cur.present], g.fps, g.ddraw_path);
-                    else
-                        fprintf(f, "error: %s\nddraw.dll: %s\n", g.error[0] ? g.error : "stopped", g.ddraw_path);
-                    fclose(f);
-                }
-            }
+            write_run_log();
             break;
-        }
-
-        while (PeekMessageA(&msg, NULL, 0, 0, PM_REMOVE))
-        {
-            if (msg.message == WM_QUIT)
-                goto done;
-
-            if (!IsDialogMessageA(g.panel, &msg))
-            {
-                TranslateMessage(&msg);
-                DispatchMessageA(&msg);
-            }
-        }
-
-        if (g.running)
-        {
-            render_frame();
-            wait_for_next_frame();
-        }
-        else
-        {
-            WaitMessage();
         }
     }
 
-done:
     stop();
-    if (g.display)
-        DestroyWindow(g.display);
     free(g.image);
+    testimage_free();
     free(g.canvas.px);
     free(g.canvas.idx);
     cv_shutdown();

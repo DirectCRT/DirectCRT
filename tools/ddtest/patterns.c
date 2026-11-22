@@ -22,12 +22,13 @@ static const char* PATTERN_NAMES[PAT_COUNT] = {
     "Interlaced (alternate black lines)",
     "Palette cycling",
     "White field",
-    "Image file",
+    "Test image (built-in, 1:1)",
+    "Image file (1:1)",
 };
 
 static const char* PATTERN_SHORT_NAMES[PAT_COUNT] = {
     "bars", "ramps", "grid", "pixels", "geometry", "dither",
-    "text", "motion", "interlaced", "palette", "white", "image",
+    "text", "motion", "interlaced", "palette", "white", "testimage", "image",
 };
 
 const char* pattern_name(int id)
@@ -202,10 +203,36 @@ void cv_ellipse(Canvas* c, double cx, double cy, double rx, double ry, uint32_t 
         ellipse1(c, cx, cy, rx - t, ry - t, color);
 }
 
+double cv_screen_aspect(const Canvas* c)
+{
+    return c->screen_aspect > 0 ? c->screen_aspect : 4.0 / 3.0;
+}
+
 double cv_par(const Canvas* c)
 {
-    /* A 4:3 screen shows w pixels across 4 units and h pixels across 3 */
-    return (4.0 / 3.0) / ((double)c->w / (double)c->h);
+    /* A screen of aspect a shows w pixels across a units and h pixels across 1 */
+    return cv_screen_aspect(c) / ((double)c->w / (double)c->h);
+}
+
+/* "16:9" for the common shapes, otherwise "1.85:1" */
+static void aspect_name(double a, char* buf, int len)
+{
+    static const struct { int w, h; } named[] = {
+        { 4, 3 }, { 16, 9 }, { 16, 10 }, { 5, 4 }, { 3, 2 }, { 21, 9 }, { 32, 9 }, { 1, 1 },
+    };
+
+    for (int i = 0; i < (int)(sizeof(named) / sizeof(named[0])); i++)
+    {
+        if (fabs(a - (double)named[i].w / named[i].h) < 0.01)
+        {
+            _snprintf(buf, len - 1, "%d:%d", named[i].w, named[i].h);
+            buf[len - 1] = '\0';
+            return;
+        }
+    }
+
+    _snprintf(buf, len - 1, "%.2f:1", a);
+    buf[len - 1] = '\0';
 }
 
 int cv_text_size(const Canvas* c)
@@ -538,13 +565,13 @@ static void pat_geometry(Canvas* c)
     cv_hline(c, 0, w - 1, h / 2, COL(80, 80, 80));
     cv_vline(c, w / 2, 0, h - 1, COL(80, 80, 80));
 
-    /* If the pixels aren't square on a 4:3 screen, also show what a circle
+    /* If the pixels aren't square on the screen, also show what a circle
        looks like when drawn with square pixels */
     double r = h * 0.45;
     if (fabs(par - 1.0) > 0.01)
         cv_ellipse(c, cx, cy, r, r, COL(90, 90, 160), 1);
 
-    /* Round on a 4:3 screen */
+    /* Round on the screen */
     cv_ellipse(c, cx, cy, r / par, r, WHITE, thick);
 
     double half = r / sqrt(2.0);
@@ -561,8 +588,12 @@ static void pat_geometry(Canvas* c)
     cv_outline(c, 0, 0, w - 1, h - 1, WHITE);
 
     int ts = small_text(c);
-    char text[96];
-    _snprintf(text, sizeof(text) - 1, "Circles are round on a 4:3 screen (pixel aspect %.3f)", par);
+    char aspect[32], text[128];
+    aspect_name(cv_screen_aspect(c), aspect, sizeof(aspect));
+    if (fabs(par - 1.0) <= 0.01)
+        _snprintf(text, sizeof(text) - 1, "Circles are round with square pixels");
+    else
+        _snprintf(text, sizeof(text) - 1, "Circles are round on a %s screen (pixel aspect %.3f)", aspect, par);
     text[sizeof(text) - 1] = '\0';
 
     SIZE sz = cv_text_extent(ts, 0, text);
@@ -725,7 +756,7 @@ static void pat_motion(Canvas* c, uint32_t frame)
     int line_x = (int)((frame * (uint32_t)line_speed) % (uint32_t)w);
     cv_vline(c, line_x, 0, h - 1, COL(255, 255, 0));
 
-    /* A bouncing square, square on a 4:3 screen */
+    /* A bouncing square, square on the screen */
     int box_h = h / 8 > 2 ? h / 8 : 2;
     int box_w = (int)lround(box_h / par);
     int vx = w / 200 > 1 ? w / 200 : 1;
@@ -795,53 +826,76 @@ static void pat_palette(Canvas* c, const PatternContext* ctx)
              "Palette cycling (drawn; not an 8-bit mode)");
 }
 
-static void pat_image(Canvas* c, const PatternContext* ctx)
+/* 1:1, centred: a bigger image is cropped, a smaller one has a border */
+static void pan_range(int iw, int w, int* pan)
+{
+    /* Centred, the picture starts (iw - w) / 2 pixels in; it can move as far
+       as either edge, and not at all where it's smaller than the screen */
+    int lo = 0, hi = 0;
+    if (iw > w)
+    {
+        lo = -((iw - w) / 2);
+        hi = (iw - w) + lo;
+    }
+    if (*pan < lo) *pan = lo;
+    if (*pan > hi) *pan = hi;
+}
+
+void image_pan_clamp(int iw, int ih, int w, int h, int* pan_x, int* pan_y)
+{
+    pan_range(iw, w, pan_x);
+    pan_range(ih, h, pan_y);
+}
+
+/* The image 1:1, centred and moved by the pan offset, cropped to the screen */
+static void draw_centred(Canvas* c, const uint32_t* img, int iw, int ih, const PatternContext* ctx)
 {
     int w = c->w, h = c->h;
+    int pan_x = ctx->pan_x, pan_y = ctx->pan_y;
+    image_pan_clamp(iw, ih, w, h, &pan_x, &pan_y);
+
+    int ox = (w - iw) / 2 - pan_x, oy = (h - ih) / 2 - pan_y;
 
     cv_fill(c, COL(40, 40, 40));
 
-    if (!ctx->image || ctx->image_w <= 0 || ctx->image_h <= 0)
+    for (int y = 0; y < h; y++)
     {
-        cv_label(c, 4, 4, cv_text_size(c), WHITE, BLACK, "No image loaded - choose an image file and press Apply");
+        int sy = y - oy;
+        if (sy < 0 || sy >= ih)
+            continue;
+
+        int x0 = ox > 0 ? ox : 0;
+        int x1 = ox + iw < w ? ox + iw : w;
+        if (x1 > x0)
+            memcpy(&c->px[y * w + x0], &img[sy * iw + (x0 - ox)], (size_t)(x1 - x0) * sizeof(uint32_t));
+    }
+}
+
+static void pat_test_image(Canvas* c, const PatternContext* ctx)
+{
+    int iw, ih;
+    const uint32_t* img = testimage_get(&iw, &ih);
+
+    if (!img)
+    {
+        cv_fill(c, BLACK);
+        cv_label(c, 4, 4, cv_text_size(c), WHITE, BLACK, "Couldn't decode the built-in test image");
         return;
     }
 
-    int iw = ctx->image_w, ih = ctx->image_h;
+    draw_centred(c, img, iw, ih, ctx);
+}
 
-    if (ctx->image_fit)
+static void pat_image(Canvas* c, const PatternContext* ctx)
+{
+    if (!ctx->image || ctx->image_w <= 0 || ctx->image_h <= 0)
     {
-        /* Scale to fit (nearest neighbour), keeping the image's shape */
-        double scale = (double)w / iw < (double)h / ih ? (double)w / iw : (double)h / ih;
-        int dw = (int)(iw * scale), dh = (int)(ih * scale);
-        int ox = (w - dw) / 2, oy = (h - dh) / 2;
-
-        for (int y = 0; y < dh; y++)
-        {
-            int sy = y * ih / dh;
-            for (int x = 0; x < dw; x++)
-                c->px[(oy + y) * w + ox + x] = ctx->image[sy * iw + x * iw / dw] & 0xFFFFFF;
-        }
+        cv_fill(c, COL(40, 40, 40));
+        cv_label(c, 4, 4, cv_text_size(c), WHITE, BLACK, "No image file loaded - choose one in the panel");
+        return;
     }
-    else
-    {
-        /* 1:1, centred and cropped */
-        int ox = (w - iw) / 2, oy = (h - ih) / 2;
 
-        for (int y = 0; y < h; y++)
-        {
-            int sy = y - oy;
-            if (sy < 0 || sy >= ih)
-                continue;
-
-            for (int x = 0; x < w; x++)
-            {
-                int sx = x - ox;
-                if (sx >= 0 && sx < iw)
-                    c->px[y * w + x] = ctx->image[sy * iw + sx] & 0xFFFFFF;
-            }
-        }
-    }
+    draw_centred(c, ctx->image, ctx->image_w, ctx->image_h, ctx);
 }
 
 void pattern_draw(int id, Canvas* c, const PatternContext* ctx)
@@ -864,6 +918,7 @@ void pattern_draw(int id, Canvas* c, const PatternContext* ctx)
         cv_fill(c, WHITE);
         cv_text(c, 4, c->h - small_text(c) - 4, small_text(c), COL(128, 128, 128), "100% white");
         break;
+    case PAT_TEST_IMAGE: pat_test_image(c, ctx); break;
     case PAT_IMAGE: pat_image(c, ctx); break;
     default: cv_fill(c, BLACK); break;
     }

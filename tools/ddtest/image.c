@@ -32,32 +32,14 @@ static IWICImagingFactory* create_factory(char* err, int err_len)
     return f;
 }
 
-BOOL image_load(const char* path, uint32_t** px, int* w, int* h, char* err, int err_len)
+/* Decodes the first frame of an image into 0x00RRGGBB pixels */
+static BOOL decode(IWICBitmapDecoder* dec, uint32_t** px, int* w, int* h, char* err, int err_len)
 {
-    WCHAR wpath[MAX_PATH];
-    IWICBitmapDecoder* dec = NULL;
     IWICBitmapFrameDecode* frame = NULL;
     IWICBitmapSource* conv = NULL;
     uint32_t* buf = NULL;
     UINT iw = 0, ih = 0;
     HRESULT hr;
-
-    *px = NULL;
-    *w = *h = 0;
-
-    if (!MultiByteToWideChar(CP_ACP, 0, path, -1, wpath, MAX_PATH))
-    {
-        set_err(err, err_len, "Invalid file name", E_INVALIDARG);
-        return FALSE;
-    }
-
-    IWICImagingFactory* f = create_factory(err, err_len);
-    if (!f)
-        return FALSE;
-
-    hr = IWICImagingFactory_CreateDecoderFromFilename(f, wpath, NULL, GENERIC_READ,
-                                                      WICDecodeMetadataCacheOnDemand, &dec);
-    if (FAILED(hr)) { set_err(err, err_len, "Couldn't open the image", hr); goto done; }
 
     hr = IWICBitmapDecoder_GetFrame(dec, 0, &frame);
     if (FAILED(hr)) { set_err(err, err_len, "Couldn't read the image", hr); goto done; }
@@ -89,9 +71,69 @@ done:
     free(buf);
     if (conv) IWICBitmapSource_Release(conv);
     if (frame) IWICBitmapFrameDecode_Release(frame);
+    return SUCCEEDED(hr);
+}
+
+BOOL image_load(const char* path, uint32_t** px, int* w, int* h, char* err, int err_len)
+{
+    WCHAR wpath[MAX_PATH];
+    IWICBitmapDecoder* dec = NULL;
+    BOOL ok = FALSE;
+
+    *px = NULL;
+    *w = *h = 0;
+
+    if (!MultiByteToWideChar(CP_ACP, 0, path, -1, wpath, MAX_PATH))
+    {
+        set_err(err, err_len, "Invalid file name", E_INVALIDARG);
+        return FALSE;
+    }
+
+    IWICImagingFactory* f = create_factory(err, err_len);
+    if (!f)
+        return FALSE;
+
+    HRESULT hr = IWICImagingFactory_CreateDecoderFromFilename(f, wpath, NULL, GENERIC_READ,
+                                                              WICDecodeMetadataCacheOnDemand, &dec);
+    if (FAILED(hr))
+        set_err(err, err_len, "Couldn't open the image", hr);
+    else
+        ok = decode(dec, px, w, h, err, err_len);
+
     if (dec) IWICBitmapDecoder_Release(dec);
     IWICImagingFactory_Release(f);
-    return SUCCEEDED(hr);
+    return ok;
+}
+
+BOOL image_load_memory(const void* data, size_t size, uint32_t** px, int* w, int* h, char* err, int err_len)
+{
+    IWICStream* stream = NULL;
+    IWICBitmapDecoder* dec = NULL;
+    BOOL ok = FALSE;
+    HRESULT hr;
+
+    *px = NULL;
+    *w = *h = 0;
+
+    IWICImagingFactory* f = create_factory(err, err_len);
+    if (!f)
+        return FALSE;
+
+    hr = IWICImagingFactory_CreateStream(f, &stream);
+    if (SUCCEEDED(hr))
+        hr = IWICStream_InitializeFromMemory(stream, (BYTE*)data, (DWORD)size);
+    if (SUCCEEDED(hr))
+        hr = IWICImagingFactory_CreateDecoderFromStream(f, (IStream*)stream, NULL, WICDecodeMetadataCacheOnDemand, &dec);
+
+    if (FAILED(hr))
+        set_err(err, err_len, "Couldn't open the image", hr);
+    else
+        ok = decode(dec, px, w, h, err, err_len);
+
+    if (dec) IWICBitmapDecoder_Release(dec);
+    if (stream) IWICStream_Release(stream);
+    IWICImagingFactory_Release(f);
+    return ok;
 }
 
 BOOL image_save_png(const char* path, const uint32_t* px, int w, int h, char* err, int err_len)

@@ -75,9 +75,17 @@
     <ClCompile Include="ddtest.c" />
     <ClCompile Include="image.c" />
     <ClCompile Include="patterns.c" />
+    <ClCompile Include="testimage.c" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="ddtest.h" />
+    <ClInclude Include="resource.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="ddtest.rc" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="testimage.png" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>

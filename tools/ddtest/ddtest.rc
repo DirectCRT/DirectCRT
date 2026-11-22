@@ -1,0 +1,4 @@
+// The built-in test image, a photo shown 1:1 by the Test image pattern
+#include "resource.h"
+
+IDR_TESTIMAGE RCDATA "testimage.png"

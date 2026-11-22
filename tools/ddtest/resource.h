@@ -1,0 +1,6 @@
+#ifndef DDTEST_RESOURCE_H
+#define DDTEST_RESOURCE_H
+
+#define IDR_TESTIMAGE 101
+
+#endif

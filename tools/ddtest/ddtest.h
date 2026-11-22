@@ -20,6 +20,7 @@ typedef struct Canvas
     uint32_t* px;  /* w * h pixels, 0x00RRGGBB */
     uint8_t* idx;  /* w * h palette indices, used instead of px in 8-bit modes when use_idx is set */
     BOOL use_idx;
+    double screen_aspect; /* width/height of the screen the picture fills; 0 = a 4:3 screen */
 } Canvas;
 
 enum
@@ -35,6 +36,7 @@ enum
     PAT_INTERLACED,
     PAT_PALETTE,
     PAT_WHITE,
+    PAT_TEST_IMAGE,
     PAT_IMAGE,
     PAT_COUNT
 };
@@ -44,9 +46,9 @@ typedef struct PatternContext
     uint32_t frame;
     const uint32_t* palette;  /* the 256-entry base palette */
     BOOL hw_palette;          /* 8-bit mode: palette cycling is done by the app with SetEntries */
-    const uint32_t* image;    /* loaded image file, may be NULL */
+    const uint32_t* image;    /* loaded image file (0x00RRGGBB), may be NULL */
     int image_w, image_h;
-    BOOL image_fit;
+    int pan_x, pan_y;         /* image patterns: how far the picture is moved from centred */
 } PatternContext;
 
 /* patterns.c */
@@ -69,7 +71,8 @@ void cv_hline(Canvas* c, int x0, int x1, int y, uint32_t color);           /* in
 void cv_vline(Canvas* c, int x, int y0, int y1, uint32_t color);           /* inclusive */
 void cv_outline(Canvas* c, int x0, int y0, int x1, int y1, uint32_t color); /* inclusive */
 void cv_ellipse(Canvas* c, double cx, double cy, double rx, double ry, uint32_t color, int thickness);
-double cv_par(const Canvas* c);      /* pixel aspect ratio (width/height) on a 4:3 screen */
+double cv_par(const Canvas* c);      /* pixel aspect ratio (width/height) on the screen it fills */
+double cv_screen_aspect(const Canvas* c);
 int cv_text_size(const Canvas* c);   /* a text height that suits the canvas size */
 int cv_text(Canvas* c, int x, int y, int height, uint32_t color, const char* s); /* returns width */
 int cv_text_ex(Canvas* c, int x, int y, int height, int char_width, uint32_t color, const char* s);
@@ -77,8 +80,18 @@ SIZE cv_text_extent(int height, int char_width, const char* s);
 int cv_label(Canvas* c, int x, int y, int height, uint32_t fg, uint32_t bg, const char* s); /* returns height used */
 void cv_shutdown(void);
 
+/* testimage.c: the built-in test image, a photo embedded in the program and
+   decoded on first use; NULL if that failed */
+const uint32_t* testimage_get(int* w, int* h);
+void testimage_free(void);
+
+/* Keeps an image pattern's pan offset within the picture, so the picture
+   covers the screen in each direction where it's bigger than the screen */
+void image_pan_clamp(int iw, int ih, int w, int h, int* pan_x, int* pan_y);
+
 /* image.c */
 BOOL image_load(const char* path, uint32_t** px, int* w, int* h, char* err, int err_len);
+BOOL image_load_memory(const void* data, size_t size, uint32_t** px, int* w, int* h, char* err, int err_len);
 BOOL image_save_png(const char* path, const uint32_t* px, int w, int h, char* err, int err_len);
 
 #endif
