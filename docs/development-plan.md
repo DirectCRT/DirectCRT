@@ -25,10 +25,9 @@ Not goals:
 | Behaviour | DOSBox Staging's `crt-auto`, VGA path only. The dosbox-staging repository is the source of truth, not the 86Box port. | One well-researched look instead of a shader catalogue. |
 | Licence | GPL-2.0-or-later. cnc-ddraw's MIT code keeps its notice. | We port DOSBox Staging's GPL C++ logic and its GPL `sharp` shader. |
 | Host systems | Windows 10 and 11, Wine, Proton. | The shaders need a modern GPU; machines that run XP natively already have CRTs. |
-| Renderer | Direct3D 11. DOSBox's GLSL shaders are translated to HLSL and compiled at build time. GDI stays as an unshaded fallback. OpenGL is used only for the prototype. | Best supported API on Windows (low-latency presentation, VRR, HDR later); runs well under Wine and Proton through DXVK. Precompiled shaders avoid Wine's `d3dcompiler` replacement. |
+| Renderer | Direct3D 11. DOSBox's GLSL shaders are translated to HLSL and compiled at build time. GDI stays as an unshaded fallback. The prototype's OpenGL renderer stays too, for crt-auto only. | Best supported API on Windows (low-latency presentation, VRR, HDR later); runs well under Wine and Proton through DXVK. Precompiled shaders avoid Wine's `d3dcompiler` replacement. OpenGL runs DOSBox's GLSL unmodified, so it's the reference for the translated shaders, and a shaded fallback where Direct3D 11 runs badly (Wine without DXVK, broken drivers). It gets the overlay, but not the features that depend on Direct3D 11 (HDR, low-latency presentation). |
 | Settings | DOSBox Staging's setting names and meanings (`viewport`, `aspect`, `integer_scaling`, `crt_color_profile`, `color_temperature`, `black_level`, ...). One central settings file plus per-game overrides; a `directcrt.ini` in the game folder takes priority. | DOSBox users already know them; their help texts can be adapted. |
-| Desktop app | Qt 6, layout inspired by DuckStation's desktop app. | DuckStation is licensed CC BY-NC-ND 4.0: take ideas only, no code, icons or text. |
-| Overlay | Dear ImGui inside the DLL. | MIT licence; DuckStation uses it the same way. |
+| User interface | No desktop app. All settings are in an on-screen overlay drawn by Dear ImGui inside the DLL. Installing is copying `ddraw.dll` into the game folder (a zip and a README; a small installer later if needed, not Qt). | CRT settings are judged by eye, so they're best changed live on the real game picture. Works wherever the DLL works, including Wine, Proton and a Steam Deck in Game Mode. Saves a second program, Qt and its deployment. Dear ImGui is MIT licensed; DuckStation uses it the same way (DuckStation is CC BY-NC-ND 4.0: take ideas only, no code, icons or text). |
 
 ## What crt-auto does
 
@@ -84,18 +83,36 @@ What we take:
    - Double scanning is decided from the game's display mode, which the DLL
      knows (the 86Box port can't).
    - Settings reload while the game runs.
-2. **Desktop app** (Qt 6, 64-bit): game list, global and per-game settings,
-   installing and removing the DLL, launching games, later a preview pane that
-   runs the same shaders on a still image.
-3. **Overlay**: information first (game resolution, output size, scale factor,
-   active shader tier, FPS), interactive settings later.
+2. **Overlay** (Dear ImGui, in the DLL), the only user interface:
+   - **Status OSD**, on its own hotkey: game resolution, output size, scale
+     factor, active shader tier, FPS, frame times. Configurable size and
+     verbosity.
+   - **Full OSD**, on another hotkey: every setting, global or for this game,
+     with help texts adapted from DOSBox's, applied live (settings that need a
+     restart say so). Mouse, keyboard and gamepad (XInput, for a Steam Deck).
+     While it's open the game gets no input: the cursor is released and shown,
+     and DirectInput, `GetAsyncKeyState` and raw input are held back. The game
+     keeps running.
+   - **First start** (no central settings file yet, so once per user, not per
+     game): a toast for a few seconds naming the hotkeys and offering a tour
+     of the OSD. Nothing modal: some games break if they lose input or focus
+     while starting.
+   - **Safe mode:** holding Shift while the game starts runs it with default
+     settings, so a setting that stops the game starting (hooks,
+     `nonexclusive`, the renderer) can be fixed in the OSD.
+   - Drawn after the CRT shader, at screen resolution, with an embedded
+     TrueType font scaled for the DPI. Screenshots with or without it.
+   - Hotkeys configurable; defaults that old games rarely use.
+   - Direct3D 11 and OpenGL through ImGui's own backends; GDI through a
+     software ImGui renderer, or failing that a message pointing to
+     `directcrt.ini`.
 
 ## cnc-ddraw features
 
 | Area | Verdict |
 |---|---|
 | DirectDraw and Direct3D stub objects, IAMMediaStream, WinAPI/GDI/WinG hooks, DirectInput hook | Keep |
-| About 280 per-game profiles in `src/config.c` | Keep; show them as per-game defaults in the app |
+| About 280 per-game profiles in `src/config.c` | Keep; show them as per-game defaults in the OSD |
 | Compatibility settings (`nonexclusive`, `singlecpu`, `fixchilds`, `guard_lines`, `fake_mode`, `win_version`, `hook`, ...) | Keep, on an advanced page |
 | Game-specific hacks (`armadahack`, `tshack`, ...) | Keep, set by the profiles |
 | Window modes, Alt+Enter, saved window position, `toggle_borderless`, `toggle_upscaled` | Keep. Done: `windowed=auto` (the new default) follows the game's request, a window for windowed games and fullscreen for fullscreen ones, with `fullscreen` choosing upscaled or a real mode switch; `true`/`false` still force it. Alt+Enter is no longer saved to the ini, so every start uses the configured mode. Windowed games now get the desktop's bit depth (32-bit), as with Windows' own DirectDraw, instead of a fixed 16-bit that cut 24/32-bit pictures down; `windowed_bpp=16` brings the old behaviour back. They're also shown 1:1 where they put their window: a saved window size and position (`savesettings`) no longer stretches or moves them, and none is saved from them |
@@ -104,12 +121,12 @@ What we take:
 | Frame limiter and VSync (`maxfps`, `limiter_type`, `maxgameticks`, `minfps`, `vsync`) | Keep |
 | Mouse (`adjmouse`, cursor-unlock hotkeys, cursor fixes) | Keep, driven by the new scaling code |
 | Screenshots, debug logs, crash dumps | Keep; add a choice of raw or shaded screenshots |
-| `renderer` (gdi, opengl, openglcore, direct3d9, direct3d9on12, auto) | Replace with Direct3D 11 plus the GDI fallback |
+| `renderer` (gdi, opengl, openglcore, direct3d9, direct3d9on12, auto) | Replace with Direct3D 11, plus OpenGL (crt-auto only, without its libretro shader loading and GL 1.x/2.x paths) and the GDI fallback |
 | `shader`, `d3d9_filter`, libretro shader loading | Remove |
 | `maintas`, `aspect_ratio`, `boxing` | Replace with `viewport`, `aspect` and `integer_scaling` |
 | `inject_resolution`, `vhack` | Remove (they make games render at high resolutions) |
 | XP build configurations, MinGW i486 build, old-Windows code paths | Remove. Done: the build configurations (DebugLogXP and DebugLogMiniXP are now DebugLog and DebugLogMini on the current toolset) and the i486 build scripts. The old-Windows code paths are left for phase 3 |
-| C++Builder config tool (`config/`) | Replace with the Qt app. Until then it's out of date: it still edits `ddraw.ini` |
+| C++Builder config tool (`config/`) | Remove in phase 3; the overlay replaces it. Until then it's out of date: it still edits `ddraw.ini` |
 
 The `adjmouse-viewport` branch adds an `adjmouse_viewport` setting, a manual way
 to map the mouse to a picture a shader draws smaller than the window. The
@@ -161,15 +178,25 @@ prototype already moved the scaling into C, so crt-auto doesn't need it.
 2. **Presenter.** Direct3D 11 renderer; build-time shader translation (glslang,
    SPIRV-Cross, then compile to bytecode and embed); the fixed pipeline; the
    scaling, tier and automatic colour logic ported to C; double-scan detection;
-   DOSBox-style settings; live reload. Check through DXVK on Windows.
+   DOSBox-style settings; live reload. Check through DXVK on Windows. Add a
+   crt-compare mode that compares the Direct3D 11 and OpenGL renderers
+   directly.
 3. **Cleanup.** Apply the feature table; translate old ini keys to the new ones.
    Before starting, extend ddtest with DirectDraw versions 1, 2, 4 and 7
    (`DirectDrawCreate` plus `QueryInterface`, `DDSURFACEDESC`), GDI text on
    surfaces, `WaitForVerticalBlank` plus `Blt`, colour-fill and colour-key
-   blits, and palette fades, so it works as a regression test.
-4. **Desktop app.**
-5. **Overlay.** Information first, then interactive.
-6. **Later.** Deinterlacing, dedithering, HDR output.
+   blits, and palette fades, so it works as a regression test. Also remove
+   the C++Builder config tool (`config/`).
+4. **Overlay**, in this order: the status OSD; the full OSD with input
+   capture; safe mode; the first-start toast and the tour.
+5. **Later.** HDR output first; deinterlacing and dedithering after it, at a
+   lower priority.
+   - HDR output, Direct3D 11 only: the extra peak brightness makes up for the
+     darkening from the mask and scanlines. It needs at least 10 bits per
+     channel, so add 10-bit SDR output with it (an `R10G10B10A2` swap chain and
+     matching framebuffers between passes): it keeps the colour adjustments'
+     steps even and the scanlines' dark gradients smooth. Both are options;
+     the default stays 8-bit like DOSBox, which is what crt-compare checks.
 
 ## Testing
 
