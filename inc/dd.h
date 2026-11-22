@@ -178,6 +178,8 @@ typedef struct CNCDDRAW
     DWORD gui_thread_id;
     BOOL show_driver_warning;
     BOOL windowed_hack;
+    BOOL auto_saw_fullscreen; /* windowed=auto: what the game has asked for so far */
+    BOOL auto_saw_normal;
 
     struct
     {

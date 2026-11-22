@@ -772,7 +772,12 @@ HRESULT dd_SetDisplayMode(DWORD dwWidth, DWORD dwHeight, DWORD dwBPP, DWORD dwFl
         g_config.hotkeys.toggle_fullscreen = 0;
     }
 
-    if (!zooming || g_config.fullscreen)
+    /* Never smaller than the game's resolution, except for a program in its own
+       window that was made smaller: it's shown smaller until the program
+       answers the new size */
+    BOOL own_window = g_config.window_is_programs && g_config.windowed && !g_config.fullscreen;
+
+    if ((!zooming || g_config.fullscreen) && !own_window)
     {
         if (g_ddraw.render.width < g_ddraw.width)
         {
@@ -1390,6 +1395,31 @@ HRESULT dd_SetCooperativeLevel(HWND hwnd, DWORD dwFlags)
         }
     }
 
+    /* windowed=auto: follow the game. A windowed game gets a real window and a
+       fullscreen game gets fullscreen ('fullscreen' then only picks upscaled or
+       a real mode switch). The first exclusive fullscreen request decides for
+       good: later DDSCL_NORMAL calls are usually the game cleaning up, and an
+       Alt+Enter toggle has to survive the game calling this again. A normal
+       (windowed) request only counts before that. */
+    if (g_config.windowed_auto)
+    {
+        if (dwFlags & DDSCL_FULLSCREEN)
+        {
+            if (!g_ddraw.auto_saw_fullscreen)
+            {
+                g_ddraw.auto_saw_fullscreen = TRUE;
+                g_config.windowed = FALSE;
+                g_config.fullscreen = g_config.fullscreen_setting;
+            }
+        }
+        else if ((dwFlags & DDSCL_NORMAL) && !g_ddraw.auto_saw_fullscreen && !g_ddraw.auto_saw_normal)
+        {
+            g_ddraw.auto_saw_normal = TRUE;
+            g_config.windowed = TRUE;
+            g_config.fullscreen = FALSE;
+        }
+    }
+
     if (!g_ddraw.hwnd)
     {
         g_ddraw.hwnd = hwnd;
@@ -1554,7 +1584,40 @@ HRESULT dd_SetCooperativeLevel(HWND hwnd, DWORD dwFlags)
                 TRACE("     client rect=%dx%d\n", rc.right, rc.bottom);
 
                 g_ddraw.windowed_hack = TRUE;
-                dd_SetDisplayMode(rc.right, rc.bottom, 16, 0);
+
+                /* A windowed program draws to the desktop, so by default it
+                   gets the desktop's bit depth, as with Windows' own
+                   DirectDraw; Blt converts from other depths */
+                DWORD bpp = 16;
+                if (g_config.windowed_bpp == 16 || g_config.windowed_bpp == 32)
+                {
+                    bpp = (DWORD)g_config.windowed_bpp;
+                }
+                else
+                {
+                    HDC dc = GetDC(NULL);
+                    int desktop_bpp = dc ? GetDeviceCaps(dc, BITSPIXEL) : 0;
+                    if (dc)
+                        ReleaseDC(NULL, dc);
+
+                    if (desktop_bpp == 32 || desktop_bpp == 24)
+                        bpp = 32;
+                }
+
+                TRACE("     windowed bpp=%u\n", bpp);
+
+                /* The program chose its window's size and place, and that size
+                   is its mode: show it 1:1 where it is, not at a saved size
+                   (which would stretch it) or a saved position */
+                POINT origin = { 0, 0 };
+                real_ClientToScreen(hwnd, &origin);
+                g_config.window_rect.left = origin.x;
+                g_config.window_rect.top = origin.y;
+                g_config.window_rect.right = rc.right;
+                g_config.window_rect.bottom = rc.bottom;
+                g_config.window_is_programs = TRUE;
+
+                dd_SetDisplayMode(rc.right, rc.bottom, bpp, 0);
             }
         }
     }
@@ -1633,6 +1696,10 @@ ULONG dd_Release()
 
     if (ref == 0)
     {
+        /* Let the cursor go (ClipCursor) and show it again. The state below is
+           wiped, so nothing would unlock it later if the game keeps running */
+        mouse_unlock();
+
         if (g_ddraw.bpp)
         {
             cfg_save();

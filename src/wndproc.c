@@ -39,6 +39,26 @@ LRESULT CALLBACK fake_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam
 
     static BOOL in_size_move = FALSE;
     static int redraw_count = 0;
+    static BOOL mbutton_unlocked = FALSE;
+
+    /* unlockcursor_middleclick: a middle click releases the cursor. The game
+       doesn't see the click, and the button-up is swallowed too, because a
+       button-up while unlocked would lock the cursor again */
+    if (g_config.hotkeys.unlock_cursor_middleclick && !g_config.devmode)
+    {
+        if (uMsg == WM_MBUTTONDOWN && g_mouse_locked)
+        {
+            mouse_unlock();
+            mbutton_unlocked = TRUE;
+            return 0;
+        }
+
+        if (uMsg == WM_MBUTTONUP && mbutton_unlocked)
+        {
+            mbutton_unlocked = FALSE;
+            return 0;
+        }
+    }
 
     switch (uMsg)
     {
@@ -231,9 +251,7 @@ LRESULT CALLBACK fake_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam
             {
                 if (g_ddraw.bnet_was_fullscreen)
                 {
-                    int ws = g_config.window_state;
                     util_toggle_fullscreen();
-                    g_config.window_state = ws;
                     g_ddraw.bnet_was_fullscreen = FALSE;
                 }
                 else if (g_ddraw.bnet_was_upscaled)
@@ -397,8 +415,10 @@ LRESULT CALLBACK fake_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam
                     }
                 }
 
-                /* enforce minimum window size */
-                if (CopyRect(&clientrc, windowrc) &&
+                /* enforce minimum window size: no smaller than the game's resolution. Not
+                   for a program in its own window: its window size is its resolution */
+                if (!g_config.window_is_programs &&
+                    CopyRect(&clientrc, windowrc) &&
                     util_unadjust_window_rect(
                         &clientrc, 
                         real_GetWindowLongA(hWnd, GWL_STYLE),

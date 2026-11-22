@@ -99,7 +99,8 @@ What we take:
 | About 280 per-game profiles in `src/config.c` | Keep; show them as per-game defaults in the app |
 | Compatibility settings (`nonexclusive`, `singlecpu`, `fixchilds`, `guard_lines`, `fake_mode`, `win_version`, `hook`, ...) | Keep, on an advanced page |
 | Game-specific hacks (`armadahack`, `tshack`, ...) | Keep, set by the profiles |
-| Window modes, Alt+Enter, saved window position, `toggle_borderless`, `toggle_upscaled` | Keep |
+| Window modes, Alt+Enter, saved window position, `toggle_borderless`, `toggle_upscaled` | Keep. Done: `windowed=auto` (the new default) follows the game's request, a window for windowed games and fullscreen for fullscreen ones, with `fullscreen` choosing upscaled or a real mode switch; `true`/`false` still force it. Alt+Enter is no longer saved to the ini, so every start uses the configured mode. Windowed games now get the desktop's bit depth (32-bit), as with Windows' own DirectDraw, instead of a fixed 16-bit that cut 24/32-bit pictures down; `windowed_bpp=16` brings the old behaviour back. They're also shown 1:1 where they put their window: a saved window size and position (`savesettings`) no longer stretches or moves them, and none is saved from them |
+| Display modes: 8, 16 and 32-bit; `SetDisplayMode` rejects 24-bit | Add 24-bit in the presenter (convert to 32-bit on upload); some games use it |
 | Plain "Fullscreen", which switches the monitor to the game's own resolution | Keep, but rename it so users know their monitor will receive the original game resolution and no CRT shading is possible |
 | Frame limiter and VSync (`maxfps`, `limiter_type`, `maxgameticks`, `minfps`, `vsync`) | Keep |
 | Mouse (`adjmouse`, cursor-unlock hotkeys, cursor fixes) | Keep, driven by the new scaling code |

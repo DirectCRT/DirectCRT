@@ -25,7 +25,7 @@ static DWORD cfg_get_game_section(LPSTR buf, DWORD size);
 #define GET_STRING(a,b,c,d) cfg_get_string(a, b, c, d); TRACE("%s=%s\n", a, c)
 
 CNCDDRAWCONFIG g_config =
-    { .window_rect = {.left = -32000, .top = -32000, .right = 0, .bottom = 0 }, .window_state = -1, .upscaled_state = -1 };
+    { .window_rect = {.left = -32000, .top = -32000, .right = 0, .bottom = 0 } };
 
 void cfg_load()
 {
@@ -36,7 +36,13 @@ void cfg_load()
     GET_INT(g_config.window_rect.right, "width", 0);
     GET_INT(g_config.window_rect.bottom, "height", 0);
     GET_BOOL(g_config.fullscreen, "fullscreen", FALSE);
-    GET_BOOL(g_config.windowed, "windowed", FALSE);
+    char windowed[8];
+    GET_STRING("windowed", "auto", windowed, sizeof(windowed));
+    g_config.windowed_auto = _stricmp(windowed, "auto") == 0;
+    g_config.windowed =
+        !g_config.windowed_auto &&
+        (_stricmp(windowed, "yes") == 0 || _stricmp(windowed, "true") == 0 || _stricmp(windowed, "1") == 0);
+    g_config.fullscreen_setting = g_config.fullscreen;
     GET_BOOL(g_config.maintas, "maintas", FALSE);
     GET_STRING("aspect_ratio", "", g_config.aspect_ratio, sizeof(g_config.aspect_ratio));
     GET_BOOL(g_config.boxing, "boxing", FALSE);
@@ -72,6 +78,7 @@ void cfg_load()
     GET_INT(g_config.resolutions, "resolutions", RESLIST_NORMAL);
     GET_INT(g_config.fixchilds, "fixchilds", FIX_CHILDS_DETECT_PAINT);
     GET_BOOL(g_config.hook_peekmessage, "hook_peekmessage", FALSE);
+    GET_INT(g_config.windowed_bpp, "windowed_bpp", 0);
 
     /* Undocumented settings */
 
@@ -103,6 +110,7 @@ void cfg_load()
     GET_INT(g_config.hotkeys.toggle_maximize2, "keytogglemaximize2", 0);
     GET_INT(g_config.hotkeys.unlock_cursor1, "keyunlockcursor1", VK_TAB);
     GET_INT(g_config.hotkeys.unlock_cursor2, "keyunlockcursor2", VK_RCONTROL);
+    GET_BOOL(g_config.hotkeys.unlock_cursor_middleclick, "unlockcursor_middleclick", FALSE);
     GET_INT(g_config.hotkeys.screenshot, "keyscreenshot", VK_SNAPSHOT);
 
     /* Game specific settings */
@@ -118,7 +126,11 @@ void cfg_load()
     GET_BOOL(g_config.flightsim98_hack, "flightsim98_hack", FALSE);
     GET_BOOL(g_config.darkcolony_hack, "darkcolony_hack", FALSE);
     
-    GameHandlesClose = GameHandlesClose || g_config.infantryhack;
+    /* ddtest, our test program, stops its test when the window is closed
+       instead of quitting, so it gets the close itself. Forced, because the
+       generated ddraw.ini sets game_handles_close=false for everything. */
+    GameHandlesClose = GameHandlesClose || g_config.infantryhack ||
+                       _stricmp(g_config.process_file_name, "ddtest") == 0;
 
     if (g_config.lock_mouse_top_left)
         g_config.adjmouse = FALSE;
@@ -132,6 +144,11 @@ void cfg_load()
 void cfg_save()
 {
     if (!g_config.save_settings)
+        return;
+
+    /* A program that runs in its own window chose its size and place itself;
+       saving them would resize and move other games' windows */
+    if (g_config.window_is_programs)
         return;
 
     /* Do not save settings while macOS maximize is active */
@@ -165,15 +182,8 @@ void cfg_save()
         WritePrivateProfileString(section, "posY", buf, g_config.ini_path);
     }
 
-    if (g_config.window_state != -1)
-    {
-        WritePrivateProfileString(section, "windowed", g_config.window_state ? "true" : "false", g_config.ini_path);
-    }
-
-    if (g_config.upscaled_state != -1)
-    {
-        WritePrivateProfileString(section, "fullscreen", g_config.upscaled_state ? "true" : "false", g_config.ini_path);
-    }
+    /* The windowed/fullscreen state isn't saved: Alt+Enter lasts until the game
+       exits, so every start uses the configured mode */
 }
 
 static void cfg_create_ini()
@@ -195,10 +205,13 @@ static void cfg_create_ini()
             "\n"
             "; Override the width/height settings shown above and always stretch to fullscreen\n"
             "; Note: Can be combined with 'windowed=true' to get windowed-fullscreen aka borderless mode\n"
+            "; With 'windowed=auto' it only affects fullscreen games: true = upscaled to the screen,\n"
+            "; false = the monitor switches to the game's own resolution\n"
             "fullscreen=false\n"
             "\n"
-            "; Run in windowed mode rather than going fullscreen\n"
-            "windowed=false\n"
+            "; Windowed or fullscreen. auto = do what the game asks for: a window for windowed games,\n"
+            "; fullscreen for fullscreen games. true = always windowed, false = always fullscreen\n"
+            "windowed=auto\n"
             "\n"
             "; Maintain aspect ratio\n"
             "maintas=false\n"
@@ -240,7 +253,9 @@ static void cfg_create_ini()
             "; Show window borders in windowed mode\n"
             "border=true\n"
             "\n"
-            "; Save window position/size/state on game exit and restore it automatically on next game start\n"
+            "; Save the window position and size on game exit and restore them on next game start\n"
+            "; (the windowed/fullscreen state from Alt+Enter isn't saved; it lasts until the game exits)\n"
+            "; Games that run in their own window keep the size and place they choose; nothing is saved for them\n"
             "; Possible values: 0 = disabled, 1 = save to global 'ddraw' section, 2 = save to game specific section\n"
             "savesettings=1\n"
             "\n"
@@ -318,6 +333,11 @@ static void cfg_create_ini()
             "; Enable the following setting if your cursor doesn't lock to the window or it doesn't work properly when upscaling is enabled\n"
             "hook_peekmessage=false\n"
             "\n"
+            "; Bit depth of the screen for games that run in a window (normal cooperative level)\n"
+            "; Possible values: 0 = the desktop's, as Windows' own DirectDraw does (32 today), 16 = 16-bit\n"
+            "; Note: Set this to 16 if a windowed game shows garbled colours\n"
+            "windowed_bpp=0\n"
+            "\n"
             "\n"
             "; Undocumented compatibility settings - These will probably not solve your problem, you should rather focus on the settings above\n"
             "fix_alt_key_stuck=false\n"
@@ -364,6 +384,9 @@ static void cfg_create_ini()
             "\n"
             "; Unlock cursor 2 = [Right Alt] + ???\n"
             "keyunlockcursor2=0xA3\n"
+            "\n"
+            "; Unlock cursor with a middle click (the game doesn't get the click; leave off for games that use the middle button)\n"
+            "unlockcursor_middleclick=false\n"
             "\n"
             "; Screenshot\n"
             "keyscreenshot=0x2C\n"

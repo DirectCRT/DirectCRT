@@ -2179,9 +2179,7 @@ HWND WINAPI fake_CreateWindowExA(
 
             if (!g_config.windowed && !g_ddraw.bnet_was_fullscreen)
             {
-                int ws = g_config.window_state;
                 util_toggle_fullscreen();
-                g_config.window_state = ws;
                 g_ddraw.bnet_was_fullscreen = TRUE;
             }
 

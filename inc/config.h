@@ -9,8 +9,6 @@
 typedef struct CNCDDRAWCONFIG
 {
     RECT window_rect;
-    int window_state;
-    int upscaled_state;
     char ini_path[MAX_PATH];
     char game_path[MAX_PATH];
     char dll_path[MAX_PATH];
@@ -27,6 +25,8 @@ typedef struct CNCDDRAWCONFIG
 
     BOOL fullscreen;
     BOOL windowed;
+    BOOL windowed_auto; /* windowed=auto: follow what the game asks for */
+    BOOL fullscreen_setting; /* fullscreen as configured; with windowed=auto it only applies to fullscreen games */
     BOOL maintas;
     char aspect_ratio[16];
     BOOL boxing;
@@ -60,6 +60,8 @@ typedef struct CNCDDRAWCONFIG
     int resolutions;
     int fixchilds;
     BOOL hook_peekmessage;
+    int windowed_bpp; /* 0 = the desktop's */
+    BOOL window_is_programs; /* set at runtime: a windowed program's own window, not saved */
 
     /* Undocumented settings */
 
@@ -92,6 +94,7 @@ typedef struct CNCDDRAWCONFIG
         int toggle_maximize2;
         int unlock_cursor1;
         int unlock_cursor2;
+        BOOL unlock_cursor_middleclick;
         int screenshot;
     } hotkeys;
 
