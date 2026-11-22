@@ -1,20 +1,16 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
-    <ProjectConfiguration Include="DebugLogMiniXP|Win32">
-      <Configuration>DebugLogMiniXP</Configuration>
+    <ProjectConfiguration Include="DebugLogMini|Win32">
+      <Configuration>DebugLogMini</Configuration>
       <Platform>Win32</Platform>
     </ProjectConfiguration>
-    <ProjectConfiguration Include="DebugLogXP|Win32">
-      <Configuration>DebugLogXP</Configuration>
+    <ProjectConfiguration Include="DebugLog|Win32">
+      <Configuration>DebugLog</Configuration>
       <Platform>Win32</Platform>
     </ProjectConfiguration>
     <ProjectConfiguration Include="Debug|Win32">
       <Configuration>Debug</Configuration>
-      <Platform>Win32</Platform>
-    </ProjectConfiguration>
-    <ProjectConfiguration Include="ReleaseXP|Win32">
-      <Configuration>ReleaseXP</Configuration>
       <Platform>Win32</Platform>
     </ProjectConfiguration>
     <ProjectConfiguration Include="Release|Win32">
@@ -125,7 +121,7 @@
   </ItemGroup>
   <ItemGroup />
   <PropertyGroup Label="Globals">
-    <RootNamespace>cnc_ddraw</RootNamespace>
+    <RootNamespace>DirectCRT</RootNamespace>
     <WindowsTargetPlatformVersion Condition="'$(WindowsTargetPlatformVersion)' == ''">$([Microsoft.Build.Utilities.ToolLocationHelper]::GetLatestSDKTargetPlatformVersion('Windows', '10.0'))</WindowsTargetPlatformVersion>
     <ProjectGuid>{96094551-5D52-4EBD-BE4C-5291A03507FC}</ProjectGuid>
   </PropertyGroup>
@@ -143,24 +139,17 @@
     <WholeProgramOptimization>true</WholeProgramOptimization>
     <CharacterSet>MultiByte</CharacterSet>
   </PropertyGroup>
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseXP|Win32'" Label="Configuration">
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='DebugLog|Win32'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
-    <PlatformToolset>v141_xp</PlatformToolset>
+    <PlatformToolset>$(DefaultPlatformToolset)</PlatformToolset>
     <WholeProgramOptimization>true</WholeProgramOptimization>
     <CharacterSet>MultiByte</CharacterSet>
   </PropertyGroup>
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='DebugLogXP|Win32'" Label="Configuration">
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='DebugLogMini|Win32'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
-    <PlatformToolset>v141_xp</PlatformToolset>
-    <WholeProgramOptimization>true</WholeProgramOptimization>
-    <CharacterSet>MultiByte</CharacterSet>
-  </PropertyGroup>
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='DebugLogMiniXP|Win32'" Label="Configuration">
-    <ConfigurationType>DynamicLibrary</ConfigurationType>
-    <UseDebugLibraries>false</UseDebugLibraries>
-    <PlatformToolset>v141_xp</PlatformToolset>
+    <PlatformToolset>$(DefaultPlatformToolset)</PlatformToolset>
     <WholeProgramOptimization>true</WholeProgramOptimization>
     <CharacterSet>MultiByte</CharacterSet>
   </PropertyGroup>
@@ -174,13 +163,10 @@
   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
-  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseXP|Win32'" Label="PropertySheets">
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='DebugLog|Win32'" Label="PropertySheets">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
-  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='DebugLogXP|Win32'" Label="PropertySheets">
-    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
-  </ImportGroup>
-  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='DebugLogMiniXP|Win32'" Label="PropertySheets">
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='DebugLogMini|Win32'" Label="PropertySheets">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
@@ -196,21 +182,15 @@
     <LinkIncremental>false</LinkIncremental>
     <TargetName>ddraw</TargetName>
   </PropertyGroup>
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseXP|Win32'">
-    <OutDir>$(SolutionDir)bin\ReleaseXP\</OutDir>
-    <IntDir>$(SolutionDir)bin\ReleaseXP\</IntDir>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='DebugLog|Win32'">
+    <OutDir>$(SolutionDir)bin\DebugLog\</OutDir>
+    <IntDir>$(SolutionDir)bin\DebugLog\</IntDir>
     <LinkIncremental>false</LinkIncremental>
     <TargetName>ddraw</TargetName>
   </PropertyGroup>
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='DebugLogXP|Win32'">
-    <OutDir>$(SolutionDir)bin\DebugLogXP\</OutDir>
-    <IntDir>$(SolutionDir)bin\DebugLogXP\</IntDir>
-    <LinkIncremental>false</LinkIncremental>
-    <TargetName>ddraw</TargetName>
-  </PropertyGroup>
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='DebugLogMiniXP|Win32'">
-    <OutDir>$(SolutionDir)bin\DebugLogMiniXP\</OutDir>
-    <IntDir>$(SolutionDir)bin\DebugLogMiniXP\</IntDir>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='DebugLogMini|Win32'">
+    <OutDir>$(SolutionDir)bin\DebugLogMini\</OutDir>
+    <IntDir>$(SolutionDir)bin\DebugLogMini\</IntDir>
     <LinkIncremental>false</LinkIncremental>
     <TargetName>ddraw</TargetName>
   </PropertyGroup>
@@ -294,49 +274,7 @@ echo #define GIT_BRANCH "%GIT_BRANCH%" &gt;&gt; %DST_FILE%
 </Command>
     </PreBuildEvent>
   </ItemDefinitionGroup>
-  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseXP|Win32'">
-    <ClCompile>
-      <WarningLevel>Level2</WarningLevel>
-      <PrecompiledHeader>
-      </PrecompiledHeader>
-      <Optimization>MaxSpeed</Optimization>
-      <FunctionLevelLinking>true</FunctionLevelLinking>
-      <IntrinsicFunctions>true</IntrinsicFunctions>
-      <PreprocessorDefinitions>_CRT_SECURE_NO_WARNINGS;WIN32;NDEBUG;_WINDOWS;_USRDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
-      <AdditionalIncludeDirectories>inc;src\detours</AdditionalIncludeDirectories>
-    </ClCompile>
-    <Link>
-      <SubSystem>Windows</SubSystem>
-      <EnableCOMDATFolding>true</EnableCOMDATFolding>
-      <OptimizeReferences>true</OptimizeReferences>
-      <AdditionalDependencies>avifil32.lib;winmm.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <ModuleDefinitionFile>exports.def</ModuleDefinitionFile>
-    </Link>
-    <PostBuildEvent>
-      <Command>
-if NOT "$(LocalDebuggerWorkingDirectory)" == "$(ProjectDir)" if exist "$(LocalDebuggerCommand)" if exist "$(LocalDebuggerWorkingDirectory)"  (
-    copy "$(TargetPath)" "$(LocalDebuggerWorkingDirectory)$(TargetFileName)"
-)
-</Command>
-    </PostBuildEvent>
-    <PreBuildEvent>
-      <Command>
-set DST_FILE="inc/git.h"
-set GIT_PATH="$(DevEnvDir)\CommonExtensions\Microsoft\TeamFoundation\Team Explorer\Git\mingw64\bin\git.exe"
-
-if not exist %GIT_PATH% set GIT_PATH="$(DevEnvDir)\CommonExtensions\Microsoft\TeamFoundation\Team Explorer\Git\mingw32\bin\git.exe"
-if not exist %GIT_PATH% set GIT_PATH=git.exe
-
-for /f "tokens=*" %%I in ('%GIT_PATH% describe --match=NeVeRmAtCh --always --dirty ^|^| echo UNKNOWN') do set GIT_COMMIT=%%I
-for /f "tokens=*" %%I in ('%GIT_PATH% rev-parse --abbrev-ref HEAD ^|^| echo UNKNOWN') do set GIT_BRANCH=%%I
-
-echo #define GIT_COMMIT "%GIT_COMMIT%" &gt; %DST_FILE%
-echo #define GIT_BRANCH "%GIT_BRANCH%" &gt;&gt; %DST_FILE%
-</Command>
-    </PreBuildEvent>
-  </ItemDefinitionGroup>
-  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='DebugLogXP|Win32'">
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='DebugLog|Win32'">
     <ClCompile>
       <WarningLevel>Level2</WarningLevel>
       <PrecompiledHeader>
@@ -378,7 +316,7 @@ echo #define GIT_BRANCH "%GIT_BRANCH%" &gt;&gt; %DST_FILE%
 </Command>
     </PreBuildEvent>
   </ItemDefinitionGroup>
-  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='DebugLogMiniXP|Win32'">
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='DebugLogMini|Win32'">
     <ClCompile>
       <WarningLevel>Level2</WarningLevel>
       <PrecompiledHeader>

@@ -82,11 +82,11 @@ BOOL WINAPI DllMain(HANDLE hDll, DWORD dwReason, LPVOID lpReserved)
                         sizeof(mes) - 1,
                         "Warning: Compatibility modes detected. \n\nIf there are issues with the game then try to "
                         "disable the '%s' compatibility mode for all game executables.\n\n"
-                        "Note: You can disable this warning via ddraw.ini -> 'no_compat_warning=true'",
+                        "Note: You can disable this warning via directcrt.ini -> 'no_compat_warning=true'",
                         s);
 
                     if (!g_config.no_compat_warning)
-                        MessageBoxA(NULL, mes, "Compatibility modes detected - cnc-ddraw", MB_OK);
+                        MessageBoxA(NULL, mes, "Compatibility modes detected - DirectCRT", MB_OK);
 
                     break;
                 }
@@ -156,7 +156,7 @@ BOOL WINAPI DllMain(HANDLE hDll, DWORD dwReason, LPVOID lpReserved)
         if (GetEnvironmentVariable("cnc_ddraw_config_init", NULL, 0))
             return TRUE;
 
-        TRACE("cnc-ddraw DLL_PROCESS_DETACH\n");
+        TRACE("DirectCRT DLL_PROCESS_DETACH\n");
 
         cfg_save();
 

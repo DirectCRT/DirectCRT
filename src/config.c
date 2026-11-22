@@ -128,7 +128,7 @@ void cfg_load()
     
     /* ddtest, our test program, stops its test when the window is closed
        instead of quitting, so it gets the close itself. Forced, because the
-       generated ddraw.ini sets game_handles_close=false for everything. */
+       generated directcrt.ini sets game_handles_close=false for everything. */
     GameHandlesClose = GameHandlesClose || g_config.infantryhack ||
                        _stricmp(g_config.process_file_name, "ddtest") == 0;
 
@@ -156,7 +156,7 @@ void cfg_save()
         return;
 
     char buf[16];
-    char* section = g_config.save_settings == 1 ? "ddraw" : g_config.process_file_name;
+    char* section = g_config.save_settings == 1 ? "directcrt" : g_config.process_file_name;
 
     if (g_config.window_rect.right)
     {
@@ -192,9 +192,9 @@ static void cfg_create_ini()
     if (fh)
     {
         fputs(
-            "; cnc-ddraw - https://github.com/FunkyFr3sh/cnc-ddraw\n"
+            "; DirectCRT - https://github.com/vvekic/DirectCRT\n"
             "\n"
-            "[ddraw]\n"
+            "[directcrt]\n"
             "; ### Optional settings ###\n"
             "; Use the following settings to adjust the look and feel to your liking\n"
             "\n"
@@ -256,7 +256,7 @@ static void cfg_create_ini()
             "; Save the window position and size on game exit and restore them on next game start\n"
             "; (the windowed/fullscreen state from Alt+Enter isn't saved; it lasts until the game exits)\n"
             "; Games that run in their own window keep the size and place they choose; nothing is saved for them\n"
-            "; Possible values: 0 = disabled, 1 = save to global 'ddraw' section, 2 = save to game specific section\n"
+            "; Possible values: 0 = disabled, 1 = save to global 'directcrt' section, 2 = save to game specific section\n"
             "savesettings=1\n"
             "\n"
             "; Should the window be resizable by the user in windowed mode?\n"
@@ -2014,11 +2014,11 @@ static void cfg_init()
         }
     }
 
-    if (!GetEnvironmentVariableA("CNC_DDRAW_CONFIG_FILE", g_config.ini_path, sizeof(g_config.ini_path) - 1))
+    if (!GetEnvironmentVariableA("DIRECTCRT_CONFIG_FILE", g_config.ini_path, sizeof(g_config.ini_path) - 1))
     {
         if (strlen(g_config.dll_path) > 0 && strlen(g_config.dll_file_name) > 0)
         {
-            _snprintf(g_config.ini_path, sizeof(g_config.ini_path) - 1, "%sddraw.ini", g_config.dll_path);
+            _snprintf(g_config.ini_path, sizeof(g_config.ini_path) - 1, "%sdirectcrt.ini", g_config.dll_path);
 
             /* Use this here instead to sync .ini filename with .dll filename - by egornovivan @ github */
             //_snprintf(g_config.ini_path, sizeof(g_config.ini_path) - 1, "%s%s.ini", g_config.dll_path, g_config.dll_file_name);
@@ -2031,12 +2031,12 @@ static void cfg_init()
             if (GetFileAttributes(g_config.ini_path) == INVALID_FILE_ATTRIBUTES)
             {
                 /* This might not actually be needed, but we keep it for now */
-                strncpy(g_config.ini_path, ".\\ddraw.ini", sizeof(g_config.ini_path) - 1);
+                strncpy(g_config.ini_path, ".\\directcrt.ini", sizeof(g_config.ini_path) - 1);
             }
         }
         else
         {
-            strncpy(g_config.ini_path, ".\\ddraw.ini", sizeof(g_config.ini_path) - 1);
+            strncpy(g_config.ini_path, ".\\directcrt.ini", sizeof(g_config.ini_path) - 1);
         }
     }
 
@@ -2049,7 +2049,7 @@ static void cfg_init()
     cfg_get_game_section(g_config.game_section, sizeof(g_config.game_section));
 
     TRACE("filename = %s\n", g_config.process_file_name);
-    TRACE("section  = %s\n", g_config.game_section[0] ? g_config.game_section : "ddraw");
+    TRACE("section  = %s\n", g_config.game_section[0] ? g_config.game_section : "directcrt");
 }
 
 static DWORD cfg_get_game_section(LPSTR buf, DWORD size)
@@ -2125,7 +2125,7 @@ static DWORD cfg_get_string(LPCSTR key, LPCSTR default_value, LPSTR buf, DWORD s
             return s;
     }
 
-    return ini_get_string(&g_config.ini, "ddraw", key, default_value, buf, size);
+    return ini_get_string(&g_config.ini, "directcrt", key, default_value, buf, size);
 }
 
 static BOOL cfg_get_bool(LPCSTR key, BOOL default_value)

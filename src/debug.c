@@ -28,11 +28,11 @@ PVOID g_dbg_exception_handle;
 static LONGLONG g_dbg_counter_start_time = 0;
 static double g_dbg_counter_freq = 0.0;
 static FILE* g_dbg_log_file;
-static char g_dbg_log_path1[MAX_PATH] = "cnc-ddraw-1.log";
-static char g_dbg_log_path2[MAX_PATH] = "cnc-ddraw-2.log";
-static char g_dbg_log_path3[MAX_PATH] = "cnc-ddraw-3.log";
-static char g_dbg_dmp_path1[MAX_PATH] = "cnc-ddraw-1.dmp";
-static char g_dbg_dmp_path2[MAX_PATH] = "cnc-ddraw-2.dmp";
+static char g_dbg_log_path1[MAX_PATH] = "directcrt-1.log";
+static char g_dbg_log_path2[MAX_PATH] = "directcrt-2.log";
+static char g_dbg_log_path3[MAX_PATH] = "directcrt-3.log";
+static char g_dbg_dmp_path1[MAX_PATH] = "directcrt-1.dmp";
+static char g_dbg_dmp_path2[MAX_PATH] = "directcrt-2.dmp";
 static BOOL g_dbg_log_rotate;
 
 #ifdef _DEBUG 
@@ -191,12 +191,12 @@ void dbg_init()
             char game_path[MAX_PATH] = { 0 };
             _makepath(game_path, drive, dir, NULL, NULL);
 
-            _snprintf(g_dbg_dmp_path1, sizeof(g_dbg_dmp_path1) - 1, "%scnc-ddraw-%s-1.dmp", game_path, filename);
-            _snprintf(g_dbg_dmp_path2, sizeof(g_dbg_dmp_path2) - 1, "%scnc-ddraw-%s-2.dmp", game_path, filename);
+            _snprintf(g_dbg_dmp_path1, sizeof(g_dbg_dmp_path1) - 1, "%sdirectcrt-%s-1.dmp", game_path, filename);
+            _snprintf(g_dbg_dmp_path2, sizeof(g_dbg_dmp_path2) - 1, "%sdirectcrt-%s-2.dmp", game_path, filename);
 
-            _snprintf(g_dbg_log_path1, sizeof(g_dbg_log_path1) - 1, "%scnc-ddraw-%s-1.log", game_path, filename);
-            _snprintf(g_dbg_log_path2, sizeof(g_dbg_log_path2) - 1, "%scnc-ddraw-%s-2.log", game_path, filename);
-            _snprintf(g_dbg_log_path3, sizeof(g_dbg_log_path3) - 1, "%scnc-ddraw-%s-3.log", game_path, filename);
+            _snprintf(g_dbg_log_path1, sizeof(g_dbg_log_path1) - 1, "%sdirectcrt-%s-1.log", game_path, filename);
+            _snprintf(g_dbg_log_path2, sizeof(g_dbg_log_path2) - 1, "%sdirectcrt-%s-2.log", game_path, filename);
+            _snprintf(g_dbg_log_path3, sizeof(g_dbg_log_path3) - 1, "%sdirectcrt-%s-3.log", game_path, filename);
         }
 
         remove(g_dbg_dmp_path1);
@@ -213,7 +213,7 @@ void dbg_init()
         }
 
         TRACE(
-            "cnc-ddraw version = %d.%d.%d.%d (git~%s, %s)\n",
+            "DirectCRT version = %d.%d.%d.%d (git~%s, %s)\n",
             VERSION_MAJOR,
             VERSION_MINOR,
             VERSION_BUILD,
@@ -221,7 +221,7 @@ void dbg_init()
             GIT_COMMIT,
             GIT_BRANCH);
 
-        TRACE("cnc-ddraw = %p\n", g_ddraw_module);
+        TRACE("DirectCRT = %p\n", g_ddraw_module);
 
         HKEY hkey = NULL;
         LONG status =

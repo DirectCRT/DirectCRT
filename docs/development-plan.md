@@ -1,7 +1,6 @@
 # DirectCRT development plan
 
-Status: planning, as of 22 November 2026. The repository is still named
-cnc-ddraw; renaming it is part of phase 0.
+Status: phase 0, as of 22 November 2026.
 
 ## Goal
 
@@ -109,8 +108,8 @@ What we take:
 | `shader`, `d3d9_filter`, libretro shader loading | Remove |
 | `maintas`, `aspect_ratio`, `boxing` | Replace with `viewport`, `aspect` and `integer_scaling` |
 | `inject_resolution`, `vhack` | Remove (they make games render at high resolutions) |
-| XP build configurations, MinGW i486 build, old-Windows code paths | Remove |
-| C++Builder config tool (`config/`) | Replace with the Qt app |
+| XP build configurations, MinGW i486 build, old-Windows code paths | Remove. Done: the build configurations (DebugLogXP and DebugLogMiniXP are now DebugLog and DebugLogMini on the current toolset) and the i486 build scripts. The old-Windows code paths are left for phase 3 |
+| C++Builder config tool (`config/`) | Replace with the Qt app. Until then it's out of date: it still edits `ddraw.ini` |
 
 The `adjmouse-viewport` branch adds an `adjmouse_viewport` setting, a manual way
 to map the mouse to a picture a shader draws smaller than the window. Moving the
@@ -121,6 +120,16 @@ scaling into C makes it unnecessary, but it's useful during the prototype.
 0. **Foundations.** Rename to DirectCRT; move to a standalone GitHub repository
    (`vvekic/cnc-ddraw` is still in upstream's fork network); switch to GPL; CI
    with Visual Studio 2026; remove the XP configurations.
+   - Done: the solution, project, version resource, messages, log and dump
+     names, and the settings file (`directcrt.ini`, global section
+     `[directcrt]`, `DIRECTCRT_CONFIG_FILE` to point elsewhere); `LICENSE` is
+     GPL-2.0 with cnc-ddraw's MIT notice in `LICENSE-cnc-ddraw.txt`; the private
+     repository `vvekic/DirectCRT`.
+   - CI runs on `windows-2025` with the default toolset. GitHub announced on
+     20 November 2026 that this image moves to Visual Studio 2027 and that the
+     `windows-2025-vs2026` label is deprecated from 1 December, so the build log
+     prints which Visual Studio it used.
+   - Version numbering restarts at 0.1.0.0.
 1. **Prototype.** Run crt-auto in the existing OpenGL renderer
    (`reference/crt-auto.glsl` on the `adjmouse-viewport` branch is a
    single-file version) and check it with ddtest at 320x200, 320x240, 640x480

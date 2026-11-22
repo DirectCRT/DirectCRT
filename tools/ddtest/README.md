@@ -16,7 +16,7 @@ Set the resolution, bit depth and presentation method in the control panel and
 press **Run**. The resolution is the width and height boxes; picking from the list
 next to them fills them in, and the list shows **Custom** for any other size. **Stop**,
 Esc in the test window, or closing the test window ends the run. Only one of Run
-and Stop is enabled at a time. (cnc-ddraw normally ends a program whose window is
+and Stop is enabled at a time. (DirectCRT normally ends a program whose window is
 closed, because many games ignore the close; it leaves the close to `ddtest.exe`,
 so a renamed copy quits instead.)
 
@@ -28,7 +28,7 @@ apply when you press Enter or leave the box. Like a game changing its settings:
   presentation method, is a display mode change on the same DirectDraw object
 - windowed, a new bit depth recreates the surfaces in the same window
 - switching between windowed and fullscreen, or a new windowed size, starts over
-  as a fresh run (cnc-ddraw takes a windowed program's window size as its mode
+  as a fresh run (DirectCRT takes a windowed program's window size as its mode
   once, when the program sets its cooperative level)
 
 Windowed, the test window shows the picture 1:1, so its size is the resolution:
@@ -38,12 +38,12 @@ window.
 
 **DirectDraw modes** lists the display modes the loaded `ddraw.dll` reports, after
 you press **List**; picking one fills in the resolution, bit depth and refresh rate.
-cnc-ddraw reports its own list of resolutions, all at 60 Hz; Windows' own
+DirectCRT reports its own list of resolutions, all at 60 Hz; Windows' own
 DirectDraw reports the graphics card's real modes.
 
 Every run starts like a new game: a new test window, and `ddraw.dll` is loaded
 again (it's unloaded when a run stops), so it reads its settings again and
-forgets anything changed at runtime, such as Alt+Enter. Edits to `ddraw.ini`
+forgets anything changed at runtime, such as Alt+Enter. Edits to `directcrt.ini`
 take effect on the next Run.
 
 In the test window: **Esc** stops (and returns to the panel, which matters in
@@ -53,7 +53,7 @@ info text and the mouse crosshair, left click marks a point, right click clears
 the marks.
 
 Presentation methods, matching what games do. They're what the program asks
-DirectDraw for. cnc-ddraw follows the request with `windowed=auto` (the default):
+DirectDraw for. DirectCRT follows the request with `windowed=auto` (the default):
 a window for the windowed method, fullscreen for the others, upscaled with
 `fullscreen=true` or as a real mode switch with `fullscreen=false`.
 `windowed=true` or `windowed=false` force one or the other whatever is asked.
@@ -63,7 +63,7 @@ a window for the windowed method, fullscreen for the others, upscaled with
 - **Exclusive fullscreen, write the primary surface** - write straight into the primary surface
 - **Windowed** - normal cooperative level, a clipper, and `Blt` into the window
 
-24-bit works only windowed through cnc-ddraw: neither cnc-ddraw nor Windows' own
+24-bit works only windowed through DirectCRT: neither DirectCRT nor Windows' own
 DirectDraw on current graphics cards offers 24-bit display modes, and Windows'
 DirectDraw can't `Blt` a 24-bit surface to the desktop either. ddtest says so
 when it happens.
@@ -78,7 +78,7 @@ All patterns are generated for the current size.
 | Grey and colour ramps | gamma, banding, near-black detail |
 | Grid (16 x 12 cells) | geometry and cropping: the outermost pixels are a red border; cells are square on a 4:3 screen |
 | Pixel patterns | single-pixel checkerboards and lines: scanlines, phosphor masks, moire, integer scaling |
-| Geometry / aspect ratio | circles that should look round. Windowed, and fullscreen when the mode has the display's shape (1280 x 720 on a 16:9 display), the pixels are square; other fullscreen modes are drawn for a 4:3 screen, as games of the time were (320 x 200 has tall pixels). A blue square-pixel circle shows when the pixels aren't square. If they still look oval, the picture is being stretched (in cnc-ddraw, `maintas=false`) |
+| Geometry / aspect ratio | circles that should look round. Windowed, and fullscreen when the mode has the display's shape (1280 x 720 on a 16:9 display), the pixels are square; other fullscreen modes are drawn for a 4:3 screen, as games of the time were (320 x 200 has tall pixels). A blue square-pixel circle shows when the pixels aren't square. If they still look oval, the picture is being stretched (in DirectCRT, `maintas=false`) |
 | Dither patterns | checkerboard and ordered dithers next to the colour they should blend to |
 | Text | small to large text, coloured text, 80 and 40 columns across the screen |
 | Motion | sweeping bar and line, bouncing square, frame counter: tearing, VSync, frame pacing |

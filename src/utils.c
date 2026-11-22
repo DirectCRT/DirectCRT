@@ -287,9 +287,9 @@ BOOL util_caller_is_ddraw_wrapper(void* return_address)
         {
             MessageBoxA(
                 NULL,
-                "Error: You cannot combine cnc-ddraw with other DirectDraw wrappers. \n\n"
+                "Error: You cannot combine DirectCRT with other DirectDraw wrappers. \n\n"
                     "Please disable D3DWindower and then try to start the game again.",
-                "Conflicting DirectDraw wrapper detected - cnc-ddraw",
+                "Conflicting DirectDraw wrapper detected - DirectCRT",
                 MB_OK | MB_TOPMOST);
 
             return TRUE;
@@ -305,9 +305,9 @@ BOOL util_caller_is_ddraw_wrapper(void* return_address)
         {
             MessageBoxA(
                 NULL,
-                "Error: You cannot combine cnc-ddraw with other DirectDraw wrappers. \n\n"
+                "Error: You cannot combine DirectCRT with other DirectDraw wrappers. \n\n"
                     "Please remove/disable wndmode.dll and then try to start the game again.",
-                "Conflicting DirectDraw wrapper detected - cnc-ddraw",
+                "Conflicting DirectDraw wrapper detected - DirectCRT",
                 MB_OK | MB_TOPMOST);
 
             return TRUE;
@@ -323,9 +323,9 @@ BOOL util_caller_is_ddraw_wrapper(void* return_address)
         {
             MessageBoxA(
                 NULL,
-                "Error: You cannot combine cnc-ddraw with other DirectDraw wrappers. \n\n"
+                "Error: You cannot combine DirectCRT with other DirectDraw wrappers. \n\n"
                     "Please remove/disable windmode.dll and then try to start the game again.",
-                "Conflicting DirectDraw wrapper detected - cnc-ddraw",
+                "Conflicting DirectDraw wrapper detected - DirectCRT",
                 MB_OK | MB_TOPMOST);
 
             return TRUE;
@@ -341,9 +341,9 @@ BOOL util_caller_is_ddraw_wrapper(void* return_address)
         {
             MessageBoxA(
                 NULL,
-                "Error: You cannot combine cnc-ddraw with other DirectDraw wrappers. \n\n"
+                "Error: You cannot combine DirectCRT with other DirectDraw wrappers. \n\n"
                     "Please disable DxWnd and then try to start the game again.",
-                "Conflicting DirectDraw wrapper detected - cnc-ddraw",
+                "Conflicting DirectDraw wrapper detected - DirectCRT",
                 MB_OK | MB_TOPMOST);
 
             return TRUE;
@@ -372,10 +372,10 @@ BOOL util_caller_is_ddraw_wrapper(void* return_address)
                 {
                     MessageBoxA(
                         NULL,
-                        "Error: You cannot combine cnc-ddraw with other DirectDraw wrappers. \n\n"
+                        "Error: You cannot combine DirectCRT with other DirectDraw wrappers. \n\n"
                             "Please disable the other wrapper by clicking in the game room on the very top "
                             "on 'Game', now select 'DirectX' and disable 'Start in Window-Mode'.",
-                        "Conflicting DirectDraw wrapper detected - cnc-ddraw",
+                        "Conflicting DirectDraw wrapper detected - DirectCRT",
                         MB_OK | MB_TOPMOST);
 
                     return TRUE;

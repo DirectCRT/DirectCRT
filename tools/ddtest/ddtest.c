@@ -45,7 +45,7 @@
 
 enum { PRESENT_FLIP, PRESENT_BLT, PRESENT_LOCK, PRESENT_WINDOWED, PRESENT_COUNT };
 
-/* What the program asks DirectDraw for. cnc-ddraw follows it with
+/* What the program asks DirectDraw for. DirectCRT follows it with
    windowed=auto; windowed=true/false override it. */
 static const char* PRESENT_NAMES[PRESENT_COUNT] = {
     "Exclusive fullscreen, page flipping",
@@ -707,7 +707,7 @@ static BOOL start(const Settings* s)
         if (!dd_ok(hr, "SetDisplayMode"))
         {
             if (s->bpp == 24)
-                append_error(". This ddraw.dll has no 24-bit display modes: cnc-ddraw doesn't offer them, "
+                append_error(". This ddraw.dll has no 24-bit display modes: DirectCRT doesn't offer them, "
                              "and neither does Windows' own DirectDraw on current graphics cards.");
             else if (hr == DDERR_INVALIDMODE || hr == DDERR_UNSUPPORTEDMODE)
                 append_error(". This ddraw.dll doesn't offer that mode; Query lists the ones it does.");
@@ -1235,7 +1235,7 @@ static int run_dump(const Settings* s, const char* dir, uint32_t frame, int only
 /* Control panel                                                           */
 
 /* The panel is laid out from the font's measured size at the window's DPI, so
-   it stays readable at any display scaling. (cnc-ddraw makes the process
+   it stays readable at any display scaling. (DirectCRT makes the process
    DPI-aware when it loads; Windows' own ddraw.dll doesn't, and then Windows
    scales the whole panel.) */
 
@@ -1246,8 +1246,8 @@ static const char* HELP_TEXT =
     "right click clears the marks.";
 
 static const char* PRESENT_NOTE =
-    "This is what the program asks DirectDraw for. cnc-ddraw follows it with windowed=auto "
-    "(the default); windowed=true or false in ddraw.ini force a window or fullscreen.";
+    "This is what the program asks DirectDraw for. DirectCRT follows it with windowed=auto "
+    "(the default); windowed=true or false in directcrt.ini force a window or fullscreen.";
 
 static const char* IMAGE_NOTE = "Shown 1:1, centred and cropped";
 
@@ -1819,7 +1819,7 @@ static void apply_live(void)
     }
 
     /* A wrapper may take a windowed program's window size as its mode, once,
-       when the program sets its cooperative level (cnc-ddraw does), so a new
+       when the program sets its cooperative level (DirectCRT does), so a new
        windowed size starts over too */
     BOOL new_window_size = windowed && (s.width != g.cur.width || s.height != g.cur.height);
 
@@ -2293,7 +2293,7 @@ static void write_run_log(void)
 enum { STEP_CONTINUE, STEP_QUIT, STEP_FRAMES_DONE };
 
 /* One pass of the main loop. It's kept out of line, and unloading ddraw.dll
-   is the last thing it does, because a wrapper like cnc-ddraw patches this
+   is the last thing it does, because a wrapper like DirectCRT patches this
    program's imports (PeekMessageA and others) while it's loaded: a loop that
    kept such an address in a register would go on calling the unloaded DLL. */
 static __declspec(noinline) int main_loop_step(MSG* msg)

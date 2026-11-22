@@ -26,7 +26,7 @@ ifdef DEBUG
 endif
 
 ifdef _WIN32_WINNT
-	CFLAGS   += -march=i486 -D _WIN32_WINNT=$(_WIN32_WINNT)
+	CFLAGS   += -D _WIN32_WINNT=$(_WIN32_WINNT)
 endif
 
 CC        = i686-w64-mingw32-gcc
