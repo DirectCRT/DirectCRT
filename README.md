@@ -11,12 +11,16 @@ work.
 
 ## Status
 
-Early development. Today DirectCRT is cnc-ddraw with a few changes, and the CRT
-shading is still to come. [docs/development-plan.md](docs/development-plan.md)
+Early development. Today DirectCRT is cnc-ddraw with a few changes and a
+prototype of the CRT shading. [docs/development-plan.md](docs/development-plan.md)
 covers the goals, the decisions and the phases.
 
 Changes from cnc-ddraw so far:
 
+- `shader=crt-auto` in `directcrt.ini` (prototype) shades the picture with
+  DOSBox Staging's `crt-auto` for VGA: its own shaders, its choice of shader
+  for the screen size, its picture size and its colours, with the same result
+  pixel for pixel. It needs OpenGL 3.3, which `renderer=auto` then picks.
 - Settings are in `directcrt.ini`, global section `[directcrt]`. The file is
   created next to `ddraw.dll` the first time a game starts.
 - `windowed=auto` (the new default) follows the game: a window for games that ask
@@ -72,8 +76,10 @@ Everything goes to `bin\<configuration>\`. There are four configurations:
 The solution also builds [ddtest](tools/ddtest/README.md), a DirectDraw test
 pattern program for checking scaling, colour depth and presentation.
 
-GitHub Actions builds all four configurations on every push to `master` and on
-pull requests.
+Unit tests: `tests\run_tests.cmd` from a Developer Command Prompt.
+
+GitHub Actions builds all four configurations and runs the unit tests on every
+push to `master` and on pull requests.
 
 ## Licence
 
@@ -89,3 +95,5 @@ code keeps its own licence:
 - LodePNG: zlib (`src/lodepng.c`)
 - Khronos OpenGL headers: MIT-style (`inc/glcorearb.h`, `inc/wglext.h`, `inc/KHR/`)
 - Shaders in `inc/openglshader.h` and `inc/d3d9shader.h`: MIT, as noted in each one
+- DOSBox Staging's shaders in `third_party/dosbox-staging/`: MIT, except
+  `sharp.glsl` (GPL-2.0-or-later); see its README

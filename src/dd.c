@@ -931,7 +931,34 @@ HRESULT dd_SetDisplayMode(DWORD dwWidth, DWORD dwHeight, DWORD dwBPP, DWORD dwFl
     g_ddraw.render.viewport.x = 0;
     g_ddraw.render.viewport.y = 0;
 
-    if (g_config.boxing)
+    if (g_config.crt_auto)
+    {
+        /* DOSBox Staging's crt-auto picks the shader from the screen pixels per
+         * game line and sizes the picture for it (integer_scaling=auto) */
+        g_ddraw.render.crt =
+            crt_auto_calc_layout(g_ddraw.width, g_ddraw.height, g_ddraw.render.width, g_ddraw.render.height);
+
+        g_ddraw.render.viewport.x = g_ddraw.render.crt.x;
+        g_ddraw.render.viewport.y = g_ddraw.render.crt.y;
+        g_ddraw.render.viewport.width = g_ddraw.render.crt.width;
+        g_ddraw.render.viewport.height = g_ddraw.render.crt.height;
+
+        TRACE(
+            "     crt-auto: %ux%u in %dx%d: %s, %d px/line, render %dx%d, picture %d,%d %dx%d\n",
+            g_ddraw.width,
+            g_ddraw.height,
+            g_ddraw.render.width,
+            g_ddraw.render.height,
+            crt_auto_shader_name(g_ddraw.render.crt.shader),
+            g_ddraw.render.crt.pixels_per_scanline,
+            g_ddraw.render.crt.render_width,
+            g_ddraw.render.crt.render_height,
+            g_ddraw.render.crt.x,
+            g_ddraw.render.crt.y,
+            g_ddraw.render.crt.width,
+            g_ddraw.render.crt.height);
+    }
+    else if (g_config.boxing)
     {
         for (int i = 20; i-- > 1;)
         {
@@ -1927,7 +1954,21 @@ HRESULT dd_CreateEx(GUID* lpGuid, LPVOID* lplpDD, REFIID iid, IUnknown* pUnkOute
             g_config.opengl_core = TRUE;
         }
 
-        if (tolower(g_config.renderer[0]) == 'd') /* direct3d9 or direct3d9on12*/
+        /* crt-auto runs DOSBox Staging's shaders, which need a 3.3 core context */
+        BOOL crt_auto_ogl =
+            g_config.crt_auto &&
+            (tolower(g_config.renderer[0]) == 'o' || _strcmpi(g_config.renderer, "auto") == 0);
+
+        if (crt_auto_ogl)
+        {
+            g_config.opengl_core = TRUE;
+        }
+
+        if (crt_auto_ogl && oglu_load_dll())
+        {
+            g_ddraw.renderer = ogl_render_main;
+        }
+        else if (tolower(g_config.renderer[0]) == 'd') /* direct3d9 or direct3d9on12*/
         {
             g_ddraw.renderer = d3d9_render_main;
         }

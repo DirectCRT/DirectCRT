@@ -96,6 +96,8 @@ so gradients show 8-bit banding on purpose.
 ```
 --size WxH, --width N, --height N, --bpp 8|16|24|32, --refresh HZ, --fps N
 --present flip|blt|lock|windowed, --pattern NAME|NUMBER, --image FILE
+--info 0|1           the info text in the picture (same as I)
+--mouse 0|1          the mouse crosshair (same as M)
 --start              run straight away
 --dump DIR           save the patterns (or just --pattern) as PNGs and exit, no DirectDraw
 --frame N            animation frame for --dump

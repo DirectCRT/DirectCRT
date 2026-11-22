@@ -91,6 +91,13 @@ PFNGLTEXBUFFERPROC glTexBuffer;
 PFNGLGETINTEGERVPROC glGetIntegerv;
 PFNGLGETSTRINGIPROC glGetStringi;
 
+PFNGLGENQUERIESPROC glGenQueries;
+PFNGLDELETEQUERIESPROC glDeleteQueries;
+PFNGLBEGINQUERYPROC glBeginQuery;
+PFNGLENDQUERYPROC glEndQuery;
+PFNGLGETQUERYOBJECTIVPROC glGetQueryObjectiv;
+PFNGLGETQUERYOBJECTUI64VPROC glGetQueryObjectui64v;
+
 HMODULE g_oglu_hmodule;
 BOOL g_oglu_got_version2;
 BOOL g_oglu_got_version3;
@@ -196,7 +203,21 @@ void oglu_init()
 
     glTexBuffer = (PFNGLTEXBUFFERPROC)xwglGetProcAddress("glTexBuffer");
     glGetIntegerv = (PFNGLGETINTEGERVPROC)xwglGetProcAddress("glGetIntegerv");
+
+    /* glGetIntegerv is OpenGL 1.1, which wglGetProcAddress doesn't return on
+     * most drivers. Without it oglu_ext_exists falls back to
+     * glGetString(GL_EXTENSIONS), an error in a core context that made the
+     * renderer give up */
+    if (!glGetIntegerv && g_oglu_hmodule)
+        glGetIntegerv = (PFNGLGETINTEGERVPROC)real_GetProcAddress(g_oglu_hmodule, "glGetIntegerv");
     glGetStringi = (PFNGLGETSTRINGIPROC)xwglGetProcAddress("glGetStringi");
+
+    glGenQueries = (PFNGLGENQUERIESPROC)xwglGetProcAddress("glGenQueries");
+    glDeleteQueries = (PFNGLDELETEQUERIESPROC)xwglGetProcAddress("glDeleteQueries");
+    glBeginQuery = (PFNGLBEGINQUERYPROC)xwglGetProcAddress("glBeginQuery");
+    glEndQuery = (PFNGLENDQUERYPROC)xwglGetProcAddress("glEndQuery");
+    glGetQueryObjectiv = (PFNGLGETQUERYOBJECTIVPROC)xwglGetProcAddress("glGetQueryObjectiv");
+    glGetQueryObjectui64v = (PFNGLGETQUERYOBJECTUI64VPROC)xwglGetProcAddress("glGetQueryObjectui64v");
 
     char* glversion = (char*)glGetString(GL_VERSION);
     if (glversion)
@@ -421,57 +442,73 @@ GLuint oglu_build_program_from_file(const char* file_path, BOOL core_profile)
         if (source)
         {
             fread(source, file_size, 1, file);
-            fclose(file);
-
-            char* vert_source = calloc(file_size + 50, 1);
-            char* frag_source = calloc(file_size + 50, 1);
-
-            if (frag_source && vert_source)
-            {
-                char* version_start = strstr(source, "#version");
-
-                if (version_start)
-                {
-                    if (core_profile)
-                    {
-                        if (_strnicmp(version_start, "#version 130", 12) == 0 ||
-                            _strnicmp(version_start, "#version 140", 12) == 0)
-                        {
-                            memcpy(version_start, "#version 150", 12);
-                        }
-                    }
-
-                    const char deli[2] = "\n";
-                    char* version = strtok(version_start, deli);
-
-                    strcpy(vert_source, source);
-                    strcpy(frag_source, source);
-                    strcat(vert_source, "\n#define VERTEX\n");
-                    strcat(frag_source, "\n#define FRAGMENT\n");
-                    strcat(vert_source, version + strlen(version) + 1);
-                    strcat(frag_source, version + strlen(version) + 1);
-
-                    program = oglu_build_program(vert_source, frag_source, core_profile);
-                }
-                else
-                {
-                    strcpy(vert_source, core_profile ? "#version 150\n" : "#version 130\n");
-                    strcpy(frag_source, core_profile ? "#version 150\n" : "#version 130\n");
-                    strcat(vert_source, "#define VERTEX\n");
-                    strcat(frag_source, "#define FRAGMENT\n");
-                    strcat(vert_source, source);
-                    strcat(frag_source, source);
-
-                    program = oglu_build_program(vert_source, frag_source, core_profile);
-                }
-
-                free(vert_source);
-                free(frag_source);
-            }
-
+            program = oglu_build_program_from_source(source, core_profile);
             free(source);
         }
+
+        fclose(file);
     }
+
+    return program;
+}
+
+/* A libretro-style shader with both stages in one source: VERTEX or FRAGMENT
+ * is defined right after the #version line */
+GLuint oglu_build_program_from_source(const char* text, BOOL core_profile)
+{
+    GLuint program = 0;
+    size_t size = strlen(text);
+
+    char* source = calloc(size + 2, 1);
+    char* vert_source = calloc(size + 50, 1);
+    char* frag_source = calloc(size + 50, 1);
+
+    if (source && frag_source && vert_source)
+    {
+        memcpy(source, text, size);
+        source[size] = '\n'; /* so the #version line always ends */
+
+        char* version_start = strstr(source, "#version");
+
+        if (version_start)
+        {
+            if (core_profile)
+            {
+                if (_strnicmp(version_start, "#version 130", 12) == 0 ||
+                    _strnicmp(version_start, "#version 140", 12) == 0)
+                {
+                    memcpy(version_start, "#version 150", 12);
+                }
+            }
+
+            const char deli[2] = "\n";
+            char* version = strtok(version_start, deli);
+
+            strcpy(vert_source, source);
+            strcpy(frag_source, source);
+            strcat(vert_source, "\n#define VERTEX\n");
+            strcat(frag_source, "\n#define FRAGMENT\n");
+            strcat(vert_source, version + strlen(version) + 1);
+            strcat(frag_source, version + strlen(version) + 1);
+
+            program = oglu_build_program(vert_source, frag_source, core_profile);
+        }
+        else
+        {
+            strcpy(vert_source, core_profile ? "#version 150\n" : "#version 130\n");
+            strcpy(frag_source, core_profile ? "#version 150\n" : "#version 130\n");
+            strcat(vert_source, "#define VERTEX\n");
+            strcat(frag_source, "#define FRAGMENT\n");
+            strcat(vert_source, source);
+            strcat(frag_source, source);
+
+            program = oglu_build_program(vert_source, frag_source, core_profile);
+        }
+    }
+
+    free(vert_source);
+    free(frag_source);
+    free(source);
 
     return program;
 }

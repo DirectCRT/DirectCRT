@@ -1,0 +1,2 @@
+third_party/dosbox-staging/resources/** -text
+*.sh text eol=lf

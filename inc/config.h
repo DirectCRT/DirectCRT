@@ -34,6 +34,7 @@ typedef struct CNCDDRAWCONFIG
     BOOL vsync;
     BOOL adjmouse;
     char shader[MAX_PATH];
+    BOOL crt_auto; /* shader=crt-auto: DOSBox Staging's crt-auto for VGA, with its own scaling */
     char renderer[256];
     BOOL devmode;
     BOOL border;

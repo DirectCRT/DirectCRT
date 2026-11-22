@@ -35,7 +35,7 @@ WINDRES  ?= i686-w64-mingw32-windres
 SRCS     := $(wildcard src/*.c) $(wildcard src/*/*.c) res.rc
 OBJS     := $(addsuffix .o, $(basename $(SRCS)))
 
-.PHONY: clean all
+.PHONY: clean all test
 all: $(TARGET)
 
 %.o: %.rc
@@ -46,3 +46,10 @@ $(TARGET): $(OBJS)
 
 clean:
 	$(RM) $(TARGET) $(OBJS) || del $(TARGET) $(subst /,\\,$(OBJS))
+
+# Unit tests, built for the machine running make
+HOSTCC   ?= cc
+
+test:
+	$(HOSTCC) -Iinc -O2 -Wall -std=c99 -o tests/test_crt_auto tests/test_crt_auto.c src/crt_auto.c -lm
+	./tests/test_crt_auto

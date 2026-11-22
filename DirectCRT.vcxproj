@@ -65,6 +65,7 @@
     <ClCompile Include="src\render_gdi.c" />
     <ClCompile Include="src\screenshot.c" />
     <ClCompile Include="src\config.c" />
+    <ClCompile Include="src\crt_auto.c" />
     <ClCompile Include="src\ddsurface.c" />
     <ClCompile Include="src\versionhelpers.c" />
     <ClCompile Include="src\winapi_hooks.c" />
@@ -109,6 +110,7 @@
     <ClInclude Include="inc\render_gdi.h" />
     <ClInclude Include="inc\screenshot.h" />
     <ClInclude Include="inc\config.h" />
+    <ClInclude Include="inc\crt_auto.h" />
     <ClInclude Include="inc\ddsurface.h" />
     <ClInclude Include="inc\version.h" />
     <ClInclude Include="inc\versionhelpers.h" />

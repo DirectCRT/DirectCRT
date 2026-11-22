@@ -1050,6 +1050,8 @@ static const char* USAGE =
     "      bars, ramps, grid, pixels, geometry, dither, text,\n"
     "      motion, interlaced, palette, white, testimage, image\n"
     "  --image FILE        image file for the image pattern (shown 1:1)\n"
+    "  --info 0|1          the info text in the picture (I)\n"
+    "  --mouse 0|1         the mouse crosshair (M)\n"
     "  --start             run straight away\n"
     "  --dump DIR          save the patterns as PNG files and exit\n"
     "  --frame N           animation frame for --dump\n"
@@ -1087,6 +1089,8 @@ static BOOL parse_args(Settings* s, BOOL* start_now, char* dump_dir, uint32_t* f
         else if (_stricmp(a, "--bpp") == 0) { s->bpp = atoi(v); }
         else if (_stricmp(a, "--refresh") == 0) { s->refresh = atoi(v); }
         else if (_stricmp(a, "--fps") == 0) { s->fps = atoi(v); }
+        else if (_stricmp(a, "--info") == 0) { s->info = atoi(v) != 0; }
+        else if (_stricmp(a, "--mouse") == 0) { s->mouse = atoi(v) != 0; }
         else if (_stricmp(a, "--image") == 0) { strncpy(s->image_path, v, MAX_PATH - 1); s->image_path[MAX_PATH - 1] = '\0'; }
         else if (_stricmp(a, "--dump") == 0) { strncpy(dump_dir, v, MAX_PATH - 1); dump_dir[MAX_PATH - 1] = '\0'; }
         else if (_stricmp(a, "--frame") == 0) { *frame = (uint32_t)strtoul(v, NULL, 10); }

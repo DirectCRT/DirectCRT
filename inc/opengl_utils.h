@@ -38,6 +38,7 @@ void oglu_init();
 BOOL oglu_ext_exists(char* ext, HDC hdc);
 GLuint oglu_build_program(GLchar* vert_source, GLchar* frag_source, BOOL core_profile);
 GLuint oglu_build_program_from_file(const char* file_path, BOOL core_profile);
+GLuint oglu_build_program_from_source(const char* source, BOOL core_profile);
 
 extern PFNGLVIEWPORTPROC glViewport;
 extern PFNGLBINDTEXTUREPROC glBindTexture;
@@ -110,6 +111,13 @@ extern PFNGLDELETEFRAMEBUFFERSPROC glDeleteFramebuffers;
 extern PFNGLTEXBUFFERPROC glTexBuffer;
 extern PFNGLGETINTEGERVPROC glGetIntegerv;
 extern PFNGLGETSTRINGIPROC glGetStringi;
+
+extern PFNGLGENQUERIESPROC glGenQueries;
+extern PFNGLDELETEQUERIESPROC glDeleteQueries;
+extern PFNGLBEGINQUERYPROC glBeginQuery;
+extern PFNGLENDQUERYPROC glEndQuery;
+extern PFNGLGETQUERYOBJECTIVPROC glGetQueryObjectiv;
+extern PFNGLGETQUERYOBJECTUI64VPROC glGetQueryObjectui64v;
 
 extern HMODULE g_oglu_hmodule;
 extern BOOL g_oglu_got_version2;

@@ -35,6 +35,13 @@ jobs:
           "$MSBUILD" DirectCRT.sln -m -nologo -v:minimal \
             -p:Configuration=${{ matrix.configuration }} -p:Platform=x86
 
+      - name: Unit tests
+        if: matrix.configuration == 'Release'
+        shell: cmd
+        run: |
+          for /f "usebackq delims=" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath`) do call "%%i\VC\Auxiliary\Build\vcvars32.bat"
+          tests\run_tests.cmd
+
       - name: Check that ddraw.dll loads
         shell: bash
         run: rundll32.exe "bin/${{ matrix.configuration }}/ddraw.dll", DDIsWindowed

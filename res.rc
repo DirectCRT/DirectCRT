@@ -28,3 +28,12 @@ PRODUCTVERSION VERSION
         VALUE "Translation",  0x0409, 0x04B0
     }
 }
+
+/* crt-auto: DOSBox Staging's shaders and presets, loaded by src/render_ogl.c */
+CRT_IMAGE_ADJUSTMENTS          RCDATA "third_party/dosbox-staging/resources/shaders/_internal/image-adjustments.glsl"
+CRT_HYLLIAN                    RCDATA "third_party/dosbox-staging/resources/shaders/crt/crt-hyllian.glsl"
+CRT_VGA_1080P                  RCDATA "third_party/dosbox-staging/resources/shaders/crt/vga-1080p.glsl"
+CRT_VGA_1080P_FAKE_DOUBLE_SCAN RCDATA "third_party/dosbox-staging/resources/shaders/crt/vga-1080p-fake-double-scan.glsl"
+CRT_SHARP                      RCDATA "third_party/dosbox-staging/resources/shaders/interpolation/sharp.glsl"
+CRT_PRESET_VGA_1440P           RCDATA "third_party/dosbox-staging/resources/shader-presets/crt/crt-hyllian/vga-1440p.preset"
+CRT_PRESET_VGA_4K              RCDATA "third_party/dosbox-staging/resources/shader-presets/crt/crt-hyllian/vga-4k.preset"

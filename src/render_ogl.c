@@ -10,6 +10,7 @@
 #include "render_ogl.h"
 #include "utils.h"
 #include "debug.h"
+#include "dllmain.h"
 
 
 static HGLRC ogl_create_core_context(HDC hdc);
@@ -18,6 +19,8 @@ static void ogl_create_textures(int width, int height);
 static void ogl_init_main_program();
 static void ogl_init_shader1_program();
 static void ogl_init_shader2_program();
+static void ogl_build_crt_auto_programs(BOOL core_profile);
+static void ogl_init_crt_auto_uniforms();
 static void ogl_render();
 static BOOL ogl_release_resources();
 static BOOL ogl_texture_upload_test();
@@ -125,6 +128,7 @@ DWORD WINAPI ogl_render_main(void)
         GL_CHECK(ogl_init_main_program());
         GL_CHECK(ogl_init_shader1_program());
         GL_CHECK(ogl_init_shader2_program());
+        GL_CHECK(ogl_init_crt_auto_uniforms());
 
         g_ogl.got_error = g_ogl.got_error || (err = glGetError()) != GL_NO_ERROR;
         GL_CHECK(g_ogl.got_error = g_ogl.got_error || !ogl_texture_upload_test());
@@ -183,7 +187,7 @@ static HGLRC ogl_create_core_context(HDC hdc)
 
     int attribs[] = {
         WGL_CONTEXT_MAJOR_VERSION_ARB, 3,
-        WGL_CONTEXT_MINOR_VERSION_ARB, 2,
+        WGL_CONTEXT_MINOR_VERSION_ARB, g_config.crt_auto ? 3 : 2, /* DOSBox Staging's shaders are GLSL 3.30 */
         WGL_CONTEXT_FLAGS_ARB, WGL_CONTEXT_FORWARD_COMPATIBLE_BIT_ARB,
         WGL_CONTEXT_PROFILE_MASK_ARB, WGL_CONTEXT_CORE_PROFILE_BIT_ARB,
         0 };
@@ -218,6 +222,7 @@ static void ogl_build_programs()
     g_ogl.main_program = g_ogl.shader1_program = g_ogl.shader2_program = 0;
 
     g_ogl.shader2_upscale = FALSE;
+    g_ogl.crt_auto = FALSE;
     BOOL core_profile = wglCreateContextAttribsARB != NULL;
 
     if (g_oglu_got_version3)
@@ -238,7 +243,11 @@ static void ogl_build_programs()
         BOOL bilinear = FALSE;
         char shader_path[MAX_PATH] = { 0 };
 
-        if (g_ogl.main_program)
+        if (g_ogl.main_program && g_config.crt_auto)
+        {
+            ogl_build_crt_auto_programs(core_profile);
+        }
+        else if (g_ogl.main_program)
         {
             strncpy(shader_path, g_config.shader, sizeof(shader_path));
             shader_path[sizeof(shader_path) - 1] = '\0'; /* strncpy fix */
@@ -309,7 +318,7 @@ static void ogl_build_programs()
             g_oglu_got_version3 = FALSE;
         }
 
-        if (g_ogl.shader1_program)
+        if (g_ogl.shader1_program && !g_ogl.crt_auto)
         {
             if (strlen(shader_path) <= sizeof(shader_path) - 8)
             {
@@ -750,17 +759,40 @@ static void ogl_init_shader1_program()
 
     for (int i = 0; i < fbo_count; i++)
     {
+        int fbo_width = g_ogl.surface_tex_width;
+        int fbo_height = g_ogl.surface_tex_height;
+        GLint fbo_filter = g_ogl.filter_bilinear ? GL_LINEAR : GL_NEAREST;
+
+        if (g_ogl.crt_auto)
+        {
+            /* DOSBox Staging's shaders read the whole texture, so these are
+             * exactly the image's size. The game's picture goes into the
+             * first; the image-adjustments pass reads it unfiltered and
+             * writes the doubled image the CRT shader expects into the
+             * second, which that shader reads filtered */
+            fbo_width = i == 0 ? (int)g_ddraw.width : g_ddraw.render.crt.render_width;
+            fbo_height = i == 0 ? (int)g_ddraw.height : g_ddraw.render.crt.render_height;
+            fbo_filter = i == 0 ? GL_NEAREST : GL_LINEAR;
+        }
+
         glBindFramebuffer(GL_FRAMEBUFFER, g_ogl.frame_buffer_id[i]);
 
         glBindTexture(GL_TEXTURE_2D, g_ogl.frame_buffer_tex_id[i]);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, g_ogl.filter_bilinear ? GL_LINEAR : GL_NEAREST);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, g_ogl.filter_bilinear ? GL_LINEAR : GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, fbo_filter);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, fbo_filter);
+
+        if (g_ogl.crt_auto)
+        {
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        }
+
         glTexImage2D(
             GL_TEXTURE_2D,
             0,
             GL_RGBA8,
-            g_ogl.surface_tex_width,
-            g_ogl.surface_tex_height,
+            fbo_width,
+            fbo_height,
             0,
             GL_RGBA,
             GL_UNSIGNED_BYTE,
@@ -971,6 +1003,257 @@ static void ogl_init_shader2_program()
     if (loc != -1)
         glUniformMatrix4fv(loc, 1, GL_FALSE, mvp_matrix);
 }
+
+/* A shader or preset built into the DLL (res.rc), as a NUL-terminated copy */
+static char* ogl_load_text_resource(const char* name)
+{
+    HRSRC res = FindResourceA(g_ddraw_module, name, MAKEINTRESOURCEA(10) /* RT_RCDATA */);
+    if (!res)
+        return NULL;
+
+    HGLOBAL handle = LoadResource(g_ddraw_module, res);
+    DWORD size = SizeofResource(g_ddraw_module, res);
+    const void* data = handle ? LockResource(handle) : NULL;
+
+    if (!data || !size)
+        return NULL;
+
+    char* text = malloc(size + 1);
+    if (text)
+    {
+        memcpy(text, data, size);
+        text[size] = '\0';
+    }
+
+    return text;
+}
+
+/* shader1: DOSBox Staging's image-adjustments pass. shader2: the CRT shader
+ * crt-auto chose for this mode and window size, with its preset */
+static void ogl_build_crt_auto_programs(BOOL core_profile)
+{
+    const char* shader_name = NULL;
+    const char* preset_name = NULL;
+
+    switch (g_ddraw.render.crt.shader)
+    {
+    case CRT_SHADER_VGA_1080P:
+        shader_name = "CRT_VGA_1080P";
+        break;
+    case CRT_SHADER_VGA_1080P_FAKE_DOUBLE_SCAN:
+        shader_name = "CRT_VGA_1080P_FAKE_DOUBLE_SCAN";
+        break;
+    case CRT_SHADER_HYLLIAN_VGA_1440P:
+        shader_name = "CRT_HYLLIAN";
+        preset_name = "CRT_PRESET_VGA_1440P";
+        break;
+    case CRT_SHADER_HYLLIAN_VGA_4K:
+        shader_name = "CRT_HYLLIAN";
+        preset_name = "CRT_PRESET_VGA_4K";
+        break;
+    case CRT_SHADER_SHARP:
+    default:
+        shader_name = "CRT_SHARP";
+        break;
+    }
+
+    char* adjustments = ogl_load_text_resource("CRT_IMAGE_ADJUSTMENTS");
+    char* shader = ogl_load_text_resource(shader_name);
+    char* preset = preset_name ? ogl_load_text_resource(preset_name) : NULL;
+
+    memset(&g_ogl.crt_params, 0, sizeof(g_ogl.crt_params));
+
+    if (adjustments && shader && (preset || !preset_name))
+    {
+        g_ogl.shader1_program = oglu_build_program_from_source(adjustments, core_profile);
+        g_ogl.shader2_program = oglu_build_program_from_source(shader, core_profile);
+
+        /* The shader's '#pragma parameter' defaults, then the preset */
+        crt_auto_params_from_shader(&g_ogl.crt_params, shader);
+
+        if (preset)
+            crt_auto_params_apply_preset(&g_ogl.crt_params, preset);
+    }
+
+    if (g_ogl.shader1_program && g_ogl.shader2_program)
+    {
+        g_ogl.crt_auto = TRUE;
+    }
+    else
+    {
+        TRACE(
+            "     crt-auto: building %s failed (image adjustments %s, %s %s)\n",
+            crt_auto_shader_name(g_ddraw.render.crt.shader),
+            g_ogl.shader1_program ? "ok" : "failed",
+            shader_name,
+            g_ogl.shader2_program ? "ok" : "failed");
+
+        if (glDeleteProgram)
+        {
+            if (g_ogl.shader1_program)
+                glDeleteProgram(g_ogl.shader1_program);
+
+            if (g_ogl.shader2_program)
+                glDeleteProgram(g_ogl.shader2_program);
+        }
+
+        g_ogl.shader1_program = g_ogl.shader2_program = 0;
+    }
+
+    free(adjustments);
+    free(shader);
+    free(preset);
+}
+
+static void ogl_uniform1i(GLuint program, const char* name, int value)
+{
+    GLint loc = glGetUniformLocation(program, name);
+    if (loc != -1)
+        glUniform1i(loc, value);
+}
+
+static void ogl_uniform1f(GLuint program, const char* name, float value)
+{
+    GLint loc = glGetUniformLocation(program, name);
+    if (loc != -1)
+        glUniform1f(loc, value);
+}
+
+static void ogl_uniform2f(GLuint program, const char* name, float x, float y)
+{
+    GLint loc = glGetUniformLocation(program, name);
+    if (loc != -1)
+    {
+        float v[2] = { x, y };
+        glUniform2fv(loc, 1, v);
+    }
+}
+
+static void ogl_uniform3f(GLuint program, const char* name, const float v[3])
+{
+    GLint loc = glGetUniformLocation(program, name);
+    if (loc != -1)
+        glUniform3fv(loc, 1, v);
+}
+
+/* The uniforms DOSBox Staging's shader pipeline sets (shader_pipeline.cpp) */
+static void ogl_init_crt_auto_uniforms()
+{
+    if (!g_ogl.crt_auto)
+        return;
+
+    if (!g_ogl.shader1_program || !g_ogl.shader2_program)
+    {
+        /* The framebuffers failed */
+        g_ogl.crt_auto = FALSE;
+        return;
+    }
+
+    const CRT_AUTO_LAYOUT* crt = &g_ddraw.render.crt;
+    CRT_AUTO_COLOR color = crt_auto_vga_color();
+
+    GLuint p = g_ogl.shader1_program;
+    glUseProgram(p);
+
+    ogl_uniform1i(p, "INPUT_TEXTURE_0", 0);
+    ogl_uniform2f(p, "INPUT_SIZE_0", (float)g_ddraw.width, (float)g_ddraw.height);
+    ogl_uniform2f(p, "OUTPUT_START_OFFSET", 0.0f, 0.0f);
+    ogl_uniform2f(p, "OUTPUT_SIZE", (float)crt->render_width, (float)crt->render_height);
+
+    ogl_uniform1i(p, "COLOR_SPACE", color.color_space);
+    ogl_uniform1i(p, "ENABLE_ADJUSTMENTS", color.enable_adjustments);
+    ogl_uniform1i(p, "COLOR_PROFILE", color.color_profile);
+    ogl_uniform1f(p, "BRIGHTNESS", color.brightness);
+    ogl_uniform1f(p, "CONTRAST", color.contrast);
+    ogl_uniform1f(p, "GAMMA", color.gamma);
+    ogl_uniform1f(p, "DIGITAL_CONTRAST", color.digital_contrast);
+    ogl_uniform3f(p, "BLACK_LEVEL_COLOR", color.black_level_color);
+    ogl_uniform1f(p, "BLACK_LEVEL", color.black_level);
+    ogl_uniform1f(p, "SATURATION", color.saturation);
+    ogl_uniform1f(p, "COLOR_TEMPERATURE_KELVIN", color.color_temperature_kelvin);
+    ogl_uniform1f(p, "COLOR_TEMPERATURE_LUMA_PRESERVE", color.color_temperature_luma_preserve);
+    ogl_uniform1f(p, "RED_GAIN", color.red_gain);
+    ogl_uniform1f(p, "GREEN_GAIN", color.green_gain);
+    ogl_uniform1f(p, "BLUE_GAIN", color.blue_gain);
+
+    p = g_ogl.shader2_program;
+    glUseProgram(p);
+
+    ogl_uniform1i(p, "INPUT_TEXTURE_0", 0);
+    ogl_uniform2f(p, "INPUT_SIZE_0", (float)crt->render_width, (float)crt->render_height);
+
+    ogl_uniform2f(
+        p,
+        "OUTPUT_START_OFFSET",
+        (float)g_ddraw.render.viewport.x,
+        (float)(g_ddraw.render.viewport.y + g_ddraw.render.opengl_y_align));
+
+    ogl_uniform2f(
+        p,
+        "OUTPUT_SIZE",
+        (float)g_ddraw.render.viewport.width,
+        (float)g_ddraw.render.viewport.height);
+
+    for (int i = 0; i < g_ogl.crt_params.count; i++)
+    {
+        ogl_uniform1f(p, g_ogl.crt_params.param[i].name, g_ogl.crt_params.param[i].value);
+    }
+
+    glUseProgram(0);
+
+    TRACE("     crt-auto: using %s\n", crt_auto_shader_name(crt->shader));
+}
+
+#ifdef _DEBUG
+/* GPU time of the crt-auto passes, logged as an average every 300 frames */
+static BOOL ogl_gpu_time_begin()
+{
+    if (!glGenQueries || !glBeginQuery || !glEndQuery || !glGetQueryObjectiv || !glGetQueryObjectui64v)
+        return FALSE;
+
+    if (!g_ogl.gpu_time_query)
+        glGenQueries(1, &g_ogl.gpu_time_query);
+
+    if (g_ogl.gpu_time_pending)
+    {
+        GLint available = 0;
+        glGetQueryObjectiv(g_ogl.gpu_time_query, GL_QUERY_RESULT_AVAILABLE, &available);
+
+        if (!available)
+            return FALSE;
+
+        GLuint64 ns = 0;
+        glGetQueryObjectui64v(g_ogl.gpu_time_query, GL_QUERY_RESULT, &ns);
+
+        g_ogl.gpu_time_pending = FALSE;
+        g_ogl.gpu_time_ms += ns / 1000000.0;
+
+        if (++g_ogl.gpu_time_frames == 300)
+        {
+            TRACE(
+                "crt-auto: GPU time %.3f ms per frame (%s, %ux%u to %dx%d, average of 300 frames)\n",
+                g_ogl.gpu_time_ms / g_ogl.gpu_time_frames,
+                crt_auto_shader_name(g_ddraw.render.crt.shader),
+                g_ddraw.width,
+                g_ddraw.height,
+                g_ddraw.render.viewport.width,
+                g_ddraw.render.viewport.height);
+
+            g_ogl.gpu_time_ms = 0;
+            g_ogl.gpu_time_frames = 0;
+        }
+    }
+
+    glBeginQuery(GL_TIME_ELAPSED, g_ogl.gpu_time_query);
+    return TRUE;
+}
+
+static void ogl_gpu_time_end()
+{
+    glEndQuery(GL_TIME_ELAPSED);
+    g_ogl.gpu_time_pending = TRUE;
+}
+#endif
 
 static void ogl_render()
 {
@@ -1243,6 +1526,10 @@ static void ogl_render()
             static int frames = 0;
             frames++;
 
+#ifdef _DEBUG
+            BOOL gpu_timing = g_ogl.crt_auto && ogl_gpu_time_begin();
+#endif
+
             /* draw surface into framebuffer */
             glUseProgram(g_ogl.main_program);
 
@@ -1261,7 +1548,11 @@ static void ogl_render()
 
             /* apply shader1 */
 
-            if (!g_ogl.shader2_upscale)
+            if (g_ogl.crt_auto)
+            {
+                glViewport(0, 0, g_ddraw.render.crt.render_width, g_ddraw.render.crt.render_height);
+            }
+            else if (!g_ogl.shader2_upscale)
             {
                 glViewport(0, 0, g_ddraw.render.viewport.width, g_ddraw.render.viewport.height);
             }
@@ -1312,6 +1603,11 @@ static void ogl_render()
 
             glActiveTexture(GL_TEXTURE1);
             glBindTexture(GL_TEXTURE_2D, 0);
+
+#ifdef _DEBUG
+            if (gpu_timing)
+                ogl_gpu_time_end();
+#endif
         }
         else if (g_ogl.shader1_program && g_ogl.main_program)
         {
@@ -1402,6 +1698,14 @@ static void ogl_render()
 static BOOL ogl_release_resources()
 {
     glDeleteTextures(TEXTURE_COUNT, g_ogl.surface_tex_ids);
+
+    if (g_ogl.gpu_time_query && glDeleteQueries)
+        glDeleteQueries(1, &g_ogl.gpu_time_query);
+
+    g_ogl.gpu_time_query = 0;
+    g_ogl.gpu_time_pending = FALSE;
+    g_ogl.gpu_time_ms = 0;
+    g_ogl.gpu_time_frames = 0;
 
     if (g_ddraw.bpp == 8)
         glDeleteTextures(TEXTURE_COUNT, g_ogl.palette_tex_ids);

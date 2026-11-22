@@ -1,6 +1,6 @@
 # DirectCRT development plan
 
-Status: phase 0, as of 22 November 2026.
+Status: phase 1 done, as of 22 November 2026.
 
 ## Goal
 
@@ -112,8 +112,8 @@ What we take:
 | C++Builder config tool (`config/`) | Replace with the Qt app. Until then it's out of date: it still edits `ddraw.ini` |
 
 The `adjmouse-viewport` branch adds an `adjmouse_viewport` setting, a manual way
-to map the mouse to a picture a shader draws smaller than the window. Moving the
-scaling into C makes it unnecessary, but it's useful during the prototype.
+to map the mouse to a picture a shader draws smaller than the window. The
+prototype already moved the scaling into C, so crt-auto doesn't need it.
 
 ## Phases
 
@@ -135,6 +135,29 @@ scaling into C makes it unnecessary, but it's useful during the prototype.
    single-file version) and check it with ddtest at 320x200, 320x240, 640x480
    and 800x600. Answers whether it looks right and performs well before the
    real work starts.
+   - Done, differently from planned: instead of the single-file 86Box port,
+     `shader=crt-auto` runs DOSBox Staging's own shader files unmodified
+     (`third_party/dosbox-staging/`, built into the DLL as resources) as two
+     passes, image adjustments and the main shader, with the same uniforms and
+     texture sizes as DOSBox's pipeline. The shader choice, picture size
+     (`viewport=fit`, `aspect=auto`, `integer_scaling=auto`), double
+     scanning, pixel doubling and VGA colour defaults are in C
+     (`src/crt_auto.c`, unit tests in `tests/`), and the picture rectangle is
+     the viewport, so the mouse maps correctly without `adjmouse_viewport`.
+     The 86Box port turned out to differ from DOSBox: it used vga-1080p for
+     fake double scan, and it didn't double the image for crt-hyllian.
+   - Looks right: ddtest's photo, pixel patterns and colour bars at the four
+     sizes, captured from DirectCRT and from DOSBox Staging 0.84 (same shader
+     files) showing the same picture, are identical to within 1/255 on a
+     3840x2160 screen (vga-4k and vga-1440p) and in a 1920x1080 window (fake
+     double scan, vga-1080p and sharp).
+   - Performs well: at most 0.39 ms of GPU time per frame for all passes at
+     2880x2160 on an RTX 5080 (vga-4k; vga-1440p 0.24 ms, vga-1080p 0.09 ms,
+     sharp 0.17 ms). DebugLog builds log it. Weaker GPUs, such as a Steam
+     Deck, are still to be measured.
+   - Fixed on the way: `renderer=openglcore` failed on drivers whose
+     `wglGetProcAddress` doesn't return `glGetIntegerv` (NVIDIA's), and fell
+     back to GDI.
 2. **Presenter.** Direct3D 11 renderer; build-time shader translation (glslang,
    SPIRV-Cross, then compile to bytecode and embed); the fixed pipeline; the
    scaling, tier and automatic colour logic ported to C; double-scan detection;
@@ -153,15 +176,20 @@ scaling into C makes it unnecessary, but it's useful during the prototype.
 - **ddtest** (`tools/ddtest`): test patterns at any resolution and bit depth,
   four presentation methods, scripted runs (`--start --frames N --log FILE`)
   and PNG dumps (`--dump DIR`). See its README.
+- **crt-compare** (`tools/crt-compare`): shows the same pictures in DirectCRT
+  and DOSBox Staging, captures both and compares them pixel by pixel. The
+  Direct3D 11 renderer has to pass it too.
 - **DXVK on Windows:** put DXVK's `d3d11.dll` and `dxgi.dll` next to
   `ddtest.exe` to run the Direct3D 11 renderer through Vulkan, as under Proton.
 - **Real Linux or a Steam Deck** before releases.
 
 ## Open questions
 
-- Which DirectDraw modes were double-scanned on VGA-class monitors: 320x200 and
-  320x240 certainly; 400x300 and 512x384 need checking (probably everything
-  under about 350 lines).
+- Which DirectDraw modes were double-scanned on VGA-class monitors. For now
+  DirectCRT follows DOSBox Staging's S3 BIOS: up to 384 lines are double
+  scanned and up to 512 pixels wide are pixel doubled (320x200, 320x240,
+  400x300 and 512x384 become 640x400, 640x480, 800x600 and 1024x768). Real
+  Windows 9x drivers may have differed.
 - The exact name of the plain fullscreen mode.
 - How far to support macOS through CrossOver (best effort for now).
 - Whether the `adjmouse-viewport` branch gets merged or is dropped once the

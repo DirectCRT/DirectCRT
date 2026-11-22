@@ -4,6 +4,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include "ddraw.h"
+#include "crt_auto.h"
 
 #ifdef __GNUC__
 #define __try
@@ -123,6 +124,7 @@ typedef struct CNCDDRAW
         HANDLE sem;
         DEVMODE mode;
         struct { int width; int height; int x; int y; } viewport;
+        CRT_AUTO_LAYOUT crt; /* with shader=crt-auto: the shader and picture size it chose */
 
         LONG palette_updated;
         LONG surface_updated;

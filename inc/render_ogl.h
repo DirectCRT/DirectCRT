@@ -3,6 +3,7 @@
 
 #include <windows.h>
 #include "opengl_utils.h"
+#include "crt_auto.h"
 
 #define TEXTURE_COUNT 4
 #define FBO_COUNT 2
@@ -50,6 +51,15 @@ typedef struct OGLRENDERER
     BOOL use_opengl;
     BOOL filter_bilinear;
     BOOL shader2_upscale;
+
+    /* shader=crt-auto: shader1 is DOSBox Staging's image-adjustments pass at the
+     * size of the doubled image, shader2 the CRT shader chosen for the window */
+    BOOL crt_auto;
+    CRT_AUTO_PARAMS crt_params;
+    GLuint gpu_time_query;
+    BOOL gpu_time_pending;
+    double gpu_time_ms;
+    int gpu_time_frames;
 } OGLRENDERER;
 
 DWORD WINAPI ogl_render_main(void);
