@@ -62,6 +62,7 @@
     <ClCompile Include="src\ddpalette.c" />
     <ClCompile Include="src\render_ogl.c" />
     <ClCompile Include="src\render_d3d9.c" />
+    <ClCompile Include="src\render_d3d11.c" />
     <ClCompile Include="src\render_gdi.c" />
     <ClCompile Include="src\screenshot.c" />
     <ClCompile Include="src\config.c" />
@@ -101,6 +102,8 @@
     <ClInclude Include="inc\lodepng.h" />
     <ClInclude Include="inc\mouse.h" />
     <ClInclude Include="inc\render_d3d9.h" />
+    <ClInclude Include="inc\render_d3d11.h" />
+    <ClInclude Include="src\d3d11_shaders\d3d11_shaders.h" />
     <ClInclude Include="inc\debug.h" />
     <ClInclude Include="inc\dd.h" />
     <ClInclude Include="inc\opengl_utils.h" />

@@ -39,6 +39,9 @@
     <ClCompile Include="src\render_d3d9.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="src\render_d3d11.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="src\lodepng.c">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -183,6 +186,12 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="inc\render_d3d9.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\render_d3d11.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\d3d11_shaders\d3d11_shaders.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="inc\glcorearb.h">

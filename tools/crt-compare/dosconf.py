@@ -1,12 +1,15 @@
 """Writes a DOSBox Staging config that shows DIR/SHOW.COM with crt-auto at
-DOSBox's default settings.
+DOSBox's default settings, or others given as NAME=VALUE.
 
-usage: python -I dosconf.py DIR fullscreen|WxH OUT.conf
+usage: python -I dosconf.py DIR fullscreen|WxH OUT.conf [NAME=VALUE...]
   WxH is the window size in logical units (pixels at 100% scaling)
+  NAME=VALUE sets a [render] setting, e.g. 'viewport=relative 120% 90%'
 """
+import re
 import sys
 
 d, display, out = sys.argv[1], sys.argv[2], sys.argv[3]
+settings = [a.split('=', 1) for a in sys.argv[4:]]
 fullscreen = display == 'fullscreen'
 
 conf = """[sdl]
@@ -52,6 +55,11 @@ mount c "{d}"
 c:
 show
 """.format(fs='on' if fullscreen else 'off', ws='default' if fullscreen else display, d=d)
+
+for name, value in settings:
+    conf, n = re.subn(r'(?m)^' + re.escape(name.strip()) + r' = .*$', lambda m: name.strip() + ' = ' + value.strip(), conf, count=1)
+    if n != 1:
+        sys.exit('dosconf.py: no [render] setting ' + name)
 
 open(out, 'w').write(conf)
 print(out)

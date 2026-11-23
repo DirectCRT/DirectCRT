@@ -3,6 +3,7 @@
 
 #include <windows.h>
 #include "ini.h"
+#include "crt_auto.h"
 
 #define FILE_EXISTS(a) (GetFileAttributes(a) != INVALID_FILE_ATTRIBUTES)
 
@@ -35,6 +36,7 @@ typedef struct CNCDDRAWCONFIG
     BOOL adjmouse;
     char shader[MAX_PATH];
     BOOL crt_auto; /* shader=crt-auto: DOSBox Staging's crt-auto for VGA, with its own scaling */
+    CRT_AUTO_SETTINGS crt; /* crt-auto's DOSBox Staging settings: aspect, viewport, integer_scaling, colour */
     char renderer[256];
     BOOL devmode;
     BOOL border;
@@ -118,5 +120,6 @@ extern CNCDDRAWCONFIG g_config;
 
 void cfg_load();
 void cfg_save();
+BOOL cfg_poll_crt_auto_settings(CRT_AUTO_SETTINGS* settings);
 
 #endif

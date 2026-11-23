@@ -1,6 +1,6 @@
 # DirectCRT development plan
 
-Status: phase 1 done, as of 22 November 2026.
+Status: phase 2 done, as of 23 November 2026.
 
 ## Goal
 
@@ -115,15 +115,15 @@ What we take:
 | About 280 per-game profiles in `src/config.c` | Keep; show them as per-game defaults in the OSD |
 | Compatibility settings (`nonexclusive`, `singlecpu`, `fixchilds`, `guard_lines`, `fake_mode`, `win_version`, `hook`, ...) | Keep, on an advanced page |
 | Game-specific hacks (`armadahack`, `tshack`, ...) | Keep, set by the profiles |
-| Window modes, Alt+Enter, saved window position, `toggle_borderless`, `toggle_upscaled` | Keep. Done: `windowed=auto` (the new default) follows the game's request, a window for windowed games and fullscreen for fullscreen ones, with `fullscreen` choosing upscaled or a real mode switch; `true`/`false` still force it. Alt+Enter is no longer saved to the ini, so every start uses the configured mode. Windowed games now get the desktop's bit depth (32-bit), as with Windows' own DirectDraw, instead of a fixed 16-bit that cut 24/32-bit pictures down; `windowed_bpp=16` brings the old behaviour back. They're also shown 1:1 where they put their window: a saved window size and position (`savesettings`) no longer stretches or moves them, and none is saved from them |
+| Window modes, Alt+Enter, saved window position, `toggle_borderless`, `toggle_upscaled` | Replace with `display` and the `window_*` settings in phase 3 (see [Display settings](#display-settings)). Done so far: `windowed=auto` (the new default) follows the game's request, a window for windowed games and fullscreen for fullscreen ones, with `fullscreen` choosing upscaled or a real mode switch; `true`/`false` still force it. Alt+Enter is no longer saved to the ini, so every start uses the configured mode. Windowed games now get the desktop's bit depth (32-bit), as with Windows' own DirectDraw, instead of a fixed 16-bit that cut 24/32-bit pictures down; `windowed_bpp=16` brings the old behaviour back. For now they're shown 1:1 where they put their window, and a saved window size and position (`savesettings`) no longer stretches or moves them; phase 3 scales them to `window_size` instead |
 | Display modes: 8, 16 and 32-bit; `SetDisplayMode` rejects 24-bit | Add 24-bit in the presenter (convert to 32-bit on upload); some games use it |
-| Plain "Fullscreen", which switches the monitor to the game's own resolution | Keep, but rename it so users know their monitor will receive the original game resolution and no CRT shading is possible |
+| Plain "Fullscreen", which switches the monitor to the game's own resolution | Keep as `display=original`, opt-in, with help text saying the monitor gets the game's resolution and there's no CRT shading |
 | Frame limiter and VSync (`maxfps`, `limiter_type`, `maxgameticks`, `minfps`, `vsync`) | Keep |
 | Mouse (`adjmouse`, cursor-unlock hotkeys, cursor fixes) | Keep, driven by the new scaling code |
 | Screenshots, debug logs, crash dumps | Keep; add a choice of raw or shaded screenshots |
 | `renderer` (gdi, opengl, openglcore, direct3d9, direct3d9on12, auto) | Replace with Direct3D 11, plus OpenGL (crt-auto only, without its libretro shader loading and GL 1.x/2.x paths) and the GDI fallback |
-| `shader`, `d3d9_filter`, libretro shader loading | Remove |
-| `maintas`, `aspect_ratio`, `boxing` | Replace with `viewport`, `aspect` and `integer_scaling` |
+| `shader`, `d3d9_filter`, libretro shader loading | Keep `shader` with DOSBox's values `crt-auto`, `sharp`, `nearest` and `bilinear`; remove the rest |
+| `width`, `height`, `maintas`, `aspect_ratio`, `boxing` | Replace with `window_size`, `viewport`, `aspect` and `integer_scaling`, for every shader |
 | `inject_resolution`, `vhack` | Remove (they make games render at high resolutions) |
 | XP build configurations, MinGW i486 build, old-Windows code paths | Remove. Done: the build configurations (DebugLogXP and DebugLogMiniXP are now DebugLog and DebugLogMini on the current toolset) and the i486 build scripts. The old-Windows code paths are left for phase 3 |
 | C++Builder config tool (`config/`) | Remove in phase 3; the overlay replaces it. Until then it's out of date: it still edits `ddraw.ini` |
@@ -131,6 +131,171 @@ What we take:
 The `adjmouse-viewport` branch adds an `adjmouse_viewport` setting, a manual way
 to map the mouse to a picture a shader draws smaller than the window. The
 prototype already moved the scaling into C, so crt-auto doesn't need it.
+
+## Display settings
+
+Phase 3 replaces cnc-ddraw's window and scaling settings with fewer ones that
+answer three questions in order: fullscreen or a window, how big, and what the
+picture looks like. Where DOSBox Staging has a setting for the same thing, it
+has its name.
+
+Why:
+
+- `windowed` and `fullscreen` give six combinations. `fullscreen` means
+  "upscaled or a real mode switch" in some and "borderless" in another.
+- The default, `fullscreen=false`, switches the monitor to the game's
+  resolution. That leaves crt-auto one screen pixel per line, so with
+  `shader=crt-auto` there's silently no CRT effect, only `sharp`. Games in
+  their own window are shown 1:1, with the same result.
+- `width`, `height`, `maintas`, `aspect_ratio`, `boxing` and `d3d9_filter`
+  overlap with `viewport`, `aspect` and `integer_scaling`, or crt-auto ignores
+  them. `toggle_borderless` and `toggle_upscaled` change what Alt+Enter does.
+  The window settings are scattered (`posX`, `posY`, `center_window`,
+  `border`, `resizable`, `savesettings=0/1/2`).
+
+### The settings
+
+```ini
+display=auto            ; auto, window, fullscreen, original
+window_size=default     ; default (= medium), small, medium, large, unscaled, WxH, WxHpx
+window_position=auto    ; auto, X,Y, X,Ypx, X,Y%
+window_decorations=on
+window_resizable=on
+remember_window=off     ; off, global, game
+shader=crt-auto         ; crt-auto, sharp, nearest, bilinear
+aspect=auto
+integer_scaling=auto
+viewport=fit
+image_adjustments=on    ; and the other colour settings, unchanged
+renderer=auto           ; auto (Direct3D 11, then OpenGL), direct3d11, opengl, gdi
+```
+
+### `display`
+
+| Value | Fullscreen games | Games in their own window | Alt+Enter goes to |
+|---|---|---|---|
+| `auto` (default) | Fullscreen at the desktop resolution | A window | The other one |
+| `window` | A window | A window | Fullscreen at the desktop resolution |
+| `fullscreen` | Fullscreen at the desktop resolution | Fullscreen at the desktop resolution (rarely wanted; kept for compatibility) | A window |
+| `original` | The monitor switches to the game's resolution | A window | The other one, with fullscreen switching the monitor's mode |
+
+- **Fullscreen at the desktop resolution** scales the picture to the screen.
+  It's what `windowed=auto` with `fullscreen=true` does now.
+- **`original`** is what Windows' own DirectDraw did, and DirectCRT's default
+  until now. The monitor, or the graphics card's scaler as set in its driver's
+  control panel, stretches the picture to the panel. It's for real CRTs,
+  scalers such as a RetroTINK or OSSC, people who prefer their monitor's
+  scaling, and the lowest latency.
+  - With one screen pixel per line, crt-auto shows `sharp`, which at 1:1
+    changes nothing. The colour adjustments still apply, because they run
+    before the shader; the help text says so.
+  - When the monitor doesn't offer the mode (320x200 usually isn't), cnc-ddraw's
+    fallback stays: 2x, then the smallest mode with the game's shape, then the
+    smallest with the desktop's shape, then the desktop's own. So the help
+    text says "or the closest mode the monitor has". At 2x, crt-auto gets two
+    pixels per line and shows `vga-1080p`.
+  - Where a mode change fails without an error (Wayland under Wine), it falls
+    back to fullscreen at the desktop resolution, as now.
+  - The refresh rate is the game's, or `refresh_rate`.
+  - The name comes from old DOSBox's `fullresolution`, whose `original` and
+    `desktop` made the same choice.
+- **One setting decides two things,** how the game starts and which fullscreen
+  Alt+Enter goes to. The combination it can't give is "start in a window, with
+  Alt+Enter going to the game's resolution", which is rare.
+
+### Windows
+
+One rule for every window, whether the game asked for fullscreen or a window:
+the window's client area is `window_size`, and `viewport`, `aspect` and
+`integer_scaling` place the picture in it, as in fullscreen. So there can be
+black borders in the window, as in DOSBox.
+
+- **`window_size`** has DOSBox's values: `small`, `medium` and `large` are 4:3
+  sizes relative to the desktop height (66.67x50%, 98.67x74% and 120x90%);
+  `WxH` is in logical units and `WxHpx` in pixels. `default` is `medium`: on a
+  3840x2160 screen about 2131x1598, which gives 640x480 3.3 pixels per line
+  and `vga-1440p`. One value is new: **`unscaled`**, the game's own resolution
+  at 1:1, for game profiles of games that misbehave when scaled.
+- **Games in their own window** are scaled too. cnc-ddraw's hooks
+  (`GetClientRect`, `GetWindowRect`, `ClientToScreen`, `ScreenToClient`,
+  `SetWindowPos`, `MoveWindow` and the cursor functions) keep telling the game
+  its window is its own size and map the mouse back. That's how cnc-ddraw has
+  always shown them, but stretched to the saved window size and at 16-bit; on
+  22 November they became 1:1 at the desktop's bit depth to fix that. The bit
+  depth stays, and the scaling comes back through `window_size` instead of a
+  saved size.
+  - The window is centred where the game put its own, kept on the screen,
+    unless `window_position` says otherwise.
+  - When the game resizes its own window, for example from a zoom option in
+    its menu, the new size is its new resolution and is scaled the same way.
+  - `fixchilds` still turns scaling off when it finds GDI child windows, so
+    those games are shown 1:1, as now.
+- **The user can resize the window,** smaller than the game too, as now.
+  `remember_window` saves its size and position when the game exits, for both
+  kinds of game, in the global section or the game's. Alt+Enter's state still
+  isn't saved.
+- **`window_position`:** `auto` centres the window, on the game's own window
+  or on the screen. It replaces `posX`, `posY` and `center_window`; when the
+  game changes resolution, the window keeps its centre.
+
+### Picture
+
+- **`shader`** takes DOSBox's values `crt-auto`, `sharp`, `nearest` and
+  `bilinear`. They all use the layout code in `src/crt_auto.c`, with
+  `viewport`, `aspect` and `integer_scaling`, which is why the old scaling
+  settings can go. As in DOSBox, `integer_scaling=auto` only snaps with
+  crt-auto, and the colour adjustments apply with every shader.
+- **`renderer=gdi`** uses the same layout, nearest neighbour, without shading
+  or colour adjustments.
+- **Live reload:** `shader` joins the settings reloaded while the game runs.
+  `display`, the `window_*` settings and `renderer` apply at the next start.
+
+### Removed
+
+`windowed`, `fullscreen`, `width`, `height`, `maintas`, `aspect_ratio`,
+`boxing`, `d3d9_filter`, libretro shader paths, `toggle_borderless`,
+`toggle_upscaled`, `posX`, `posY`, `center_window`, `border`, `resizable`,
+`savesettings`, and the renderers `openglcore`, `direct3d9` and
+`direct3d9on12`. (`inject_resolution` and `vhack` go too; see the feature
+table.)
+
+### Old settings
+
+An old key is read when its new one isn't set, with a line in the log. The
+generated `directcrt.ini` only has the new keys, and the game profiles in
+`src/config.c` are rewritten to them.
+
+| Old | New |
+|---|---|
+| `windowed=auto` (with either `fullscreen`) | `display=auto` |
+| `windowed=true` | `display=window` |
+| `windowed=true` with `fullscreen=true` (borderless) | `display=fullscreen` |
+| `windowed=false` (with either `fullscreen`) | `display=fullscreen` |
+| `width`, `height` (not 0) | `window_size=WxHpx` |
+| `boxing=true` | `integer_scaling=vertical` |
+| `maintas`, `aspect_ratio`, `d3d9_filter`, `toggle_borderless`, `toggle_upscaled`, `center_window` | Dropped |
+| `shader=Nearest neighbor`, `Bilinear` | `shader=nearest`, `bilinear` |
+| Other `shader` values (Bicubic, Lanczos, xBR, shader files) | `shader=crt-auto` |
+| `border`, `resizable` | `window_decorations`, `window_resizable` |
+| `posX`, `posY` | `window_position=X,Ypx` (`-32000`: `auto`) |
+| `savesettings=0`, `1`, `2` | `remember_window=off`, `global`, `game` |
+| `renderer=openglcore`, `direct3d9`, `direct3d9on12` | `renderer=auto` |
+
+Old keys never give `original`. `windowed=false` with `fullscreen=false` was a
+mode switch, and it's cnc-ddraw's default, so a copied cnc-ddraw config would
+otherwise keep the no-shading trap. `original` has to be chosen.
+
+### Testing
+
+- Unit tests for parsing `display` and `window_size`, the window size
+  computation, and the translation of old keys.
+- ddtest: its windowed presentation methods open scaled, and its README and
+  help text talk about `display` instead of `windowed`.
+- crt-compare: the windowed cases set `display=window` and
+  `window_size=1920x1080px`, the fullscreen cases `display=fullscreen`. All
+  eight cases, on both renderers, again.
+- By hand: a game in its own window; Alt+Enter with each `display` value;
+  `original` at 320x200 and 640x480; `remember_window`.
 
 ## Phases
 
@@ -181,8 +346,56 @@ prototype already moved the scaling into C, so crt-auto doesn't need it.
    DOSBox-style settings; live reload. Check through DXVK on Windows. Add a
    crt-compare mode that compares the Direct3D 11 and OpenGL renderers
    directly.
-3. **Cleanup.** Apply the feature table; translate old ini keys to the new ones.
-   Before starting, extend ddtest with DirectDraw versions 1, 2, 4 and 7
+   - Done: the Direct3D 11 renderer (`renderer=direct3d11`, and the default
+     for crt-auto with `renderer=auto`) matches DOSBox in all eight
+     crt-compare cases.
+   - Done: shader translation. `tools/shaders/gen_d3d11_shaders.py` turns
+     DOSBox's GLSL into HLSL and bytecode in `src/d3d11_shaders/`, which is
+     committed, so a normal build needs neither the tools nor a shader
+     compiler. fxc needs `/Gis`: without it, it simplifies float maths such as
+     `(x / y) * y` to `x`, but the OpenGL driver keeps the round trip, and
+     its rounding decides which side of a texel boundary some pixels fall
+     (the fake double scan shader).
+   - Done: DOSBox-style settings. `aspect`, `integer_scaling`, `viewport`
+     (all forms: `fit`, `WxH`, `WxHpx`, `N%`, `relative H% V%`),
+     `image_adjustments`, `crt_color_profile`, `brightness`, `contrast`,
+     `gamma`, `digital_contrast`, `black_level`, `saturation`,
+     `color_temperature`, `color_temperature_luma_preserve` and the RGB gains,
+     with DOSBox's values, defaults and invalid-value handling, in
+     `src/crt_auto.c` with unit tests. crt-compare's `SETTINGS` sets them in
+     both programs; non-default sets match DOSBox. One known difference is
+     noise: the `sharp` shader at exactly 1x samples on texel centres, and
+     each GPU path's filter rounding leaks up to 4/255 (OpenGL) or 9/255
+     (Direct3D 11) of a neighbouring line into fine 1-pixel patterns. DOSBox
+     itself has more of it than DirectCRT's OpenGL renderer.
+   - A deliberate difference from DOSBox: `aspect=auto` shows only the low
+     resolution VGA modes (up to 720 wide, below 480 lines, no wider than
+     16:10, such as 320x200 and 640x400) at 4:3. Every other mode has square
+     pixels, so 1280x1024 is shown at 5:4 (DOSBox stretches it to 4:3), as are
+     in-between shapes such as 1280x800. ddtest's geometry pattern uses the
+     same rule.
+   - Done: live reload of crt-auto's settings. A timer on the game's window
+     checks `directcrt.ini` every half second; once a change has settled, it
+     reads those settings again and, if they differ, sets the picture up again
+     (as Alt+Enter does), so the shader tier, picture size, mouse mapping and
+     colours follow. Other settings (`shader`, `renderer`, ...) still need a
+     restart; the overlay's full OSD will apply them live.
+   - Done: a CI job (`shaders` in `build.yml`) checks that the committed
+     shaders match a fresh translation (`gen_d3d11_shaders.py check`). The
+     tool downloads are pinned by SHA-256, and fxc by Windows SDK version
+     (`FXC_SDK`), so the bytecode doesn't change with the SDKs installed.
+   - Done: crt-compare compares DirectCRT's renderers with each other
+     (`REFERENCE=opengl` or `direct3d11`, no DOSBox needed), and runs the
+     tested one through DXVK (`DXVK=<x32 folder>`). Direct3D 11 vs OpenGL:
+     the same in all eight cases. One windowed 800x600 run (`sharp`) was off
+     by up to 3/255 in 1-pixel horizontal patterns; three reruns matched, so
+     it's the `sharp` noise described above. DXVK 3.1.1 vs Windows' Direct3D
+     11 (RTX 5080): the same in all eight cases. The NVIDIA app's performance
+     overlay, when it's on, draws over the bottom of the first fullscreen
+     case's capture; that case then shows as different.
+3. **Cleanup.** First the new display settings (see
+   [Display settings](#display-settings)). Then apply the rest of the feature
+   table. Before that part, extend ddtest with DirectDraw versions 1, 2, 4 and 7
    (`DirectDrawCreate` plus `QueryInterface`, `DDSURFACEDESC`), GDI text on
    surfaces, `WaitForVerticalBlank` plus `Blt`, colour-fill and colour-key
    blits, and palette fades, so it works as a regression test. Also remove
@@ -204,10 +417,12 @@ prototype already moved the scaling into C, so crt-auto doesn't need it.
   four presentation methods, scripted runs (`--start --frames N --log FILE`)
   and PNG dumps (`--dump DIR`). See its README.
 - **crt-compare** (`tools/crt-compare`): shows the same pictures in DirectCRT
-  and DOSBox Staging, captures both and compares them pixel by pixel. The
-  Direct3D 11 renderer has to pass it too.
+  and DOSBox Staging, captures both and compares them pixel by pixel. Both
+  renderers have to pass it, and match each other (`REFERENCE=opengl`).
 - **DXVK on Windows:** put DXVK's `d3d11.dll` and `dxgi.dll` next to
   `ddtest.exe` to run the Direct3D 11 renderer through Vulkan, as under Proton.
+  crt-compare does this with `DXVK=<x32 folder>` and compares the result with
+  Windows' own Direct3D 11.
 - **Real Linux or a Steam Deck** before releases.
 
 ## Open questions
@@ -217,7 +432,6 @@ prototype already moved the scaling into C, so crt-auto doesn't need it.
   scanned and up to 512 pixels wide are pixel doubled (320x200, 320x240,
   400x300 and 512x384 become 640x400, 640x480, 800x600 and 1024x768). Real
   Windows 9x drivers may have differed.
-- The exact name of the plain fullscreen mode.
 - How far to support macOS through CrossOver (best effort for now).
 - Whether the `adjmouse-viewport` branch gets merged or is dropped once the
   presenter lands.

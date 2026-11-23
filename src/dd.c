@@ -9,6 +9,7 @@
 #include "keyboard.h"
 #include "wndproc.h"
 #include "render_d3d9.h"
+#include "render_d3d11.h"
 #include "render_gdi.h"
 #include "render_ogl.h"
 #include "fps_limiter.h"
@@ -654,6 +655,78 @@ HRESULT dd_RestoreDisplayMode()
     return DD_OK;
 }
 
+/* The desktop and its display scale, for crt-auto's 'viewport' sizes */
+static CRT_AUTO_DISPLAY dd_crt_auto_display()
+{
+    CRT_AUTO_DISPLAY display = { 0 };
+    display.desktop_width = g_ddraw.mode.dmPelsWidth;
+    display.desktop_height = g_ddraw.mode.dmPelsHeight;
+
+    UINT dpi = 0;
+
+    /* Windows 10 1607 and later */
+    typedef UINT(WINAPI* GETDPIFORWINDOWPROC)(HWND);
+    GETDPIFORWINDOWPROC get_dpi_for_window =
+        (GETDPIFORWINDOWPROC)GetProcAddress(GetModuleHandleA("user32.dll"), "GetDpiForWindow");
+
+    if (get_dpi_for_window && g_ddraw.hwnd)
+        dpi = get_dpi_for_window(g_ddraw.hwnd);
+
+    if (!dpi)
+    {
+        HDC dc = GetDC(NULL);
+
+        if (dc)
+        {
+            dpi = GetDeviceCaps(dc, LOGPIXELSX);
+            ReleaseDC(NULL, dc);
+        }
+    }
+
+    display.scale = dpi ? dpi / 96.0f : 1.0f;
+
+    return display;
+}
+
+/* Live reload of crt-auto's settings: called from a timer on the game's
+ * window. When directcrt.ini has new ones, the picture is set up again with
+ * them, as for Alt+Enter */
+void dd_poll_settings()
+{
+    CRT_AUTO_SETTINGS crt;
+
+    if (!cfg_poll_crt_auto_settings(&crt))
+        return;
+
+    if (memcmp(&crt, &g_config.crt, sizeof(crt)) == 0)
+    {
+        TRACE("     crt-auto: settings unchanged\n");
+        return;
+    }
+
+    if (!g_config.crt_auto || !g_ddraw.render.thread || !g_ddraw.width || g_ddraw.bnet_active)
+    {
+        /* For the next display mode */
+        g_config.crt = crt;
+        return;
+    }
+
+    TRACE("     crt-auto: new settings, setting up the picture again\n");
+
+    /* The renderer reads the colour settings while it starts */
+    EnterCriticalSection(&g_ddraw.cs);
+    g_ddraw.render.run = FALSE;
+    ReleaseSemaphore(g_ddraw.render.sem, 1, NULL);
+    LeaveCriticalSection(&g_ddraw.cs);
+
+    WaitForSingleObject(g_ddraw.render.thread, INFINITE);
+    g_ddraw.render.thread = NULL;
+
+    g_config.crt = crt;
+
+    dd_SetDisplayMode(0, 0, 0, 0);
+}
+
 HRESULT dd_SetDisplayMode(DWORD dwWidth, DWORD dwHeight, DWORD dwBPP, DWORD dwFlags)
 {
     if (!dwWidth)
@@ -934,9 +1007,27 @@ HRESULT dd_SetDisplayMode(DWORD dwWidth, DWORD dwHeight, DWORD dwBPP, DWORD dwFl
     if (g_config.crt_auto)
     {
         /* DOSBox Staging's crt-auto picks the shader from the screen pixels per
-         * game line and sizes the picture for it (integer_scaling=auto) */
+         * game line and sizes the picture for it, with its aspect, viewport
+         * and integer_scaling settings */
+        CRT_AUTO_DISPLAY display = dd_crt_auto_display();
+
         g_ddraw.render.crt =
-            crt_auto_calc_layout(g_ddraw.width, g_ddraw.height, g_ddraw.render.width, g_ddraw.render.height);
+            crt_auto_calc_layout(
+                &g_config.crt,
+                &display,
+                g_ddraw.width,
+                g_ddraw.height,
+                g_ddraw.render.width,
+                g_ddraw.render.height);
+
+        if (g_ddraw.render.crt.viewport_rejected)
+        {
+            TRACE(
+                "     crt-auto: the viewport is larger than the %dx%d desktop (scale %.2f), using fit\n",
+                display.desktop_width,
+                display.desktop_height,
+                display.scale);
+        }
 
         g_ddraw.render.viewport.x = g_ddraw.render.crt.x;
         g_ddraw.render.viewport.y = g_ddraw.render.crt.y;
@@ -1049,6 +1140,16 @@ HRESULT dd_SetDisplayMode(DWORD dwWidth, DWORD dwHeight, DWORD dwBPP, DWORD dwFl
     {
         g_ddraw.mouse.rc.right = g_ddraw.render.viewport.width + g_ddraw.mouse.x_adjust;
         g_ddraw.mouse.rc.bottom = g_ddraw.render.viewport.height + g_ddraw.mouse.y_adjust;
+    }
+
+    if (g_config.crt_auto)
+    {
+        /* With 'viewport=relative' the picture can be larger than the window;
+         * keep the cursor in the window */
+        g_ddraw.mouse.rc.left = max(g_ddraw.mouse.rc.left, 0);
+        g_ddraw.mouse.rc.top = max(g_ddraw.mouse.rc.top, 0);
+        g_ddraw.mouse.rc.right = min(g_ddraw.mouse.rc.right, (LONG)g_ddraw.render.width);
+        g_ddraw.mouse.rc.bottom = min(g_ddraw.mouse.rc.bottom, (LONG)g_ddraw.render.height);
     }
 
     if (nonexclusive || (g_config.nonexclusive && !g_config.windowed && g_ddraw.renderer == ogl_render_main))
@@ -1189,6 +1290,15 @@ HRESULT dd_SetDisplayMode(DWORD dwWidth, DWORD dwHeight, DWORD dwBPP, DWORD dwFl
                 g_ddraw.renderer = gdi_render_main;
             }
         }
+        else if (g_ddraw.renderer == d3d11_render_main)
+        {
+            if (!d3d11_create())
+            {
+                d3d11_release();
+                g_ddraw.show_driver_warning = TRUE;
+                g_ddraw.renderer = gdi_render_main;
+            }
+        }
 
         if (lock_mouse || (g_config.fullscreen && real_GetForegroundWindow() == g_ddraw.hwnd))
             mouse_lock();
@@ -1274,6 +1384,15 @@ HRESULT dd_SetDisplayMode(DWORD dwWidth, DWORD dwHeight, DWORD dwBPP, DWORD dwFl
             if (!ogl_create())
             {
                 ogl_release();
+                g_ddraw.show_driver_warning = TRUE;
+                g_ddraw.renderer = gdi_render_main;
+            }
+        }
+        else if (g_ddraw.renderer == d3d11_render_main)
+        {
+            if (!d3d11_create())
+            {
+                d3d11_release();
                 g_ddraw.show_driver_warning = TRUE;
                 g_ddraw.renderer = gdi_render_main;
             }
@@ -1377,6 +1496,9 @@ HRESULT dd_SetDisplayMode(DWORD dwWidth, DWORD dwHeight, DWORD dwBPP, DWORD dwFl
         g_ddraw.render.thread = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)g_ddraw.renderer, NULL, 0, &tid);
         SetThreadPriority(g_ddraw.render.thread, THREAD_PRIORITY_ABOVE_NORMAL);
     }
+
+    /* Live reload of the settings (dd_poll_settings) */
+    SetTimer(g_ddraw.hwnd, IDT_TIMER_RELOAD_SETTINGS, 500, (TIMERPROC)NULL);
 
     if ((dwFlags & SDM_MODE_SET_BY_GAME) && !g_config.infantryhack)
     {
@@ -1727,6 +1849,9 @@ ULONG dd_Release()
            wiped, so nothing would unlock it later if the game keeps running */
         mouse_unlock();
 
+        if (g_ddraw.hwnd)
+            KillTimer(g_ddraw.hwnd, IDT_TIMER_RELOAD_SETTINGS);
+
         if (g_ddraw.bpp)
         {
             cfg_save();
@@ -1762,6 +1887,10 @@ ULONG dd_Release()
         if (g_ddraw.renderer == ogl_render_main)
         {
             ogl_release();
+        }
+        else if (g_ddraw.renderer == d3d11_render_main)
+        {
+            d3d11_release();
         }
 
         if (g_ddraw.render.hdc)
@@ -1954,19 +2083,41 @@ HRESULT dd_CreateEx(GUID* lpGuid, LPVOID* lplpDD, REFIID iid, IUnknown* pUnkOute
             g_config.opengl_core = TRUE;
         }
 
-        /* crt-auto runs DOSBox Staging's shaders, which need a 3.3 core context */
+        /* crt-auto runs DOSBox Staging's shaders: in Direct3D 11, or in OpenGL
+         * with a 3.3 core context */
+        BOOL renderer_auto = _strcmpi(g_config.renderer, "auto") == 0;
+
+        BOOL crt_auto_d3d11 =
+            g_config.crt_auto && renderer_auto && d3d11_is_available();
+
         BOOL crt_auto_ogl =
-            g_config.crt_auto &&
-            (tolower(g_config.renderer[0]) == 'o' || _strcmpi(g_config.renderer, "auto") == 0);
+            g_config.crt_auto && !crt_auto_d3d11 &&
+            (tolower(g_config.renderer[0]) == 'o' || renderer_auto);
 
         if (crt_auto_ogl)
         {
             g_config.opengl_core = TRUE;
         }
 
-        if (crt_auto_ogl && oglu_load_dll())
+        if (crt_auto_d3d11)
+        {
+            g_ddraw.renderer = d3d11_render_main;
+        }
+        else if (crt_auto_ogl && oglu_load_dll())
         {
             g_ddraw.renderer = ogl_render_main;
+        }
+        else if (_strcmpi(g_config.renderer, "direct3d11") == 0)
+        {
+            if (d3d11_is_available())
+            {
+                g_ddraw.renderer = d3d11_render_main;
+            }
+            else
+            {
+                g_ddraw.show_driver_warning = TRUE;
+                g_ddraw.renderer = gdi_render_main;
+            }
         }
         else if (tolower(g_config.renderer[0]) == 'd') /* direct3d9 or direct3d9on12*/
         {

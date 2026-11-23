@@ -16,6 +16,42 @@ primary monitor, or `win:WxH`, in a 1920x1080 window, for 320x200, 320x240,
 minutes. Leave the computer alone while it runs: the captures are of the
 screen.
 
+Set `SETTINGS` to test other crt-auto settings than DOSBox's defaults. They're
+set in both the `directcrt.ini` and DOSBox's `[render]` section, separated by
+`;`, for example:
+
+```
+SETTINGS='viewport=relative 120% 90%;aspect=stretch' tools/crt-compare/run.sh ../crt-work Release fs:320x200
+```
+
+Set `RENDERER=opengl` or `RENDERER=direct3d11` to test one renderer.
+
+Set `REFERENCE=opengl` or `REFERENCE=direct3d11` to compare with DirectCRT
+using that renderer instead of DOSBox, for example the two renderers directly
+(DOSBox isn't needed then):
+
+```
+RENDERER=direct3d11 REFERENCE=opengl tools/crt-compare/run.sh ../crt-work
+```
+
+Set `DXVK` to a folder with DXVK's 32-bit `d3d11.dll` and `dxgi.dll` (the
+`x32` folder of a [release](https://github.com/doitsujin/dxvk/releases)) to run
+the tested DirectCRT's Direct3D 11 through Vulkan, as under Wine and Proton.
+The reference doesn't get them, so this compares DXVK with Windows' own
+Direct3D 11:
+
+```
+DXVK=../dxvk-3.1.1/x32 RENDERER=direct3d11 REFERENCE=direct3d11 tools/crt-compare/run.sh ../crt-work
+```
+
+The summary says whether DXVK was used, and its version (DXVK writes
+`ddtest_d3d11.log` and `ddtest_dxgi.log` next to the program). DXVK also keeps
+a shader cache in `%LOCALAPPDATA%\dxvk`.
+
+Turn off overlays that draw over the screen, such as the NVIDIA app's
+performance overlay: they end up in the captures, and the case shows as
+different.
+
 At the end it lists each case as `same` or `DIFFERENT`. The captures, a
 difference image (`cmp_*_diff.png`, differences x 8) and side-by-side crops
 (`cmp_*_crops.png`, DirectCRT on the left) are in `WORKDIR/captures`.

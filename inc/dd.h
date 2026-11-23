@@ -23,6 +23,7 @@ HRESULT dd_GetVerticalBlankStatus(LPBOOL lpbIsInVB);
 HRESULT dd_RestoreDisplayMode();
 HRESULT dd_SetCooperativeLevel(HWND hwnd, DWORD dwFlags);
 HRESULT dd_SetDisplayMode(DWORD dwWidth, DWORD dwHeight, DWORD dwBPP, DWORD dwFlags);
+void dd_poll_settings();
 HRESULT dd_WaitForVerticalBlank(DWORD dwFlags, HANDLE hEvent);
 HRESULT dd_GetAvailableVidMem(LPDDSCAPS lpDDCaps, LPDWORD lpdwTotal, LPDWORD lpdwFree);
 HRESULT dd_TestCooperativeLevel();

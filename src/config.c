@@ -19,6 +19,8 @@ static BOOL cfg_get_bool(LPCSTR key, BOOL default_value);
 static int cfg_get_int(LPCSTR key, int default_value);
 static DWORD cfg_get_string(LPCSTR key, LPCSTR default_value, LPSTR out_string, DWORD out_size);
 static DWORD cfg_get_game_section(LPSTR buf, DWORD size);
+static void cfg_load_crt_auto_settings(CRT_AUTO_SETTINGS* settings);
+static void cfg_ini_stat(WIN32_FILE_ATTRIBUTE_DATA* data);
 
 #define GET_INT(a,b,c) a = cfg_get_int(b, c); TRACE("%s=%d\n", b, a)
 #define GET_BOOL(a,b,c) a = cfg_get_bool(b, c); TRACE("%s=%s\n", b, a ? "true" : "false")
@@ -27,9 +29,15 @@ static DWORD cfg_get_game_section(LPSTR buf, DWORD size);
 CNCDDRAWCONFIG g_config =
     { .window_rect = {.left = -32000, .top = -32000, .right = 0, .bottom = 0 } };
 
+/* directcrt.ini as last seen, for the live reload */
+static WIN32_FILE_ATTRIBUTE_DATA g_ini_seen;
+static BOOL g_ini_changed;
+
 void cfg_load()
 {
     cfg_init();
+    cfg_ini_stat(&g_ini_seen);
+    g_ini_changed = FALSE;
 
     /* Optional settings */ 
 
@@ -51,6 +59,7 @@ void cfg_load()
     GET_BOOL(g_config.adjmouse, "adjmouse", TRUE);
     GET_STRING("shader", "Shaders\\interpolation\\catmull-rom-bilinear.glsl", g_config.shader, sizeof(g_config.shader));
     g_config.crt_auto = _stricmp(g_config.shader, "crt-auto") == 0;
+    cfg_load_crt_auto_settings(&g_config.crt);
     GET_INT(g_config.window_rect.left, "posX", -32000);
     GET_INT(g_config.window_rect.top, "posY", -32000);
     GET_STRING("renderer", "auto", g_config.renderer, sizeof(g_config.renderer));
@@ -185,6 +194,51 @@ void cfg_save()
 
     /* The windowed/fullscreen state isn't saved: Alt+Enter lasts until the game
        exits, so every start uses the configured mode */
+
+    /* Our own change, not one to reload */
+    cfg_ini_stat(&g_ini_seen);
+}
+
+static void cfg_ini_stat(WIN32_FILE_ATTRIBUTE_DATA* data)
+{
+    if (!GetFileAttributesExA(g_config.ini_path, GetFileExInfoStandard, data))
+        memset(data, 0, sizeof(*data));
+}
+
+/* Live reload. Called every half second or so while the game runs: when
+ * directcrt.ini has changed and then stayed the same for a call (an editor
+ * may write it in several steps), reads crt-auto's settings from it again
+ * into 'settings' and returns TRUE. The other settings need a restart */
+BOOL cfg_poll_crt_auto_settings(CRT_AUTO_SETTINGS* settings)
+{
+    if (!g_config.ini_path[0])
+        return FALSE;
+
+    WIN32_FILE_ATTRIBUTE_DATA now;
+    cfg_ini_stat(&now);
+
+    if (CompareFileTime(&now.ftLastWriteTime, &g_ini_seen.ftLastWriteTime) != 0 ||
+        now.nFileSizeLow != g_ini_seen.nFileSizeLow ||
+        now.nFileSizeHigh != g_ini_seen.nFileSizeHigh)
+    {
+        g_ini_seen = now;
+        g_ini_changed = TRUE;
+        return FALSE;
+    }
+
+    /* Deleted, or being replaced */
+    if (!g_ini_changed || !now.nFileSizeLow)
+        return FALSE;
+
+    g_ini_changed = FALSE;
+
+    TRACE("directcrt.ini changed, reading crt-auto's settings again\n");
+
+    ini_create(&g_config.ini, g_config.ini_path);
+    cfg_load_crt_auto_settings(settings);
+    ini_free(&g_config.ini);
+
+    return TRUE;
 }
 
 static void cfg_create_ini()
@@ -227,7 +281,7 @@ static void cfg_create_ini()
             "; Note: Does not have an impact on the game speed, to limit your game speed use 'maxgameticks='\n"
             "maxfps=-1\n"
             "\n"
-            "; Vertical synchronization, enable if you get tearing - (Requires 'renderer=auto/opengl*/direct3d9*')\n"
+            "; Vertical synchronization, enable if you get tearing - (Requires 'renderer=auto/opengl*/direct3d9*/direct3d11')\n"
             "; Note: vsync=true can fix tearing but it will cause input lag\n"
             "vsync=false\n"
             "\n"
@@ -240,14 +294,76 @@ static void cfg_create_ini()
             "; You can specify a full path to a .glsl shader file here or use one of the values listed below\n"
             "; Possible values: Nearest neighbor, Bilinear, Bicubic, Lanczos, xBR-lv2\n"
             "; crt-auto = DOSBox Staging's CRT shading for VGA (prototype). It picks the shader and the picture size\n"
-            ";   itself (maintas, aspect_ratio and boxing are ignored) and uses OpenGL with 'renderer=auto'\n"
+            ";   itself (maintas, aspect_ratio and boxing are ignored) and uses Direct3D 11 with 'renderer=auto'\n"
+            ";   (OpenGL if Direct3D 11 isn't available). It also works with 'renderer=opengl' and 'renderer=direct3d11'\n"
             "shader=Shaders\\interpolation\\catmull-rom-bilinear.glsl\n"
+            "\n"
+            "; The settings below only apply to 'shader=crt-auto'. They have DOSBox Staging's names, values and\n"
+            "; defaults, so a DOSBox config's [render] values can be copied here. An invalid value gets the default\n"
+            "; Changes to them apply while the game runs, when this file is saved; other changes need a restart\n"
+            "\n"
+            "; Aspect ratio correction\n"
+            "; auto, on = show 320x200 and 640x400 at 4:3, as on a CRT monitor; other modes have square pixels\n"
+            ";   (1280x1024 too, unlike in DOSBox, which shows it at 4:3)\n"
+            "; square-pixels, off = no correction; 320x200 and 640x400 look squashed\n"
+            "; stretch = take the shape from the viewport (see 'viewport'), for example to fill a 16:9 screen\n"
+            "aspect=auto\n"
+            "\n"
+            "; Keep the scaling factor a whole number, so the picture still fits in the viewport\n"
+            "; auto = vertical, with 3.5x and 4.5x also allowed, and none above 5x (best for crt-auto)\n"
+            "; vertical = whole numbers vertically; horizontal = whole numbers horizontally; off = fill the viewport\n"
+            "integer_scaling=auto\n"
+            "\n"
+            "; The largest area the picture may use\n"
+            "; fit = the window or screen\n"
+            "; WxH = a size in logical units (e.g. 960x720; with display scaling at 150%, 1440x1080 pixels)\n"
+            "; WxHpx = a size in pixels (e.g. 1440x1080px); N% = a percentage of the desktop (e.g. 80%)\n"
+            ";   These must fit on the desktop (otherwise 'fit' is used) and shrink to fit a smaller window\n"
+            "; relative H% V% = a 4:3 area fitted to the window, scaled by H and V (20% to 300%). It may go past the\n"
+            ";   window's edges, like a CRT's stretch controls. Use it with 'aspect=stretch' for other shapes\n"
+            "viewport=fit\n"
+            "\n"
+            "; Colour adjustments, as on a CRT monitor; off = the game's raw colours\n"
+            "image_adjustments=on\n"
+            "\n"
+            "; CRT colour profile: auto (p22 for VGA), none, ebu, p22, smpte-c, philips, trinitron\n"
+            "; Note: philips and trinitron are meant for 'color_temperature=6500' and a wide gamut (DCI-P3) display\n"
+            "crt_color_profile=auto\n"
+            "\n"
+            "; Brightness (0 to 100), the monitor's black point; higher raises the blacks\n"
+            "brightness=45\n"
+            "\n"
+            "; Contrast (0 to 100), the monitor's white point; higher also raises the blacks\n"
+            "contrast=65\n"
+            "\n"
+            "; Gamma (-50 to 50), on top of the emulated monitor's own\n"
+            "gamma=0\n"
+            "\n"
+            "; Digital contrast (-50 to 50), applied to the game's colours before the monitor\n"
+            "digital_contrast=0\n"
+            "\n"
+            "; Black level raise (0 to 100), before brightness and contrast; auto = 0 for VGA\n"
+            "black_level=auto\n"
+            "\n"
+            "; Saturation (-50 to 50), applied to the game's colours\n"
+            "saturation=0\n"
+            "\n"
+            "; Colour temperature in Kelvin (3000 to 10000); 6500 is neutral, lower is warmer; auto = 7800 for VGA\n"
+            "color_temperature=auto\n"
+            "\n"
+            "; Keep the brightness when changing the colour temperature (0 to 100); 0 is the most accurate\n"
+            "color_temperature_luma_preserve=0\n"
+            "\n"
+            "; Red, green and blue gain (0 to 200); 100 = unchanged\n"
+            "red_gain=100\n"
+            "green_gain=100\n"
+            "blue_gain=100\n"
             "\n"
             "; Window position, -32000 = center to screen\n"
             "posX=-32000\n"
             "posY=-32000\n"
             "\n"
-            "; Renderer, possible values: auto, opengl, openglcore, gdi, direct3d9, direct3d9on12 (auto = try direct3d9/opengl, fallback = gdi)\n"
+            "; Renderer, possible values: auto, opengl, openglcore, gdi, direct3d9, direct3d9on12, direct3d11 (auto = try direct3d9/opengl, fallback = gdi)\n"
             "renderer=auto\n"
             "\n"
             "; Developer mode (don't lock the cursor)\n"
@@ -265,7 +381,7 @@ static void cfg_create_ini()
             "; Should the window be resizable by the user in windowed mode?\n"
             "resizable=true\n"
             "\n"
-            "; Upscaling filter for the direct3d9* renderers\n"
+            "; Upscaling filter for the direct3d9* renderers (direct3d11 without crt-auto: 0 = nearest-neighbor, else bilinear)\n"
             "; Possible values: 0 = nearest-neighbor, 1 = bilinear, 2 = bicubic, 3 = lanczos (bicubic/lanczos only support 16/32bit color depth games)\n"
             "d3d9_filter=2\n"
             "\n"
@@ -2129,6 +2245,31 @@ static DWORD cfg_get_string(LPCSTR key, LPCSTR default_value, LPSTR buf, DWORD s
     }
 
     return ini_get_string(&g_config.ini, "directcrt", key, default_value, buf, size);
+}
+
+/* crt-auto's settings use DOSBox Staging's names, values and defaults. An
+ * invalid value gets the default, as in DOSBox */
+static void cfg_load_crt_auto_settings(CRT_AUTO_SETTINGS* settings)
+{
+    *settings = crt_auto_default_settings();
+
+    for (int i = 0; i < crt_auto_setting_count(); i++)
+    {
+        const char* name = crt_auto_setting_name(i);
+        const char* default_value = crt_auto_setting_default(i);
+
+        char value[64];
+        cfg_get_string(name, default_value, value, sizeof(value));
+
+        if (crt_auto_set(settings, name, value))
+        {
+            TRACE("%s=%s\n", name, value);
+        }
+        else
+        {
+            TRACE("%s=%s is invalid, using %s\n", name, value, default_value);
+        }
+    }
 }
 
 static BOOL cfg_get_bool(LPCSTR key, BOOL default_value)

@@ -45,10 +45,109 @@ typedef struct CRT_AUTO_LAYOUT
     int y;
     int width;
     int height;
+
+    /* The viewport setting was larger than the desktop: DOSBox rejects it and
+     * uses 'fit', and so does this */
+    int viewport_rejected;
 } CRT_AUTO_LAYOUT;
 
-/* mode: the game's resolution. canvas: the area the picture goes in */
-CRT_AUTO_LAYOUT crt_auto_calc_layout(int mode_width, int mode_height, int canvas_width, int canvas_height);
+/* The DOSBox Staging [render] settings crt-auto uses, with DOSBox's names
+ * and values (see crt_auto_set) */
+
+typedef enum CRT_ASPECT
+{
+    CRT_ASPECT_AUTO = 0,      /* aspect = auto: 4:3, like a VGA monitor */
+    CRT_ASPECT_SQUARE_PIXELS, /* aspect = square-pixels */
+    CRT_ASPECT_STRETCH        /* aspect = stretch: fill the viewport */
+} CRT_ASPECT;
+
+typedef enum CRT_INTEGER_SCALING
+{
+    CRT_INTEGER_SCALING_AUTO = 0, /* whole and half steps, for the CRT shaders only */
+    CRT_INTEGER_SCALING_VERTICAL,
+    CRT_INTEGER_SCALING_HORIZONTAL,
+    CRT_INTEGER_SCALING_OFF
+} CRT_INTEGER_SCALING;
+
+typedef enum CRT_VIEWPORT_MODE
+{
+    CRT_VIEWPORT_FIT = 0,      /* viewport = fit: the whole canvas */
+    CRT_VIEWPORT_LIMIT,        /* viewport = WxH: at most this size, in logical units */
+    CRT_VIEWPORT_LIMIT_PX,     /* viewport = WxHpx: at most this size, in pixels */
+    CRT_VIEWPORT_DESKTOP,      /* viewport = N%: at most N% of the desktop */
+    CRT_VIEWPORT_RELATIVE      /* viewport = relative H% V%: a 4:3 box in the canvas, scaled */
+} CRT_VIEWPORT_MODE;
+
+typedef struct CRT_VIEWPORT
+{
+    CRT_VIEWPORT_MODE mode;
+
+    /* LIMIT and LIMIT_PX: the size. DESKTOP: the fraction in width (0.01 to
+     * 1). RELATIVE: the horizontal and vertical scale (0.2 to 3) */
+    float width;
+    float height;
+} CRT_VIEWPORT;
+
+#define CRT_AUTO_SETTING_AUTO (-1000)
+
+typedef struct CRT_AUTO_SETTINGS
+{
+    CRT_ASPECT aspect;
+    CRT_INTEGER_SCALING integer_scaling;
+    CRT_VIEWPORT viewport;
+
+    /* Image adjustments, in the settings' own ranges. CRT_AUTO_SETTING_AUTO
+     * where 'auto' is allowed */
+    int image_adjustments;               /* on/off */
+    int crt_color_profile;               /* auto, or 0 none, 1 EBU, 2 P22, 3 SMPTE-C, 4 Philips, 5 Trinitron */
+    int brightness;                      /* 0 to 100 */
+    int contrast;                        /* 0 to 100 */
+    int gamma;                           /* -50 to 50 */
+    int digital_contrast;                /* -50 to 50 */
+    int black_level;                     /* auto, or 0 to 100 */
+    int saturation;                      /* -50 to 50 */
+    int color_temperature;               /* auto, or 3000 to 10000 K */
+    int color_temperature_luma_preserve; /* 0 to 100 */
+    int red_gain;                        /* 0 to 200 */
+    int green_gain;
+    int blue_gain;
+} CRT_AUTO_SETTINGS;
+
+/* DOSBox Staging's defaults */
+CRT_AUTO_SETTINGS crt_auto_default_settings(void);
+
+/* The settings' names, and their defaults as text, for i = 0 to
+ * crt_auto_setting_count() - 1 */
+int crt_auto_setting_count(void);
+const char* crt_auto_setting_name(int i);
+const char* crt_auto_setting_default(int i);
+
+/* Sets a setting from its text, as DOSBox Staging reads it. Returns 1 when
+ * the value is valid; otherwise sets the default and returns 0 (DOSBox shows
+ * a warning and uses the default). Also returns 0 for a name that isn't a
+ * crt-auto setting, and changes nothing */
+int crt_auto_set(CRT_AUTO_SETTINGS* settings, const char* name, const char* value);
+
+/* The display the canvas is on: the desktop size in pixels and the display
+ * scale (DPI / 96), for viewport sizes in logical units or relative to the
+ * desktop */
+typedef struct CRT_AUTO_DISPLAY
+{
+    int desktop_width;
+    int desktop_height;
+    float scale;
+} CRT_AUTO_DISPLAY;
+
+/* mode: the game's resolution. canvas: the area the picture goes in.
+ * settings and display can be NULL: DOSBox's defaults, and a desktop the size
+ * of the canvas at 100% */
+CRT_AUTO_LAYOUT crt_auto_calc_layout(
+    const CRT_AUTO_SETTINGS* settings,
+    const CRT_AUTO_DISPLAY* display,
+    int mode_width,
+    int mode_height,
+    int canvas_width,
+    int canvas_height);
 
 const char* crt_auto_shader_name(CRT_SHADER shader);
 
@@ -103,8 +202,9 @@ typedef struct CRT_AUTO_COLOR
     float blue_gain;                       /* BLUE_GAIN */
 } CRT_AUTO_COLOR;
 
-/* DOSBox Staging's defaults with crt-auto on a VGA mode: P22 phosphors,
- * 7800 K, no black level boost, sRGB output */
-CRT_AUTO_COLOR crt_auto_vga_color(void);
+/* The shader values for the settings with crt-auto on a VGA mode, where
+ * 'auto' means P22 phosphors, 7800 K and no black level boost. Output is
+ * sRGB. settings can be NULL for DOSBox's defaults */
+CRT_AUTO_COLOR crt_auto_vga_color(const CRT_AUTO_SETTINGS* settings);
 
 #endif

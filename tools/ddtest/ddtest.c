@@ -158,7 +158,6 @@ static struct
     int pan_x, pan_y;     /* image patterns: Ctrl+arrows move the picture */
     POINT window_pos;     /* where the next windowed test window goes, if have_window_pos */
     BOOL have_window_pos;
-    double native_aspect; /* the desktop's width/height: a fullscreen picture fills that shape */
     HWND restart_focus;   /* the panel control to give the focus back to after it */
     Settings cur;
     Canvas canvas;
@@ -850,15 +849,16 @@ static void render_frame(void)
 
     /* The shape of the screen the picture fills, for the patterns that should
        look round or square. Windowed: the window, so square pixels.
-       Fullscreen: the display, when the mode has its shape (a 1280 x 720
-       mode on a 16:9 display); any other mode is taken to be shown on a
-       4:3 screen, as in the days of these games. */
+       Fullscreen: square pixels too (1:1, 1280 x 1024 included), except for
+       the low resolution VGA modes (up to 720 wide, below 480 lines, no
+       wider than 16:10: 320 x 200, 640 x 400), which were shown on a 4:3
+       screen. That's crt-auto's 'aspect=auto' rule. */
     double mode_aspect = (double)g.cur.width / g.cur.height;
-    if (g.cur.present == PRESENT_WINDOWED ||
-        (g.native_aspect > 0 && fabs(mode_aspect - g.native_aspect) < 0.01))
-        g.canvas.screen_aspect = mode_aspect;
-    else
+    if (g.cur.present != PRESENT_WINDOWED &&
+        g.cur.width <= 720 && g.cur.height < 480 && g.cur.width * 10 <= g.cur.height * 16)
         g.canvas.screen_aspect = 0; /* 4:3 */
+    else
+        g.canvas.screen_aspect = mode_aspect;
 
     pattern_draw(g.cur.pattern, &g.canvas, &ctx);
 
@@ -2404,14 +2404,6 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
         CoUninitialize();
         return rc;
     }
-
-    /* The desktop mode is the display's own shape (asked before a wrapper is
-       loaded, as one may change what EnumDisplaySettings reports) */
-    DEVMODEA dm;
-    ZeroMemory(&dm, sizeof(dm));
-    dm.dmSize = sizeof(dm);
-    if (EnumDisplaySettingsA(NULL, ENUM_REGISTRY_SETTINGS, &dm) && dm.dmPelsWidth && dm.dmPelsHeight)
-        g.native_aspect = (double)dm.dmPelsWidth / dm.dmPelsHeight;
 
     load_ddraw();
 

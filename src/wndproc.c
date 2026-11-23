@@ -269,6 +269,15 @@ LRESULT CALLBACK fake_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam
             util_set_window_rect(0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
             return 0;
         }
+        case IDT_TIMER_RELOAD_SETTINGS:
+        {
+            /* Not while the window is being resized: that sets up the picture
+               again when it ends */
+            if (!in_size_move)
+                dd_poll_settings();
+
+            return 0;
+        }
         }
         break;
     }

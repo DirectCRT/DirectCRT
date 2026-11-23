@@ -1,6 +1,7 @@
-"""Compares a DirectCRT capture with a DOSBox Staging capture of the same image.
+"""Compares a DirectCRT capture with a capture of the same image from DOSBox
+Staging or from DirectCRT with another renderer (the reference).
 
-usage: python -I compare.py DIRECTCRT.png DOSBOX.png OUTPREFIX [x y w h]
+usage: python -I compare.py DIRECTCRT.png REFERENCE.png OUTPREFIX [x y w h]
 
 Finds the picture in each (the bounding box of non-black pixels), lines them
 up (DOSBox's forced-borderless fullscreen window can put its picture a pixel
@@ -32,7 +33,7 @@ b = np.asarray(Image.open(b_path).convert('RGB')).astype(np.int16)
 assert a.shape == b.shape, (a.shape, b.shape)
 
 print('DirectCRT picture at', bbox(a))
-print('DOSBox    picture at', bbox(b))
+print('Reference picture at', bbox(b))
 
 if len(sys.argv) > 4:
     x, y, w, h = (int(v) for v in sys.argv[4:8])
@@ -49,7 +50,7 @@ for dy in range(-2, 3):
         if best is None or m < best[0]:
             best = (m, dx, dy)
 _, odx, ody = best
-print('DOSBox offset from DirectCRT: dx=%d dy=%d' % (odx, ody))
+print('Reference offset from DirectCRT: dx=%d dy=%d' % (odx, ody))
 b = np.roll(b, (-ody, -odx), axis=(0, 1))
 
 d = np.abs(a - b)

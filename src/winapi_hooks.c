@@ -15,6 +15,7 @@
 #include "render_gdi.h"
 #include "render_d3d9.h"
 #include "render_ogl.h"
+#include "render_d3d11.h"
 #include "directinput.h"
 #include "ddsurface.h"
 #include "ddclipper.h"
@@ -1940,6 +1941,10 @@ BOOL WINAPI fake_DestroyWindow(HWND hWnd)
         else if (g_ddraw.renderer == ogl_render_main)
         {
             ogl_release();
+        }
+        else if (g_ddraw.renderer == d3d11_render_main)
+        {
+            d3d11_release();
         }
     }
 

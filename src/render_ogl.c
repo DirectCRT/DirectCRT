@@ -1150,7 +1150,7 @@ static void ogl_init_crt_auto_uniforms()
     }
 
     const CRT_AUTO_LAYOUT* crt = &g_ddraw.render.crt;
-    CRT_AUTO_COLOR color = crt_auto_vga_color();
+    CRT_AUTO_COLOR color = crt_auto_vga_color(&g_config.crt);
 
     GLuint p = g_ogl.shader1_program;
     glUseProgram(p);

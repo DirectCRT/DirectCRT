@@ -61,3 +61,21 @@ jobs:
         with:
           name: DirectCRT-${{ matrix.configuration }}
           path: DirectCRT-${{ matrix.configuration }}
+
+  shaders:
+    # The Direct3D 11 shaders in src/d3d11_shaders are committed, so a normal
+    # build needs no shader tools. This checks that they still match a fresh
+    # translation of DOSBox's GLSL with the pinned glslang, SPIRV-Cross and
+    # Windows SDK fxc (tools/shaders/gen_d3d11_shaders.py).
+    runs-on: windows-2025
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Get the shader tools
+        shell: bash
+        run: python tools/shaders/gen_d3d11_shaders.py fetch
+
+      - name: Compare with a fresh translation
+        shell: bash
+        run: python tools/shaders/gen_d3d11_shaders.py check
