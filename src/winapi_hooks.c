@@ -1032,7 +1032,7 @@ BOOL WINAPI fake_StretchBlt(
                     strcmp(class_name, "AVIWnd32") == 0 ||
                     strcmp(class_name, "MCIWndClass") == 0))))
     {
-        if (g_ddraw.primary && (g_ddraw.primary->bpp == 16 || g_ddraw.primary->bpp == 32 || g_ddraw.primary->palette))
+        if (g_ddraw.primary && (g_ddraw.primary->bpp != 8 || g_ddraw.primary->palette))
         {
             HDC primary_dc;
             dds_GetDC(g_ddraw.primary, &primary_dc);
@@ -1169,7 +1169,7 @@ BOOL WINAPI fake_BitBlt(
                     strcmp(class_name, "AVIWnd32") == 0 ||
                     strcmp(class_name, "MCIWndClass") == 0))))
     {
-        if (g_ddraw.primary && (g_ddraw.primary->bpp == 16 || g_ddraw.primary->bpp == 32 || g_ddraw.primary->palette))
+        if (g_ddraw.primary && (g_ddraw.primary->bpp != 8 || g_ddraw.primary->palette))
         {
             HDC primary_dc;
             dds_GetDC(g_ddraw.primary, &primary_dc);
@@ -1270,7 +1270,7 @@ int WINAPI fake_SetDIBitsToDevice(
                     strcmp(class_name, "AVIWnd32") == 0 ||
                     strcmp(class_name, "MCIWndClass") == 0))))
     {
-        if (g_ddraw.primary && (g_ddraw.primary->bpp == 16 || g_ddraw.primary->bpp == 32 || g_ddraw.primary->palette))
+        if (g_ddraw.primary && (g_ddraw.primary->bpp != 8 || g_ddraw.primary->palette))
         {
             HDC primary_dc;
             dds_GetDC(g_ddraw.primary, &primary_dc);
@@ -1365,7 +1365,7 @@ int WINAPI fake_StretchDIBits(
                     strcmp(class_name, "AVIWnd32") == 0 ||
                     strcmp(class_name, "MCIWndClass") == 0))))
     {
-        if (g_ddraw.primary && (g_ddraw.primary->bpp == 16 || g_ddraw.primary->bpp == 32 || g_ddraw.primary->palette))
+        if (g_ddraw.primary && (g_ddraw.primary->bpp != 8 || g_ddraw.primary->palette))
         {
             HDC primary_dc;
             dds_GetDC(g_ddraw.primary, &primary_dc);

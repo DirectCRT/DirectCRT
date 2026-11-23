@@ -56,7 +56,7 @@ DWORD WINAPI gdi_render_main(void)
             g_ddraw.primary->bpp == g_ddraw.bpp &&
             g_ddraw.primary->width == g_ddraw.width &&
             g_ddraw.primary->height == g_ddraw.height &&
-            (g_ddraw.bpp == 16 || g_ddraw.bpp == 32 || g_ddraw.primary->palette))
+            (g_ddraw.bpp != 8 || g_ddraw.primary->palette))
         {
             if (g_config.lock_surfaces)
                 EnterCriticalSection(&g_ddraw.primary->cs);

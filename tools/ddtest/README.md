@@ -80,10 +80,9 @@ The surfaces, surface descriptions and calls are that version's: version 1
 sets the display mode without a refresh rate, and versions 1 and 2 restore
 lost surfaces one by one, having no `RestoreAllSurfaces`.
 
-24-bit works only windowed through DirectCRT: neither DirectCRT nor Windows' own
-DirectDraw on current graphics cards offers 24-bit display modes, and Windows'
-DirectDraw can't `Blt` a 24-bit surface to the desktop either. ddtest says so
-when it happens.
+DirectCRT offers 24-bit display modes. Windows' own DirectDraw on current
+graphics cards doesn't, and can't `Blt` a 24-bit surface to the desktop
+either; ddtest says so when it happens.
 
 ## Patterns
 
@@ -140,7 +139,7 @@ ddtest --size 320x240 --bpp 8 --present flip --pattern grid --start --frames 300
 ## Regression test
 
 `regress.ps1` runs the blits pattern with every interface version (1, 2, 4,
-7), presentation method and bit depth (8, 16, 32; windowed once, at the
+7), presentation method and bit depth (8, 16, 24, 32; windowed once, at the
 desktop's), and prints a table:
 
 ```

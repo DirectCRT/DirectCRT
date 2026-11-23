@@ -238,7 +238,7 @@ static void ogl_build_programs()
     {
         g_ogl.main_program = oglu_build_program(PASSTHROUGH_VERT_SHADER, RGB555_FRAG_SHADER, core_profile);
     }
-    else if (g_ddraw.bpp == 16 || g_ddraw.bpp == 32)
+    else if (g_ddraw.bpp == 16 || g_ddraw.bpp == 24 || g_ddraw.bpp == 32)
     {
         g_ogl.main_program = oglu_build_program(PASSTHROUGH_VERT_SHADER, PASSTHROUGH_FRAG_SHADER, core_profile);
     }
@@ -291,6 +291,21 @@ static void ogl_create_textures(int width, int height)
                 g_ogl.surface_tex_height,
                 0,
                 g_ogl.surface_format = GL_BGRA,
+                g_ogl.surface_type = GL_UNSIGNED_BYTE,
+                0);
+        }
+        else if (g_ddraw.bpp == 24)
+        {
+            /* Rows of 24-bit surfaces are padded to 8 bytes, which GL's default
+               unpack alignment of 4 gives with the row length ogl_render sets */
+            glTexImage2D(
+                GL_TEXTURE_2D,
+                0,
+                GL_RGBA8,
+                g_ogl.surface_tex_width,
+                g_ogl.surface_tex_height,
+                0,
+                g_ogl.surface_format = GL_BGR,
                 g_ogl.surface_type = GL_UNSIGNED_BYTE,
                 0);
         }
@@ -880,7 +895,7 @@ static void ogl_render()
             g_ddraw.primary->bpp == g_ddraw.bpp &&
             g_ddraw.primary->width == g_ddraw.width &&
             g_ddraw.primary->height == g_ddraw.height &&
-            (g_ddraw.bpp == 16 || g_ddraw.bpp == 32 || g_ddraw.primary->palette))
+            (g_ddraw.bpp != 8 || g_ddraw.primary->palette))
         {
             if (g_config.lock_surfaces)
                 EnterCriticalSection(&g_ddraw.primary->cs);

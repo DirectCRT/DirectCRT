@@ -875,8 +875,8 @@ static BOOL start(const Settings* s)
         if (!dd_ok(hr, "SetDisplayMode"))
         {
             if (s->bpp == 24)
-                append_error(". This ddraw.dll has no 24-bit display modes: DirectCRT doesn't offer them, "
-                             "and neither does Windows' own DirectDraw on current graphics cards.");
+                append_error(". This ddraw.dll has no 24-bit display modes: Windows' own DirectDraw "
+                             "doesn't offer them on current graphics cards (DirectCRT does).");
             else if (hr == DDERR_INVALIDMODE || hr == DDERR_UNSUPPORTEDMODE)
                 append_error(". This ddraw.dll doesn't offer that mode; List shows the ones it does.");
             return FALSE;

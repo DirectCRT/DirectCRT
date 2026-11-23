@@ -236,11 +236,6 @@ HRESULT dds_Blt(
 
     if (dst_buf && (dwFlags & DDBLT_COLORFILL) && lpDDBltFx && dst_w > 0 && dst_h > 0)
     {
-        if (This->bpp == 24)
-        {
-            TRACE_EXT("     NOT_IMPLEMENTED This->bpp=%u, dwFillColor=%08X\n", This->bpp, lpDDBltFx->dwFillColor);
-        }
-
         blt_colorfill(
             dst_buf,
             dst_x,
@@ -265,8 +260,6 @@ HRESULT dds_Blt(
         BOOL mirror_up_down = got_fx && (lpDDBltFx->dwDDFX & DDBLTFX_MIRRORUPDOWN);
 
         if (This->bpp != src_surface->bpp || 
-            This->bpp == 24 ||
-            src_surface->bpp == 24 ||
             (is_stretch_blt && This == src_surface))
         {
             TRACE_EXT("     NOT_IMPLEMENTED This->bpp=%u, src_surface->bpp=%u\n", This->bpp, src_surface->bpp);
@@ -569,9 +562,7 @@ HRESULT dds_BltFast(
 
     if (src_surface && dst_w > 0 && dst_h > 0)
     {
-        if (This->bpp != src_surface->bpp ||
-            This->bpp == 24 ||
-            src_surface->bpp == 24)
+        if (This->bpp != src_surface->bpp)
         {
             TRACE_EXT("     NOT_IMPLEMENTED This->bpp=%u, src_surface->bpp=%u\n", This->bpp, src_surface->bpp);
 

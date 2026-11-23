@@ -20,7 +20,7 @@ param(
     [string]$Size = "640x480",
     [string]$Versions = "1,2,4,7",
     [string]$Methods = "flip,blt,vblank,lock,windowed",
-    [string]$Depths = "8,16,32"
+    [string]$Depths = "8,16,24,32"
 )
 $ErrorActionPreference = "Stop"
 # Comma-separated: powershell -File passes "1,7" as one string

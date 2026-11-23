@@ -707,6 +707,7 @@ static BOOL d3d11_create_resources()
     }
     else
     {
+        /* 32-bit, and 24-bit converted on upload (DXGI has no 24-bit format) */
         format = DXGI_FORMAT_B8G8R8A8_UNORM;
         ps = d3d11_ps_convert_bgra32;
         ps_size = sizeof(d3d11_ps_convert_bgra32);
@@ -1023,18 +1024,35 @@ static void d3d11_upload()
         if (SUCCEEDED(ID3D11DeviceContext_Map(
             g_d3d11.ctx, (ID3D11Resource*)g_d3d11.surface_tex, 0, D3D11_MAP_WRITE_DISCARD, 0, &map)))
         {
-            blt_clean(
-                map.pData,
-                0,
-                0,
-                g_ddraw.primary->width,
-                g_ddraw.primary->height,
-                map.RowPitch,
-                g_ddraw.primary->surface,
-                0,
-                0,
-                g_ddraw.primary->pitch,
-                g_ddraw.primary->bpp);
+            if (g_ddraw.primary->bpp == 24)
+            {
+                blt_bgr888_to_bgra8888(
+                    map.pData,
+                    0,
+                    0,
+                    g_ddraw.primary->width,
+                    g_ddraw.primary->height,
+                    map.RowPitch,
+                    g_ddraw.primary->surface,
+                    0,
+                    0,
+                    g_ddraw.primary->pitch);
+            }
+            else
+            {
+                blt_clean(
+                    map.pData,
+                    0,
+                    0,
+                    g_ddraw.primary->width,
+                    g_ddraw.primary->height,
+                    map.RowPitch,
+                    g_ddraw.primary->surface,
+                    0,
+                    0,
+                    g_ddraw.primary->pitch,
+                    g_ddraw.primary->bpp);
+            }
 
             ID3D11DeviceContext_Unmap(g_d3d11.ctx, (ID3D11Resource*)g_d3d11.surface_tex, 0);
         }
@@ -1090,7 +1108,7 @@ static void d3d11_render()
             g_ddraw.primary->bpp == g_ddraw.bpp &&
             g_ddraw.primary->width == g_ddraw.width &&
             g_ddraw.primary->height == g_ddraw.height &&
-            (g_ddraw.bpp == 16 || g_ddraw.bpp == 32 || g_ddraw.primary->palette))
+            (g_ddraw.bpp != 8 || g_ddraw.primary->palette))
         {
             if (g_config.lock_surfaces)
                 EnterCriticalSection(&g_ddraw.primary->cs);

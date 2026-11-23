@@ -116,7 +116,7 @@ What we take:
 | Compatibility settings (`nonexclusive`, `singlecpu`, `fixchilds`, `guard_lines`, `fake_mode`, `win_version`, `hook`, ...) | Keep, on an advanced page |
 | Game-specific hacks (`armadahack`, `tshack`, ...) | Removed in phase 3 with the profiles, which were the only thing that set them. The fixes cnc-ddraw applies by itself (Battle.net dialogs, StarCraft's and Red Alert's cursor, Age of Empires II's text boxes, Claw) stay |
 | Window modes, Alt+Enter, saved window position, `toggle_borderless`, `toggle_upscaled` | Done in phase 3: replaced with `display` and the `window_*` settings (see [Display settings](#display-settings)). Windowed games keep the desktop's bit depth (32-bit) from phase 1; `windowed_bpp=16` brings the old 16-bit back |
-| Display modes: 8, 16 and 32-bit; `SetDisplayMode` rejects 24-bit | Add 24-bit in the presenter (convert to 32-bit on upload); some games use it |
+| Display modes: 8, 16, 24 and 32-bit | Done: 24-bit added (Direct3D 11 converts to 32-bit on upload, OpenGL and GDI take it as is); some games use it |
 | Plain "Fullscreen", which switches the monitor to the game's own resolution | Keep as `display=original`, opt-in, with help text saying the monitor gets the game's resolution and there's no CRT shading |
 | Frame limiter and VSync (`maxfps`, `limiter_type`, `maxgameticks`, `minfps`, `vsync`) | Keep |
 | Mouse (`adjmouse`, cursor-unlock hotkeys, cursor fixes) | Keep, driven by the new scaling code |
@@ -431,6 +431,14 @@ otherwise keep the no-shading trap. `original` has to be chosen.
      depths: all 52 runs pass on DirectCRT, and on Windows' own DirectDraw
      in the modes it offers. Deliberately wrong colour-key and fill values
      make the check fail.
+   - Done: 24-bit display modes. `SetDisplayMode` accepts 24, and
+     `EnumDisplayModes` lists 24-bit when the game asks for it, is already
+     in a 24-bit mode, or with `resolutions=full`, so other games' mode
+     lists don't change. Blits, colour fills and colour keys work on
+     3-byte pixels; Direct3D 11 converts to BGRA on upload, OpenGL uploads
+     `GL_BGR`, GDI draws the DIB as is, and screenshots save it. The picture
+     matches 32-bit on all three renderers, and `regress.ps1` now covers
+     24-bit too (68 runs).
    - Not done yet: when a game resizes its own window, the new size should
      become its new resolution. For now it doesn't.
 4. **Overlay**, in this order: the status OSD; the full OSD with input

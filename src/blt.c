@@ -86,6 +86,20 @@ void blt_copy(
     }
 }
 
+/* 24-bit pixels are three bytes, blue first. A 24-bit surface's pitch needn't be
+   a multiple of 3, so its rows are stepped through in bytes */
+static __forceinline unsigned int blt_get24(const unsigned char* p)
+{
+    return p[0] | (p[1] << 8) | (p[2] << 16);
+}
+
+static __forceinline void blt_put24(unsigned char* p, unsigned int c)
+{
+    p[0] = (unsigned char)c;
+    p[1] = (unsigned char)(c >> 8);
+    p[2] = (unsigned char)(c >> 16);
+}
+
 void blt_clean(
     unsigned char* dst,
     int dst_x,
@@ -289,6 +303,27 @@ void blt_colorkey(
             }
         }
     }
+    else if (bpp == 24)
+    {
+        unsigned int key_l = key_low & 0xFFFFFF;
+        unsigned int key_h = key_high & 0xFFFFFF;
+
+        for (int y = 0; y < dst_h; y++)
+        {
+            unsigned char* d = dst + y * dst_p;
+            unsigned char* s = src + y * src_p;
+
+            for (int x = 0; x < dst_w; x++, d += 3, s += 3)
+            {
+                unsigned int c = blt_get24(s);
+
+                if (c < key_l || c > key_h)
+                {
+                    blt_put24(d, c);
+                }
+            }
+        }
+    }
     else if (bpp == 32)
     {
         unsigned int key_l = key_low & 0xFFFFFF;
@@ -429,6 +464,37 @@ void blt_colorkey_mirror_stretch(
             }
         }
     }
+    else if (bpp == 24)
+    {
+        unsigned int key_l = key_low & 0xFFFFFF;
+        unsigned int key_h = key_high & 0xFFFFFF;
+
+        for (int y = 0; y < dst_h; y++)
+        {
+            int scaled_y = (int)(y * scale_h);
+
+            if (mirror_up_down)
+                scaled_y = src_h - 1 - scaled_y;
+
+            unsigned char* src_row = src + src_x * 3 + src_p * (scaled_y + src_y);
+            unsigned char* dst_row = dst + dst_x * 3 + dst_p * (y + dst_y);
+
+            for (int x = 0; x < dst_w; x++)
+            {
+                int scaled_x = (int)(x * scale_w);
+
+                if (mirror_left_right)
+                    scaled_x = src_w - 1 - scaled_x;
+
+                unsigned int c = blt_get24(src_row + scaled_x * 3);
+
+                if (c < key_l || c > key_h)
+                {
+                    blt_put24(dst_row + x * 3, c);
+                }
+            }
+        }
+    }
     else if (bpp == 32)
     {
         unsigned int key_l = key_low & 0xFFFFFF;
@@ -521,7 +587,7 @@ void blt_colorfill(
         ((bpp == 32 || bpp == 24) &&
             (color & 0xFF) == ((color >> 8) & 0xFF) &&
             (color & 0xFF) == ((color >> 16) & 0xFF) &&
-            (color & 0xFF) == ((color >> 24) & 0xFF)))
+            (bpp == 24 || (color & 0xFF) == ((color >> 24) & 0xFF))))
     {
         if (size == dst_p)
         {
@@ -549,6 +615,21 @@ void blt_colorfill(
         {
             dst += dst_p;
             blt_copy(dst, (void*)first_row, size);
+        }
+    }
+    else if (bpp == 24)
+    {
+        unsigned char* first_row = dst;
+
+        for (int x = 0; x < dst_w; x++)
+        {
+            blt_put24(first_row + x * 3, color);
+        }
+
+        for (int i = 1; i < dst_h; i++)
+        {
+            dst += dst_p;
+            blt_copy(dst, first_row, size);
         }
     }
     else if (bpp == 32)
@@ -676,6 +757,54 @@ void blt_bgra8888_to_rgba8888(
     }
 }
 
+void blt_bgr888_to_bgra8888(
+    unsigned int* dst,
+    int dst_x,
+    int dst_y,
+    int dst_w,
+    int dst_h,
+    int dst_p,
+    unsigned char* src,
+    int src_x,
+    int src_y,
+    int src_p)
+{
+    for (int y = 0; y < dst_h; y++)
+    {
+        unsigned int* d = (unsigned int*)((unsigned char*)dst + dst_p * (y + dst_y)) + dst_x;
+        unsigned char* s = src + src_p * (y + src_y) + src_x * 3;
+
+        for (int x = 0; x < dst_w; x++, s += 3)
+        {
+            *d++ = 0xFF000000 | blt_get24(s);
+        }
+    }
+}
+
+void blt_bgr888_to_rgba8888(
+    unsigned int* dst,
+    int dst_x,
+    int dst_y,
+    int dst_w,
+    int dst_h,
+    int dst_p,
+    unsigned char* src,
+    int src_x,
+    int src_y,
+    int src_p)
+{
+    for (int y = 0; y < dst_h; y++)
+    {
+        unsigned int* d = (unsigned int*)((unsigned char*)dst + dst_p * (y + dst_y)) + dst_x;
+        unsigned char* s = src + src_p * (y + src_y) + src_x * 3;
+
+        for (int x = 0; x < dst_w; x++, s += 3)
+        {
+            *d++ = 0xFF000000 | (s[0] << 16) | (s[1] << 8) | s[2];
+        }
+    }
+}
+
 void blt_stretch(
     unsigned char* dst,
     int dst_x,
@@ -704,7 +833,39 @@ void blt_stretch(
     int last_y = -1;
     int last_row = -1;
 
-    if (bpp == 8)
+    if (bpp == 24)
+    {
+        unsigned char* last = NULL;
+
+        for (int y = 0; y < dst_h; y++)
+        {
+            int scaled_y = (int)(y * scale_h);
+            unsigned char* dst_row = dst + dst_x * 3 + dst_p * (y + dst_y);
+
+            if (scaled_y == last_y)
+            {
+                blt_copy(dst_row, last, size);
+                continue;
+            }
+
+            last_y = scaled_y;
+            last = dst_row;
+
+            unsigned char* src_row = src + src_x * 3 + src_p * (scaled_y + src_y);
+
+            for (int x = 0; x < dst_w; x++)
+            {
+                int scaled_x = (int)(x * scale_w);
+                unsigned char* sp = src_row + scaled_x * 3;
+                unsigned char* dp = dst_row + x * 3;
+
+                dp[0] = sp[0];
+                dp[1] = sp[1];
+                dp[2] = sp[2];
+            }
+        }
+    }
+    else if (bpp == 8)
     {
         unsigned char* d = (unsigned char*)dst;
         unsigned char* s = (unsigned char*)src;
