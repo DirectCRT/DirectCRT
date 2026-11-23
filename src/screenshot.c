@@ -8,279 +8,241 @@
 #include "lodepng.h"
 #include "blt.h"
 #include "config.h"
+#include "debug.h"
+#include "screenshot.h"
 
-static BOOL ss_screenshot_bmp(char* filename, IDirectDrawSurfaceImpl* src);
+/* The screenshot key asks for both pictures of the next frame: the game's own
+   surface ("raw") and what's on screen with the CRT shader ("crt"). The render
+   thread takes them and a worker thread encodes the PNGs, which takes a while
+   at 4K. */
 
-static BOOL ss_screenshot_8bit(char* filename, IDirectDrawSurfaceImpl* src)
+static volatile LONG g_ss_pending;
+static char g_ss_base[MAX_PATH]; /* render thread only */
+
+typedef struct SS_JOB
 {
-    LodePNGState state;
+    char filename[MAX_PATH];
+    unsigned char* pixels; /* RGBA, or palette indices */
+    unsigned int width;
+    unsigned int height;
+    BOOL indexed;
+    RGBQUAD palette[256];
+} SS_JOB;
 
-    lodepng_state_init(&state);
-
-    for (int i = 0; i < 256; i++)
-    {
-        RGBQUAD* c = &src->palette->data_rgb[i];
-        lodepng_palette_add(&state.info_png.color, c->rgbRed, c->rgbGreen, c->rgbBlue, 255);
-        lodepng_palette_add(&state.info_raw, c->rgbRed, c->rgbGreen, c->rgbBlue, 255);
-    }
-
-    state.info_png.color.colortype = LCT_PALETTE;
-    state.info_png.color.bitdepth = 8;
-    state.info_raw.colortype = LCT_PALETTE;
-    state.info_raw.bitdepth = 8;
-    state.encoder.auto_convert = 0;
-
-    unsigned char* dst_buf = NULL;
-    size_t dst_buf_size = 0;
-
-    unsigned int error = 
-        lodepng_encode(
-            &dst_buf, 
-            &dst_buf_size, 
-            dds_GetBuffer(src), 
-            src->pitch / src->bytes_pp, /* can't specify pitch so we use bitmap real width */
-            src->height,
-            &state);
-
-    if (!error && dst_buf)
-        lodepng_save_file(dst_buf, dst_buf_size, filename);
-
-    lodepng_state_cleanup(&state);
-
-    if (dst_buf)
-        free(dst_buf);
-
-    return !error;
-}
-
-static BOOL ss_screenshot_16bit(char* filename, IDirectDrawSurfaceImpl* src)
+static DWORD WINAPI ss_encode_main(LPVOID param)
 {
-    unsigned int error = TRUE;
-    unsigned int* buf = malloc(src->width * src->height * 4);
+    SS_JOB* job = (SS_JOB*)param;
+    unsigned int error;
 
-    if (buf)
+    if (job->indexed)
     {
-        if (g_config.rgb555)
+        LodePNGState state;
+        lodepng_state_init(&state);
+
+        for (int i = 0; i < 256; i++)
         {
-            blt_rgb555_to_rgba8888(
-                buf,
-                0,
-                0,
-                src->width,
-                src->height,
-                src->width * 4,
-                dds_GetBuffer(src),
-                0,
-                0,
-                src->pitch);
-        }
-        else
-        {
-            blt_rgb565_to_rgba8888(
-                buf,
-                0,
-                0,
-                src->width,
-                src->height,
-                src->width * 4,
-                dds_GetBuffer(src),
-                0,
-                0,
-                src->pitch);
+            RGBQUAD* c = &job->palette[i];
+            lodepng_palette_add(&state.info_png.color, c->rgbRed, c->rgbGreen, c->rgbBlue, 255);
+            lodepng_palette_add(&state.info_raw, c->rgbRed, c->rgbGreen, c->rgbBlue, 255);
         }
 
-        error = lodepng_encode32_file(filename, (unsigned char*)buf, src->width, src->height);
+        state.info_png.color.colortype = LCT_PALETTE;
+        state.info_png.color.bitdepth = 8;
+        state.info_raw.colortype = LCT_PALETTE;
+        state.info_raw.bitdepth = 8;
+        state.encoder.auto_convert = 0;
 
-        free(buf);
+        unsigned char* png = NULL;
+        size_t png_size = 0;
+
+        error = lodepng_encode(&png, &png_size, job->pixels, job->width, job->height, &state);
+
+        if (!error && png)
+            error = lodepng_save_file(png, png_size, job->filename);
+
+        lodepng_state_cleanup(&state);
+        free(png);
     }
-
-    return !error;
-}
-
-static BOOL ss_screenshot_32bit(char* filename, IDirectDrawSurfaceImpl* src)
-{
-    unsigned int error = TRUE;
-    unsigned int* buf = malloc(src->width * src->height * 4);
-
-    if (buf)
+    else
     {
-        blt_bgra8888_to_rgba8888(
-            buf,
-            0,
-            0,
-            src->width,
-            src->height,
-            src->width * 4,
-            dds_GetBuffer(src),
-            0,
-            0,
-            src->pitch);
-
-        error = lodepng_encode32_file(filename, (unsigned char*)buf, src->width, src->height);
-
-        free(buf);
+        error = lodepng_encode32_file(job->filename, job->pixels, job->width, job->height);
     }
 
-    return !error;
+    if (error)
+        TRACE("Screenshot %s failed (lodepng error %u)\n", job->filename, error);
+
+    free(job->pixels);
+    free(job);
+
+    return 0;
 }
 
-static BOOL ss_screenshot_24bit(char* filename, IDirectDrawSurfaceImpl* src)
+static void ss_encode(SS_JOB* job)
 {
-    unsigned int error = TRUE;
-    unsigned int* buf = malloc(src->width * src->height * 4);
+    HANDLE thread = CreateThread(NULL, 0, ss_encode_main, job, CREATE_SUSPENDED, NULL);
 
-    if (buf)
+    if (thread)
     {
-        blt_bgr888_to_rgba8888(
-            buf,
-            0,
-            0,
-            src->width,
-            src->height,
-            src->width * 4,
-            dds_GetBuffer(src),
-            0,
-            0,
-            src->pitch);
-
-        error = lodepng_encode32_file(filename, (unsigned char*)buf, src->width, src->height);
-
-        free(buf);
+        SetThreadPriority(thread, THREAD_PRIORITY_BELOW_NORMAL);
+        ResumeThread(thread);
+        CloseHandle(thread);
     }
-
-    return !error;
+    else
+    {
+        ss_encode_main(job);
+    }
 }
 
-BOOL ss_take_screenshot(IDirectDrawSurfaceImpl* src)
+static SS_JOB* ss_new_job(const char* suffix, unsigned int width, unsigned int height, unsigned int bytes_pp)
 {
-    if (!src || !dds_GetBuffer(src) || !src->width || !src->height)
+    SS_JOB* job = calloc(1, sizeof(SS_JOB));
+
+    if (!job)
+        return NULL;
+
+    job->pixels = malloc((size_t)width * height * bytes_pp);
+
+    if (!job->pixels)
+    {
+        free(job);
+        return NULL;
+    }
+
+    _snprintf(job->filename, sizeof(job->filename) - 1, "%s_%s.png", g_ss_base, suffix);
+    job->width = width;
+    job->height = height;
+
+    return job;
+}
+
+void ss_request()
+{
+    InterlockedExchange(&g_ss_pending, TRUE);
+
+    /* A game that isn't drawing leaves the render thread waiting */
+    if (g_ddraw.render.sem)
+        ReleaseSemaphore(g_ddraw.render.sem, 1, NULL);
+}
+
+BOOL ss_begin()
+{
+    if (!InterlockedExchange(&g_ss_pending, FALSE))
         return FALSE;
 
-    char title[128];
-    char filename[128];
-    char str_time[64];
-    time_t t = time(NULL);
+    char title[sizeof(g_ddraw.title)];
+    strncpy(title, g_ddraw.title, sizeof(title) - 1);
+    title[sizeof(title) - 1] = 0;
 
-    strncpy(title, g_ddraw.title, sizeof(g_ddraw.title));
-
-    for (int i = 0; i < strlen(title); i++)
+    for (char* c = title; *c; c++)
     {
-        if (title[i] == ' ')
+        if (*c == ' ' || strchr("\\/:*?\"<>|", *c))
         {
-            title[i] = '_';
+            *c = '_';
         }
         else
         {
-            title[i] = tolower(title[i]);
+            *c = (char)tolower((unsigned char)*c);
         }
     }
+
+    char str_time[64];
+    time_t t = time(NULL);
+    strftime(str_time, sizeof(str_time), "%Y-%m-%d_%H-%M-%S", localtime(&t));
 
     CreateDirectoryA(g_config.screenshot_dir, NULL);
 
-    strftime(str_time, sizeof(str_time), "%Y-%m-%d_%H-%M-%S", localtime(&t));
-    _snprintf(filename, sizeof(filename) - 1, "%s%s_%s.png", g_config.screenshot_dir, title, str_time);
-
-    if (FILE_EXISTS(filename))
-        return FALSE;
-
-    if (src->bpp == 8 && src->palette)
+    /* Two in the same second get a number */
+    for (int i = 1; i < 100; i++)
     {
-        if (!ss_screenshot_8bit(filename, src))
-        {
-            memcpy(&src->bmi->bmiColors[0], src->palette->data_rgb, 256 * sizeof(int));
+        char raw[MAX_PATH], crt[MAX_PATH];
 
-            return ss_screenshot_bmp(filename, src);
-        }
+        if (i == 1)
+            _snprintf(g_ss_base, sizeof(g_ss_base) - 1, "%s%s_%s", g_config.screenshot_dir, title, str_time);
+        else
+            _snprintf(g_ss_base, sizeof(g_ss_base) - 1, "%s%s_%s_%d", g_config.screenshot_dir, title, str_time, i);
 
-        return TRUE;
+        g_ss_base[sizeof(g_ss_base) - 1] = 0;
+
+        _snprintf(raw, sizeof(raw) - 1, "%s_raw.png", g_ss_base);
+        _snprintf(crt, sizeof(crt) - 1, "%s_crt.png", g_ss_base);
+        raw[sizeof(raw) - 1] = crt[sizeof(crt) - 1] = 0;
+
+        if (!FILE_EXISTS(raw) && !FILE_EXISTS(crt))
+            return TRUE;
     }
-    else if (src->bpp == 16)
-    {
-        if (!ss_screenshot_16bit(filename, src))
-            return ss_screenshot_bmp(filename, src);
 
-        return TRUE;
-    }
-    else if (src->bpp == 24)
-    {
-        if (!ss_screenshot_24bit(filename, src))
-            return ss_screenshot_bmp(filename, src);
-
-        return TRUE;
-    }
-    else if (src->bpp == 32)
-    {
-        if (!ss_screenshot_32bit(filename, src))
-            return ss_screenshot_bmp(filename, src);
-
-        return TRUE;
-    }
-    
     return FALSE;
 }
 
-static BOOL ss_screenshot_bmp(char* filename, IDirectDrawSurfaceImpl* src)
+void ss_save_raw(IDirectDrawSurfaceImpl* src)
 {
-    BOOL result = TRUE;
+    if (!src || !dds_GetBuffer(src) || !src->width || !src->height)
+        return;
 
-    // make sure file extension is correct
-    char* ext = filename + strlen(filename) - 4;
+    unsigned char* surface = dds_GetBuffer(src);
+    SS_JOB* job;
 
-    if (_strcmpi(ext, ".png") == 0)
+    if (src->bpp == 8)
     {
-        strncpy(ext, ".bmp", 5);
+        if (!src->palette || !(job = ss_new_job("raw", src->width, src->height, 1)))
+            return;
+
+        job->indexed = TRUE;
+        memcpy(job->palette, src->palette->data_rgb, sizeof(job->palette));
+
+        for (DWORD y = 0; y < src->height; y++)
+            memcpy(job->pixels + y * src->width, surface + y * src->pitch, src->width);
+    }
+    else
+    {
+        if (!(job = ss_new_job("raw", src->width, src->height, 4)))
+            return;
+
+        unsigned int* dst = (unsigned int*)job->pixels;
+        int dst_p = src->width * 4;
+
+        if (src->bpp == 16 && g_config.rgb555)
+            blt_rgb555_to_rgba8888(dst, 0, 0, src->width, src->height, dst_p, (void*)surface, 0, 0, src->pitch);
+        else if (src->bpp == 16)
+            blt_rgb565_to_rgba8888(dst, 0, 0, src->width, src->height, dst_p, (void*)surface, 0, 0, src->pitch);
+        else if (src->bpp == 24)
+            blt_bgr888_to_rgba8888(dst, 0, 0, src->width, src->height, dst_p, (void*)surface, 0, 0, src->pitch);
+        else if (src->bpp == 32)
+            blt_bgra8888_to_rgba8888(dst, 0, 0, src->width, src->height, dst_p, (void*)surface, 0, 0, src->pitch);
+        else
+        {
+            free(job->pixels);
+            free(job);
+            return;
+        }
     }
 
-    // Create the .BMP file.  
-    HANDLE hf = CreateFile(
-        filename,
-        GENERIC_READ | GENERIC_WRITE,
-        0,
-        NULL,
-        CREATE_ALWAYS,
-        FILE_ATTRIBUTE_NORMAL,
-        (HANDLE)NULL);
+    ss_encode(job);
+}
 
-    if (hf == INVALID_HANDLE_VALUE)
-        return FALSE;
+void ss_save_shaded(const void* pixels, int width, int height, int pitch, BOOL bgra, BOOL bottom_up)
+{
+    if (!pixels || width <= 0 || height <= 0)
+        return;
 
-    PBITMAPINFOHEADER pbih = (PBITMAPINFOHEADER)src->bmi;
-    BITMAPFILEHEADER hdr;
+    SS_JOB* job = ss_new_job("crt", width, height, 4);
 
-    hdr.bfType = 0x4d42;        // 0x42 = "B" 0x4d = "M"  
-    // Compute the size of the entire file.  
-    hdr.bfSize = (DWORD)(sizeof(BITMAPFILEHEADER) + pbih->biSize + pbih->biClrUsed * sizeof(RGBQUAD) + pbih->biSizeImage);
-    hdr.bfReserved1 = 0;
-    hdr.bfReserved2 = 0;
+    if (!job)
+        return;
 
-    // Compute the offset to the array of color indices.  
-    hdr.bfOffBits = (DWORD)sizeof(BITMAPFILEHEADER) + pbih->biSize + pbih->biClrUsed * sizeof(RGBQUAD);
-
-    // Copy the BITMAPFILEHEADER into the .BMP file.  
-    DWORD tmp;
-    if (!WriteFile(hf, (LPVOID)&hdr, sizeof(BITMAPFILEHEADER), (LPDWORD)&tmp, NULL))
+    for (int y = 0; y < height; y++)
     {
-        result = FALSE;
+        const unsigned char* s = (const unsigned char*)pixels + (size_t)pitch * (bottom_up ? height - 1 - y : y);
+        unsigned char* d = job->pixels + (size_t)width * 4 * y;
+
+        for (int x = 0; x < width; x++, s += 4, d += 4)
+        {
+            d[0] = bgra ? s[2] : s[0];
+            d[1] = s[1];
+            d[2] = bgra ? s[0] : s[2];
+            d[3] = 255;
+        }
     }
 
-    // Copy the BITMAPINFOHEADER and RGBQUAD array into the file.  
-    if (!WriteFile(hf, (LPVOID)pbih, sizeof(BITMAPINFOHEADER) + pbih->biClrUsed * sizeof(RGBQUAD), (LPDWORD)&tmp, (NULL)))
-    {
-        result = FALSE;
-    }
-
-    // Copy the array of color indices into the .BMP file.  
-    DWORD cb = pbih->biSizeImage;
-    if (!WriteFile(hf, (LPSTR)dds_GetBuffer(src), (int)cb, (LPDWORD)&tmp, NULL))
-    {
-        result = FALSE;
-    }     
-
-    // Close the .BMP file.  
-    if (!CloseHandle(hf))
-    {
-        result = FALSE;
-    }
-
-    return result;
+    ss_encode(job);
 }

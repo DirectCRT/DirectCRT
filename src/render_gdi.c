@@ -9,7 +9,48 @@
 #include "hook.h"
 #include "debug.h"
 #include "config.h"
+#include "screenshot.h"
 
+
+/* The finished frame, for the screenshot key: copied back from the window */
+static void gdi_screenshot()
+{
+    RECT rc;
+
+    if (!g_ddraw.render.hdc || !real_GetClientRect(g_ddraw.hwnd, &rc) || rc.right <= 0 || rc.bottom <= 0)
+        return;
+
+    BITMAPINFO bmi = { 0 };
+    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth = rc.right;
+    bmi.bmiHeader.biHeight = -rc.bottom;
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
+
+    void* bits = NULL;
+    HBITMAP bmp = CreateDIBSection(g_ddraw.render.hdc, &bmi, DIB_RGB_COLORS, &bits, NULL, 0);
+    HDC dc = CreateCompatibleDC(g_ddraw.render.hdc);
+
+    if (bmp && bits && dc)
+    {
+        HGDIOBJ old = SelectObject(dc, bmp);
+
+        if (real_BitBlt(dc, 0, 0, rc.right, rc.bottom, g_ddraw.render.hdc, 0, 0, SRCCOPY))
+        {
+            GdiFlush();
+            ss_save_shaded(bits, rc.right, rc.bottom, rc.right * 4, TRUE, FALSE);
+        }
+
+        SelectObject(dc, old);
+    }
+
+    if (dc)
+        DeleteDC(dc);
+
+    if (bmp)
+        DeleteObject(bmp);
+}
 
 DWORD WINAPI gdi_render_main(void)
 {
@@ -50,6 +91,8 @@ DWORD WINAPI gdi_render_main(void)
 
         fpsl_frame_start();
 
+        BOOL screenshot = ss_begin();
+
         EnterCriticalSection(&g_ddraw.cs);
 
         if (g_ddraw.primary && 
@@ -60,6 +103,9 @@ DWORD WINAPI gdi_render_main(void)
         {
             if (g_config.lock_surfaces)
                 EnterCriticalSection(&g_ddraw.primary->cs);
+
+            if (screenshot)
+                ss_save_raw(g_ddraw.primary);
 
             if (warning_end_tick)
             {
@@ -149,6 +195,9 @@ DWORD WINAPI gdi_render_main(void)
         }
 
         LeaveCriticalSection(&g_ddraw.cs);
+
+        if (screenshot)
+            gdi_screenshot();
 
         /* Force redraw for GDI games (ClueFinders) */
         if (!g_ddraw.primary)

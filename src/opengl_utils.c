@@ -24,6 +24,7 @@ PFNGLGETERRORPROC glGetError;
 PFNGLGETSTRINGPROC glGetString;
 PFNGLGETTEXIMAGEPROC glGetTexImage;
 PFNGLPIXELSTOREIPROC glPixelStorei;
+PFNGLREADPIXELSPROC glReadPixels;
 PFNGLENABLEPROC glEnable;
 PFNGLCLEARPROC glClear;
 PFNGLBEGINPROC glBegin;
@@ -128,6 +129,7 @@ BOOL oglu_load_dll()
         glGetString = (PFNGLGETSTRINGPROC)real_GetProcAddress(g_oglu_hmodule, "glGetString");
         glGetTexImage = (PFNGLGETTEXIMAGEPROC)real_GetProcAddress(g_oglu_hmodule, "glGetTexImage");
         glPixelStorei = (PFNGLPIXELSTOREIPROC)real_GetProcAddress(g_oglu_hmodule, "glPixelStorei");
+        glReadPixels = (PFNGLREADPIXELSPROC)real_GetProcAddress(g_oglu_hmodule, "glReadPixels");
         glEnable = (PFNGLENABLEPROC)real_GetProcAddress(g_oglu_hmodule, "glEnable");
         glClear = (PFNGLCLEARPROC)real_GetProcAddress(g_oglu_hmodule, "glClear");
 

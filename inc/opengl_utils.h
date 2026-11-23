@@ -51,6 +51,7 @@ extern PFNGLGETERRORPROC glGetError;
 extern PFNGLGETSTRINGPROC glGetString;
 extern PFNGLGETTEXIMAGEPROC glGetTexImage;
 extern PFNGLPIXELSTOREIPROC glPixelStorei;
+extern PFNGLREADPIXELSPROC glReadPixels;
 extern PFNGLENABLEPROC glEnable;
 extern PFNGLCLEARPROC glClear;
 extern PFNGLCREATEPROGRAMPROC glCreateProgram;

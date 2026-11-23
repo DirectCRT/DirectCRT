@@ -433,7 +433,7 @@ static void cfg_create_ini()
             "; Unlock cursor with a middle click (the game doesn't get the click; leave off for games that use the middle button)\n"
             "unlockcursor_middleclick=false\n"
             "\n"
-            "; Screenshot\n"
+            "; Screenshot: saves the game's own picture (_raw.png) and what's on screen (_crt.png)\n"
             "keyscreenshot=0x2C\n"
             "\n"
             "\n"

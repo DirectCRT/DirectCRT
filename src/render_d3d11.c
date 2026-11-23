@@ -14,6 +14,7 @@
 #include "debug.h"
 #include "hook.h"
 #include "config.h"
+#include "screenshot.h"
 #include "dllmain.h"
 #include "d3d11_shaders/d3d11_shaders.h"
 
@@ -1070,6 +1071,51 @@ static void d3d11_upload()
     }
 }
 
+/* The finished frame, for the screenshot key: read back before Present */
+static void d3d11_screenshot()
+{
+    ID3D11Texture2D* back = NULL;
+
+    if (FAILED(IDXGISwapChain1_GetBuffer(g_d3d11.swap_chain, 0, &D3D11_IID_ID3D11Texture2D, (void**)&back)))
+        return;
+
+    D3D11_TEXTURE2D_DESC desc;
+    ID3D11Texture2D_GetDesc(back, &desc);
+
+    BOOL bgra = desc.Format == DXGI_FORMAT_B8G8R8A8_UNORM;
+
+    if (bgra || desc.Format == DXGI_FORMAT_R8G8B8A8_UNORM)
+    {
+        desc.MipLevels = 1;
+        desc.ArraySize = 1;
+        desc.SampleDesc.Count = 1;
+        desc.SampleDesc.Quality = 0;
+        desc.Usage = D3D11_USAGE_STAGING;
+        desc.BindFlags = 0;
+        desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+        desc.MiscFlags = 0;
+
+        ID3D11Texture2D* staging = NULL;
+
+        if (SUCCEEDED(ID3D11Device_CreateTexture2D(g_d3d11.device, &desc, NULL, &staging)))
+        {
+            D3D11_MAPPED_SUBRESOURCE map;
+
+            ID3D11DeviceContext_CopyResource(g_d3d11.ctx, (ID3D11Resource*)staging, (ID3D11Resource*)back);
+
+            if (SUCCEEDED(ID3D11DeviceContext_Map(g_d3d11.ctx, (ID3D11Resource*)staging, 0, D3D11_MAP_READ, 0, &map)))
+            {
+                ss_save_shaded(map.pData, desc.Width, desc.Height, map.RowPitch, bgra, FALSE);
+                ID3D11DeviceContext_Unmap(g_d3d11.ctx, (ID3D11Resource*)staging, 0);
+            }
+
+            ID3D11Texture2D_Release(staging);
+        }
+    }
+
+    ID3D11Texture2D_Release(back);
+}
+
 /* Device removed (driver update or crash, GPU switch): start again */
 static BOOL d3d11_recover()
 {
@@ -1101,6 +1147,7 @@ static void d3d11_render()
         fpsl_frame_start();
 
         BOOL can_draw = d3d11_update_back_buffer();
+        BOOL screenshot = can_draw && ss_begin();
 
         EnterCriticalSection(&g_ddraw.cs);
 
@@ -1114,6 +1161,9 @@ static void d3d11_render()
                 EnterCriticalSection(&g_ddraw.primary->cs);
 
             d3d11_upload();
+
+            if (screenshot)
+                ss_save_raw(g_ddraw.primary);
 
             if (g_config.fixchilds)
             {
@@ -1130,6 +1180,9 @@ static void d3d11_render()
         if (can_draw)
         {
             d3d11_draw_frame();
+
+            if (screenshot)
+                d3d11_screenshot();
 
             UINT sync = g_config.vsync ? 1 : 0;
             UINT flags = !sync && g_d3d11.tearing ? DXGI_PRESENT_ALLOW_TEARING : 0;

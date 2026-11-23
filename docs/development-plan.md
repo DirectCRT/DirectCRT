@@ -120,7 +120,7 @@ What we take:
 | Plain "Fullscreen", which switches the monitor to the game's own resolution | Keep as `display=original`, opt-in, with help text saying the monitor gets the game's resolution and there's no CRT shading |
 | Frame limiter and VSync (`maxfps`, `limiter_type`, `maxgameticks`, `minfps`, `vsync`) | Keep |
 | Mouse (`adjmouse`, cursor-unlock hotkeys, cursor fixes) | Keep, driven by the new scaling code |
-| Screenshots, debug logs, crash dumps | Keep; add a choice of raw or shaded screenshots |
+| Screenshots, debug logs, crash dumps | Keep. Done: the screenshot key saves both the raw and the shaded picture |
 | `renderer` (gdi, opengl, openglcore, direct3d9, direct3d9on12, auto) | Done: Direct3D 11, OpenGL (crt-auto's pipeline only, in a 3.3 core context, without the libretro shader loading and GL 1.x/2.x paths) and GDI. Direct3D 9 is removed; `openglcore`, `direct3d9` and `direct3d9on12` read as `auto` |
 | `shader`, `d3d9_filter`, libretro shader loading | Done: `shader` has DOSBox's values `crt-auto`, `sharp`, `nearest` and `bilinear`, all through crt-auto's pipeline; the rest is removed |
 | `width`, `height`, `maintas`, `aspect_ratio`, `boxing` | Done: replaced with `window_size`, `viewport`, `aspect` and `integer_scaling`, for every shader |
@@ -228,7 +228,8 @@ black borders in the window, as in DOSBox.
   - The window is centred where the game put its own, kept on the screen,
     unless `window_position` says otherwise.
   - When the game resizes its own window, for example from a zoom option in
-    its menu, the new size is its new resolution and is scaled the same way.
+    its menu, the new size isn't treated as a new resolution. That isn't
+    planned until a game needs it (see phase 3).
   - `fixchilds` still turns scaling off when it finds GDI child windows, so
     those games are shown 1:1, as now.
 - **The user can resize the window,** smaller than the game too, as now.
@@ -439,8 +440,29 @@ otherwise keep the no-shading trap. `original` has to be chosen.
      `GL_BGR`, GDI draws the DIB as is, and screenshots save it. The picture
      matches 32-bit on all three renderers, and `regress.ps1` now covers
      24-bit too (68 runs).
-   - Not done yet: when a game resizes its own window, the new size should
-     become its new resolution. For now it doesn't.
+   - Done: screenshots. The key saves two PNGs of the same frame:
+     `<game>_<time>_raw.png`, the game's own surface (8-bit with its
+     palette), and `<game>_<time>_crt.png`, the finished frame as shown,
+     at the window's or screen's size. The render thread takes both, reading
+     the frame back before it's presented (a staging texture, `glReadPixels`,
+     or a copy of the window for GDI), and a worker thread encodes them so
+     a 4K PNG doesn't stall the game. The key wakes the render thread, so it
+     works while the game isn't drawing. The shaded shots from Direct3D 11
+     and OpenGL are the same to within 1 in 99.99% of pixels; the rest is
+     ddtest's frame counter. Once the overlay exists, the shaded shot is
+     taken without it.
+   - Not planned: when a game resizes its own window, making the new size
+     its new resolution. Only games in their own window can do it, mostly
+     windowed-only games with a zoom option, and none we know of needs it.
+     It waits for a real game to design against. Games in their own window
+     stay as they are: scaled by `window_size`, a window with `display=auto`
+     (the default) and fullscreen only with `display=fullscreen` or
+     Alt+Enter.
+     A "virtual desktop" (a fixed 1024x768 screen, shaded as a whole, with
+     the game's windows in it) was considered and rejected: the title bar,
+     menus and dialogs are real windows drawn by Windows, so it would mean
+     capturing them and routing input back, a window manager of its own. A
+     PC emulator running Windows 98 gives that experience.
 4. **Overlay**, in this order: the status OSD; the full OSD with input
    capture; safe mode; the first-start toast and the tour.
 5. **Later.** HDR output first; deinterlacing and dedithering after it, at a

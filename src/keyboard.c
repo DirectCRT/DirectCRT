@@ -93,13 +93,13 @@ LRESULT CALLBACK keyboard_hook_proc(int code, WPARAM wParam, LPARAM lParam)
         {
             if (key_released)
             {
-                ss_take_screenshot(g_ddraw.primary);
+                ss_request();
                 return 1;
             }
         }
         else if (key_triggered)
         {
-            ss_take_screenshot(g_ddraw.primary);
+            ss_request();
             return 1;
         }
     }

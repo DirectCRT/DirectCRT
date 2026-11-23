@@ -11,6 +11,8 @@
 #include "utils.h"
 #include "debug.h"
 #include "dllmain.h"
+#include "hook.h"
+#include "screenshot.h"
 
 
 static HGLRC ogl_create_core_context(HDC hdc);
@@ -864,6 +866,32 @@ static void ogl_gpu_time_end()
 }
 #endif
 
+/* The finished frame, for the screenshot key: read back before SwapBuffers */
+static void ogl_screenshot()
+{
+    RECT rc;
+
+    /* The window's extra row (opengl_y_align) is at the bottom, off the screen */
+    int y = g_ddraw.render.opengl_y_align;
+
+    if (!glReadPixels || !real_GetClientRect(g_ddraw.hwnd, &rc) || rc.right <= 0 || rc.bottom - y <= 0)
+        return;
+
+    int w = rc.right, h = rc.bottom - y;
+    unsigned char* buf = malloc((size_t)w * h * 4);
+
+    if (buf)
+    {
+        glPixelStorei(GL_PACK_ALIGNMENT, 4);
+        glReadPixels(0, y, w, h, GL_RGBA, GL_UNSIGNED_BYTE, buf);
+
+        if (glGetError() == GL_NO_ERROR)
+            ss_save_shaded(buf, w, h, w * 4, FALSE, TRUE);
+
+        free(buf);
+    }
+}
+
 static void ogl_render()
 {
     if (!g_ogl.crt_auto)
@@ -888,6 +916,8 @@ static void ogl_render()
         static int tex_index = 0, pal_index = 0;
 
         fpsl_frame_start();
+
+        BOOL screenshot = ss_begin();
 
         EnterCriticalSection(&g_ddraw.cs);
 
@@ -946,6 +976,9 @@ static void ogl_render()
                 if (row_len != g_ddraw.primary->width)
                     glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
             }
+
+            if (screenshot)
+                ss_save_raw(g_ddraw.primary);
 
             static int error_check_count = 0;
 
@@ -1070,6 +1103,9 @@ static void ogl_render()
 
         if (g_ddraw.bnet_active)
             glClear(GL_COLOR_BUFFER_BIT);
+
+        if (screenshot)
+            ogl_screenshot();
 
         SwapBuffers(g_ogl.hdc);
 
