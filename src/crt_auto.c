@@ -224,8 +224,8 @@ static RECTF restricted_viewport(const CRT_VIEWPORT* v, const CRT_AUTO_DISPLAY* 
 static int is_crt_shader(CRT_SHADER shader)
 {
     /* ShaderDescriptor::EnforceAutoIntegerScaling: the shaders under 'crt/'.
-     * sharp is 'interpolation/sharp' */
-    return shader != CRT_SHADER_SHARP;
+     * sharp, nearest and bilinear are under 'interpolation/' */
+    return shader != CRT_SHADER_SHARP && shader != CRT_SHADER_NEAREST && shader != CRT_SHADER_BILINEAR;
 }
 
 /* RENDER_CalcDrawRectInPixels, before rounding */
@@ -380,8 +380,20 @@ CRT_AUTO_LAYOUT crt_auto_calc_layout(
         layout.pixels_per_scanline = iroundf(r.h) / rh;
     }
 
-    /* GetVgaShader */
-    if (layout.pixels_per_scanline >= 4)
+    /* A fixed shader, or GetVgaShader */
+    if (s->shader == CRT_SHADER_SETTING_SHARP)
+    {
+        layout.shader = CRT_SHADER_SHARP;
+    }
+    else if (s->shader == CRT_SHADER_SETTING_NEAREST)
+    {
+        layout.shader = CRT_SHADER_NEAREST;
+    }
+    else if (s->shader == CRT_SHADER_SETTING_BILINEAR)
+    {
+        layout.shader = CRT_SHADER_BILINEAR;
+    }
+    else if (layout.pixels_per_scanline >= 4)
     {
         layout.shader = CRT_SHADER_HYLLIAN_VGA_4K;
     }
@@ -403,13 +415,15 @@ CRT_AUTO_LAYOUT crt_auto_calc_layout(
         layout.shader = CRT_SHADER_SHARP;
     }
 
-    /* The image the shader gets: sharp forces single scanning and no pixel
-     * doubling, the fake double scan shader forces single scanning */
+    /* The image the shader gets: sharp and nearest force single scanning and
+     * no pixel doubling, the fake double scan shader forces single scanning.
+     * bilinear has neither pragma, so it gets the doubled image */
     {
-        int pd = layout.pixel_doubled && layout.shader != CRT_SHADER_SHARP ? 2 : 1;
+        int single = layout.shader == CRT_SHADER_SHARP || layout.shader == CRT_SHADER_NEAREST;
+        int pd = layout.pixel_doubled && !single ? 2 : 1;
         int ds =
             layout.double_scanned &&
-            layout.shader != CRT_SHADER_SHARP &&
+            !single &&
             layout.shader != CRT_SHADER_VGA_1080P_FAKE_DOUBLE_SCAN ? 2 : 1;
 
         layout.render_width = mode_width * pd;
@@ -447,6 +461,8 @@ const char* crt_auto_shader_name(CRT_SHADER shader)
     case CRT_SHADER_VGA_1080P_FAKE_DOUBLE_SCAN: return "crt/vga-1080p-fake-double-scan";
     case CRT_SHADER_HYLLIAN_VGA_1440P: return "crt/crt-hyllian:vga-1440p";
     case CRT_SHADER_HYLLIAN_VGA_4K: return "crt/crt-hyllian:vga-4k";
+    case CRT_SHADER_NEAREST: return "interpolation/nearest";
+    case CRT_SHADER_BILINEAR: return "interpolation/bilinear";
     default: return "?";
     }
 }
@@ -807,6 +823,7 @@ static int parse_viewport(const char* v, CRT_VIEWPORT* out)
 }
 
 static const char* const g_setting_names[] = {
+    "shader",
     "aspect",
     "integer_scaling",
     "viewport",
@@ -826,6 +843,7 @@ static const char* const g_setting_names[] = {
 };
 
 static const char* const g_setting_defaults[] = {
+    "crt-auto", /* shader */
     "auto", /* aspect */
     "auto", /* integer_scaling */
     "fit",  /* viewport */
@@ -862,6 +880,22 @@ const char* crt_auto_setting_default(int i)
 /* Returns 0 for an invalid value, and changes nothing then */
 static int parse_setting(CRT_AUTO_SETTINGS* s, const char* name, const char* v)
 {
+    if (str_ieq(name, "shader"))
+    {
+        if (str_ieq(v, "crt-auto"))
+            s->shader = CRT_SHADER_SETTING_CRT_AUTO;
+        else if (str_ieq(v, "sharp"))
+            s->shader = CRT_SHADER_SETTING_SHARP;
+        else if (str_ieq(v, "nearest"))
+            s->shader = CRT_SHADER_SETTING_NEAREST;
+        else if (str_ieq(v, "bilinear"))
+            s->shader = CRT_SHADER_SETTING_BILINEAR;
+        else
+            return 0;
+
+        return 1;
+    }
+
     if (str_ieq(name, "aspect"))
     {
         if (is_true(v) || str_ieq(v, "auto"))

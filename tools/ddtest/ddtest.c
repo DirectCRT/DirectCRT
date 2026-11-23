@@ -46,7 +46,7 @@
 enum { PRESENT_FLIP, PRESENT_BLT, PRESENT_LOCK, PRESENT_WINDOWED, PRESENT_COUNT };
 
 /* What the program asks DirectDraw for. DirectCRT follows it with
-   windowed=auto; windowed=true/false override it. */
+   display=auto; display=window/fullscreen override it. */
 static const char* PRESENT_NAMES[PRESENT_COUNT] = {
     "Exclusive fullscreen, page flipping",
     "Exclusive fullscreen, Blt to the primary surface",
@@ -1250,8 +1250,8 @@ static const char* HELP_TEXT =
     "right click clears the marks.";
 
 static const char* PRESENT_NOTE =
-    "This is what the program asks DirectDraw for. DirectCRT follows it with windowed=auto "
-    "(the default); windowed=true or false in directcrt.ini force a window or fullscreen.";
+    "This is what the program asks DirectDraw for. DirectCRT follows it with display=auto "
+    "(the default); display=window or fullscreen in directcrt.ini force a window or fullscreen.";
 
 static const char* IMAGE_NOTE = "Shown 1:1, centred and cropped";
 

@@ -13,7 +13,6 @@
 #include "keyboard.h"
 #include "wndproc.h"
 #include "render_gdi.h"
-#include "render_d3d9.h"
 #include "render_ogl.h"
 #include "render_d3d11.h"
 #include "directinput.h"
@@ -52,31 +51,6 @@ BOOL WINAPI fake_GetCursorPos(LPPOINT lpPoint)
 
         x = min(x, g_ddraw.width - 1);
         y = min(y, g_ddraw.height - 1);
-
-        if (g_config.vhack && 
-            !g_ddraw.isworms2 && 
-            !g_config.devmode && 
-            !g_ddraw.bnet_active && 
-            InterlockedExchangeAdd(&g_ddraw.upscale_hack_active, 0))
-        {
-            int diffx = 0;
-            int diffy = 0;
-
-            if (x > g_ddraw.upscale_hack_width)
-            {
-                diffx = x - g_ddraw.upscale_hack_width;
-                x = g_ddraw.upscale_hack_width;
-            }
-
-            if (y > g_ddraw.upscale_hack_height)
-            {
-                diffy = y - g_ddraw.upscale_hack_height;
-                y = g_ddraw.upscale_hack_height;
-            }
-
-            if (diffx || diffy)
-                real_SetCursorPos(realpt.x - diffx, realpt.y - diffy);
-        }
 
         InterlockedExchange((LONG*)&g_ddraw.cursor.x, x);
         InterlockedExchange((LONG*)&g_ddraw.cursor.y, y);
@@ -733,19 +707,8 @@ void HandleMessage(LPMSG lpMsg, HWND hWnd, UINT wMsgFilterMin, UINT wMsgFilterMa
 
             if (g_config.adjmouse)
             {
-                if (g_config.vhack && !g_config.devmode)
-                {
-                    POINT pt = { 0, 0 };
-                    fake_GetCursorPos(&pt);
-
-                    x = pt.x;
-                    y = pt.y;
-                }
-                else
-                {
-                    x = (DWORD)(roundf(x * g_ddraw.mouse.unscale_x));
-                    y = (DWORD)(roundf(y * g_ddraw.mouse.unscale_y));
-                }
+                x = (DWORD)(roundf(x * g_ddraw.mouse.unscale_x));
+                y = (DWORD)(roundf(y * g_ddraw.mouse.unscale_y));
             }
 
             x = min(x, g_ddraw.width - 1);
@@ -1934,11 +1897,7 @@ BOOL WINAPI fake_DestroyWindow(HWND hWnd)
     {
         dd_RestoreDisplayMode();
 
-        if (g_ddraw.renderer == d3d9_render_main)
-        {
-            d3d9_release();
-        }
-        else if (g_ddraw.renderer == ogl_render_main)
+        if (g_ddraw.renderer == ogl_render_main)
         {
             ogl_release();
         }
@@ -1982,24 +1941,19 @@ BOOL WINAPI fake_DestroyWindow(HWND hWnd)
                     int width = g_ddraw.bnet_win_rect.right - g_ddraw.bnet_win_rect.left;
                     int height = g_ddraw.bnet_win_rect.bottom - g_ddraw.bnet_win_rect.top;
 
-                    UINT flags = width != g_ddraw.width || height != g_ddraw.height ? 0 : SWP_NOMOVE;
-
-                    int dst_width = width == g_ddraw.width ? 0 : width;
-                    int dst_height = height == g_ddraw.height ? 0 : height;
-
                     util_set_window_rect(
-                        g_ddraw.bnet_win_rect.left, 
-                        g_ddraw.bnet_win_rect.top, 
-                        dst_width, 
-                        dst_height, 
-                        flags);
+                        g_ddraw.bnet_win_rect.left,
+                        g_ddraw.bnet_win_rect.top,
+                        width,
+                        height,
+                        0);
                 }
 
-                g_config.fullscreen = g_ddraw.bnet_was_upscaled;
+g_config.fullscreen = g_ddraw.bnet_was_upscaled;
 
                 SetTimer(g_ddraw.hwnd, IDT_TIMER_LEAVE_BNET, 1000, (TIMERPROC)NULL);
 
-                g_config.resizable = TRUE;
+                g_config.window_resizable = g_ddraw.bnet_was_resizable;
             }
         }
     }
@@ -2199,11 +2153,11 @@ HWND WINAPI fake_CreateWindowExA(
 
             UINT flags = width != g_ddraw.width || height != g_ddraw.height ? 0 : SWP_NOMOVE;
 
-            int dst_width = g_config.window_rect.right ? g_ddraw.width : 0;
-            int dst_height = g_config.window_rect.bottom ? g_ddraw.height : 0;
-
-            util_set_window_rect(x, y, dst_width, dst_height, flags);
-            g_config.resizable = FALSE;
+            /* Battle.net's dialogs are child windows at the game's
+               coordinates, so the window is the game's resolution at 1:1 */
+            util_set_window_rect(x, y, g_ddraw.width, g_ddraw.height, flags);
+            g_ddraw.bnet_was_resizable = g_config.window_resizable;
+            g_config.window_resizable = FALSE;
 
             g_ddraw.bnet_active = TRUE;
             mouse_unlock();

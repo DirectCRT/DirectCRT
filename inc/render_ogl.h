@@ -38,22 +38,16 @@ typedef struct OGLRENDERER
     GLint main_vertex_coord_attr_loc;
     GLuint main_vbos[3];
     GLuint main_vao;
-    GLint shader1_frame_count_uni_loc;
-    GLint shader2_frame_count_uni_loc;
     GLuint frame_buffer_id[FBO_COUNT];
     GLuint frame_buffer_tex_id[FBO_COUNT];
-    GLint shader1_tex_coord_attr_loc;
-    GLint shader2_tex_coord_attr_loc;
-    GLuint shader1_vbos[3];
-    GLuint shader2_vbos[3];
+    GLuint shader1_vbos[2];
+    GLuint shader2_vbos[2];
     GLuint shader1_vao;
     GLuint shader2_vao;
     BOOL use_opengl;
-    BOOL filter_bilinear;
-    BOOL shader2_upscale;
 
-    /* shader=crt-auto: shader1 is DOSBox Staging's image-adjustments pass at the
-     * size of the doubled image, shader2 the CRT shader chosen for the window */
+    /* shader1 is DOSBox Staging's image-adjustments pass at the size of the
+     * doubled image, shader2 the shader crt-auto chose for the window */
     BOOL crt_auto;
     CRT_AUTO_PARAMS crt_params;
     GLuint gpu_time_query;

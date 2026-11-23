@@ -243,13 +243,11 @@ void oglu_init()
     if (IsWine() && glversion && glversion[0] == '2') // macOS
     {
         g_oglu_got_version3 = FALSE;
-        wglCreateContextAttribsARB = (PFNWGLCREATECONTEXTATTRIBSARBPROC)xwglGetProcAddress("wglCreateContextAttribsARB");
     }
 
-    if (g_config.opengl_core)
-    {
-        wglCreateContextAttribsARB = (PFNWGLCREATECONTEXTATTRIBSARBPROC)xwglGetProcAddress("wglCreateContextAttribsARB");
-    }
+    /* DOSBox Staging's shaders are GLSL 3.30: a 3.3 core context
+     * (ogl_create_core_context) */
+    wglCreateContextAttribsARB = (PFNWGLCREATECONTEXTATTRIBSARBPROC)xwglGetProcAddress("wglCreateContextAttribsARB");
 }
 
 BOOL oglu_ext_exists(char* ext, HDC hdc)
@@ -421,32 +419,6 @@ GLuint oglu_build_program(GLchar* vert_source, GLchar* frag_source, BOOL core_pr
                 return 0;
             }
         }
-    }
-
-    return program;
-}
-
-GLuint oglu_build_program_from_file(const char* file_path, BOOL core_profile)
-{
-    GLuint program = 0;
-
-    FILE* file = fopen(file_path, "rb");
-    if (file)
-    {
-        fseek(file, 0, SEEK_END);
-        long file_size = ftell(file);
-        fseek(file, 0, SEEK_SET);
-
-        char* source = file_size > 0 ? calloc(file_size + 1, 1) : NULL;
-
-        if (source)
-        {
-            fread(source, file_size, 1, file);
-            program = oglu_build_program_from_source(source, core_profile);
-            free(source);
-        }
-
-        fclose(file);
     }
 
     return program;

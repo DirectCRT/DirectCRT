@@ -53,14 +53,3 @@ float4 ps_convert_bgra32(VS_OUT i) : SV_Target
 {
     return surface_rgba.Load(int3(i.pos.xy, 0));
 }
-
-// ----------------------------------------------------------------- plain
-// No crt-auto: the converted surface, scaled to the viewport
-
-Texture2D<float4> plain_source : register(t0);
-SamplerState      plain_sampler : register(s0);
-
-float4 ps_plain(VS_OUT i) : SV_Target
-{
-    return plain_source.Sample(plain_sampler, i.uv);
-}

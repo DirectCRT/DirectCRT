@@ -5,7 +5,6 @@
 #include "dd.h"
 #include "hook.h"
 #include "mouse.h"
-#include "render_d3d9.h"
 #include "config.h"
 #include "screenshot.h"
 #include "winapi_hooks.h"
@@ -22,7 +21,7 @@ LRESULT CALLBACK fake_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam
     if (uMsg != WM_MOUSEMOVE && uMsg != WM_NCMOUSEMOVE && uMsg != WM_NCHITTEST && uMsg != WM_SETCURSOR &&
         uMsg != WM_KEYUP && uMsg != WM_KEYDOWN && uMsg != WM_CHAR && uMsg != WM_DEADCHAR && uMsg != WM_INPUT &&
         uMsg != WM_UNICHAR && uMsg != WM_IME_CHAR && uMsg != WM_IME_KEYDOWN && uMsg != WM_IME_KEYUP && uMsg != WM_TIMER &&
-        uMsg != WM_D3D9DEVICELOST && uMsg != WM_NULL)
+        uMsg != WM_NULL)
     {
         TRACE(
             "     uMsg = %s (%d), wParam = %08X (%d), lParam = %08X (%d, LO=%d HI=%d)\n",
@@ -152,7 +151,7 @@ LRESULT CALLBACK fake_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam
 
         LRESULT result = real_DefWindowProcA(hWnd, uMsg, wParam, lParam);
 
-        if (!g_config.resizable)
+        if (!g_config.window_resizable)
         {
             switch (result)
             {
@@ -224,17 +223,6 @@ LRESULT CALLBACK fake_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam
     {
         uMsg = WM_DISPLAYCHANGE;
         break;
-    }
-    case WM_D3D9DEVICELOST:
-    {
-        if (((!g_config.windowed && !g_config.nonexclusive) || !util_is_minimized(g_ddraw.hwnd)) &&
-            g_ddraw.renderer == d3d9_render_main &&
-            d3d9_on_device_lost())
-        {
-            if (!g_config.windowed)
-                mouse_lock();
-        }
-        return 0;
     }
     case WM_TIMER:
     {
@@ -370,9 +358,12 @@ LRESULT CALLBACK fake_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam
 
                 RECT clientrc = { 0 };
 
-                /* maintain aspect ratio */
-                if (g_config.maintas &&
-                    CopyRect(&clientrc, windowrc) &&
+                /* enforce minimum window size: the game's resolution can be scaled
+                   down, to a minimum of DOSBox's 320x200 */
+                LONG min_width = min((LONG)g_ddraw.width, WINDOW_MIN_WIDTH);
+                LONG min_height = min((LONG)g_ddraw.height, WINDOW_MIN_HEIGHT);
+
+                if (CopyRect(&clientrc, windowrc) &&
                     util_unadjust_window_rect(
                         &clientrc, 
                         real_GetWindowLongA(hWnd, GWL_STYLE),
@@ -380,62 +371,7 @@ LRESULT CALLBACK fake_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam
                         real_GetWindowLongA(hWnd, GWL_EXSTYLE)) &&
                     SetRect(&clientrc, 0, 0, clientrc.right - clientrc.left, clientrc.bottom - clientrc.top))
                 {
-                    double scale_h;
-                    double scale_w;
-
-                    if (g_config.aspect_ratio[0])
-                    {
-                        char* e = &g_config.aspect_ratio[0];
-
-                        DWORD cx = strtoul(e, &e, 0);
-                        DWORD cy = strtoul(e + 1, &e, 0);
-
-                        scale_h = (double)cy / cx;
-                        scale_w = (double)cx / cy;
-                    }
-                    else
-                    {
-                        scale_h = (double)g_ddraw.height / g_ddraw.width;
-                        scale_w = (double)g_ddraw.width / g_ddraw.height;
-                    }
-
-                    switch (wParam)
-                    {
-                    case WMSZ_BOTTOMLEFT:
-                    case WMSZ_BOTTOMRIGHT:
-                    case WMSZ_LEFT:
-                    case WMSZ_RIGHT:
-                    {
-                        windowrc->bottom += (LONG)round(scale_h * clientrc.right - clientrc.bottom);
-                        break;
-                    }
-                    case WMSZ_TOP:
-                    case WMSZ_BOTTOM:
-                    {
-                        windowrc->right += (LONG)round(scale_w * clientrc.bottom - clientrc.right);
-                        break;
-                    }
-                    case WMSZ_TOPRIGHT:
-                    case WMSZ_TOPLEFT:
-                    {
-                        windowrc->top -= (LONG)round(scale_h * clientrc.right - clientrc.bottom);
-                        break;
-                    }
-                    }
-                }
-
-                /* enforce minimum window size: no smaller than the game's resolution. Not
-                   for a program in its own window: its window size is its resolution */
-                if (!g_config.window_is_programs &&
-                    CopyRect(&clientrc, windowrc) &&
-                    util_unadjust_window_rect(
-                        &clientrc, 
-                        real_GetWindowLongA(hWnd, GWL_STYLE),
-                        GetMenu(hWnd) != NULL,
-                        real_GetWindowLongA(hWnd, GWL_EXSTYLE)) &&
-                    SetRect(&clientrc, 0, 0, clientrc.right - clientrc.left, clientrc.bottom - clientrc.top))
-                {
-                    if (clientrc.right < g_ddraw.width)
+                    if (clientrc.right < min_width)
                     {
                         switch (wParam)
                         {
@@ -445,20 +381,20 @@ LRESULT CALLBACK fake_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam
                         case WMSZ_BOTTOM:
                         case WMSZ_TOP:
                         {
-                            windowrc->right += g_ddraw.width - clientrc.right;
+                            windowrc->right += min_width - clientrc.right;
                             break;
                         }
                         case WMSZ_TOPLEFT:
                         case WMSZ_BOTTOMLEFT:
                         case WMSZ_LEFT:
                         {
-                            windowrc->left -= g_ddraw.width - clientrc.right;
+                            windowrc->left -= min_width - clientrc.right;
                             break;
                         }
                         }
                     }
 
-                    if (clientrc.bottom < g_ddraw.height)
+                    if (clientrc.bottom < min_height)
                     {
                         switch (wParam)
                         {
@@ -468,14 +404,14 @@ LRESULT CALLBACK fake_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam
                         case WMSZ_RIGHT:
                         case WMSZ_LEFT:
                         {
-                            windowrc->bottom += g_ddraw.height - clientrc.bottom;
+                            windowrc->bottom += min_height - clientrc.bottom;
                             break;
                         }
                         case WMSZ_TOPLEFT:
                         case WMSZ_TOPRIGHT:
                         case WMSZ_TOP:
                         {
-                            windowrc->top -= g_ddraw.height - clientrc.bottom;
+                            windowrc->top -= min_height - clientrc.bottom;
                             break;
                         }
                         }
@@ -639,7 +575,7 @@ LRESULT CALLBACK fake_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam
             if (IsWine())
                 return real_DefWindowProcA(hWnd, uMsg, wParam, lParam);
 
-            if (g_config.resizable)
+            if (g_config.window_resizable)
             {
                 util_toggle_maximize();
             }
@@ -762,12 +698,9 @@ LRESULT CALLBACK fake_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam
         {
             if (!g_config.windowed)
             {
-                if (g_ddraw.renderer != d3d9_render_main || g_config.nonexclusive)
-                {
-                    ChangeDisplaySettings(&g_ddraw.render.mode, CDS_FULLSCREEN);
-                    real_ShowWindow(g_ddraw.hwnd, SW_RESTORE);
-                    mouse_lock();
-                }
+                ChangeDisplaySettings(&g_ddraw.render.mode, CDS_FULLSCREEN);
+                real_ShowWindow(g_ddraw.hwnd, SW_RESTORE);
+                mouse_lock();
             }
             else if (g_config.fullscreen && real_GetForegroundWindow() == g_ddraw.hwnd)
             {
@@ -788,11 +721,8 @@ LRESULT CALLBACK fake_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam
 
             if (!g_config.windowed)
             {
-                if (g_ddraw.renderer != d3d9_render_main || g_config.nonexclusive)
-                {
-                    real_ShowWindow(g_ddraw.hwnd, SW_MINIMIZE);
-                    ChangeDisplaySettings(NULL, g_ddraw.bnet_active ? CDS_FULLSCREEN : 0);
-                }
+                real_ShowWindow(g_ddraw.hwnd, SW_MINIMIZE);
+                ChangeDisplaySettings(NULL, g_ddraw.bnet_active ? CDS_FULLSCREEN : 0);
             }
         }
 
@@ -848,24 +778,21 @@ LRESULT CALLBACK fake_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam
     }
     case WM_TOGGLE_FULLSCREEN:
     {
-        if (!g_config.fullscreen || g_config.toggle_upscaled || (g_config.windowed && g_config.toggle_borderless))
-        {
-            /* Check if we are fullscreen/borderless already */
-            if (wParam == CNC_DDRAW_SET_FULLSCREEN && (!g_config.windowed || g_config.fullscreen))
-                return 0;
+        /* Check if we are fullscreen/borderless already */
+        if (wParam == CNC_DDRAW_SET_FULLSCREEN && (!g_config.windowed || g_config.fullscreen))
+            return 0;
 
-            /* Check if we are windowed already */
-            if (wParam == CNC_DDRAW_SET_WINDOWED && g_config.windowed && !g_config.fullscreen)
-                return 0;
+        /* Check if we are windowed already */
+        if (wParam == CNC_DDRAW_SET_WINDOWED && g_config.windowed && !g_config.fullscreen)
+            return 0;
 
-            util_toggle_fullscreen();
-        }
+        util_toggle_fullscreen();
 
         return 0;
     }
     case WM_TOGGLE_MAXIMIZE:
     {
-        if (g_config.resizable)
+        if (g_config.window_resizable)
         {
             util_toggle_maximize();
         }
@@ -874,7 +801,7 @@ LRESULT CALLBACK fake_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam
     }
     case WM_NCLBUTTONDBLCLK:
     {
-        if (g_config.resizable)
+        if (g_config.window_resizable)
         {
             util_toggle_maximize();
         }
@@ -973,19 +900,8 @@ LRESULT CALLBACK fake_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam
 
         if (g_config.adjmouse)
         {
-            if (g_config.vhack && !g_config.devmode)
-            {
-                POINT pt = { 0, 0 };
-                fake_GetCursorPos(&pt);
-
-                x = pt.x;
-                y = pt.y;
-            }
-            else
-            {
-                x = (DWORD)(roundf(x * g_ddraw.mouse.unscale_x));
-                y = (DWORD)(roundf(y * g_ddraw.mouse.unscale_y));
-            }
+            x = (DWORD)(roundf(x * g_ddraw.mouse.unscale_x));
+            y = (DWORD)(roundf(y * g_ddraw.mouse.unscale_y));
         }
 
         x = min(x, g_ddraw.width - 1);

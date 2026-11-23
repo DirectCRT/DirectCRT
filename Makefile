@@ -53,3 +53,5 @@ HOSTCC   ?= cc
 test:
 	$(HOSTCC) -Iinc -O2 -Wall -std=c99 -o tests/test_crt_auto tests/test_crt_auto.c src/crt_auto.c -lm
 	./tests/test_crt_auto
+	$(HOSTCC) -Iinc -O2 -Wall -std=c99 -o tests/test_display_settings tests/test_display_settings.c src/display_settings.c -lm
+	./tests/test_display_settings

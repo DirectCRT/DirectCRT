@@ -17,6 +17,8 @@ typedef enum CRT_SHADER
     CRT_SHADER_VGA_1080P_FAKE_DOUBLE_SCAN, /* crt/vga-1080p-fake-double-scan */
     CRT_SHADER_HYLLIAN_VGA_1440P,          /* crt/crt-hyllian with the vga-1440p preset */
     CRT_SHADER_HYLLIAN_VGA_4K,             /* crt/crt-hyllian with the vga-4k preset */
+    CRT_SHADER_NEAREST,                    /* interpolation/nearest, with shader = nearest */
+    CRT_SHADER_BILINEAR,                   /* interpolation/bilinear, with shader = bilinear */
     CRT_SHADER_COUNT
 } CRT_SHADER;
 
@@ -69,6 +71,16 @@ typedef enum CRT_INTEGER_SCALING
     CRT_INTEGER_SCALING_OFF
 } CRT_INTEGER_SCALING;
 
+/* shader = crt-auto picks a shader from the pixels per line; the others
+ * are fixed */
+typedef enum CRT_SHADER_SETTING
+{
+    CRT_SHADER_SETTING_CRT_AUTO = 0,
+    CRT_SHADER_SETTING_SHARP,
+    CRT_SHADER_SETTING_NEAREST,
+    CRT_SHADER_SETTING_BILINEAR
+} CRT_SHADER_SETTING;
+
 typedef enum CRT_VIEWPORT_MODE
 {
     CRT_VIEWPORT_FIT = 0,      /* viewport = fit: the whole canvas */
@@ -92,6 +104,7 @@ typedef struct CRT_VIEWPORT
 
 typedef struct CRT_AUTO_SETTINGS
 {
+    CRT_SHADER_SETTING shader;
     CRT_ASPECT aspect;
     CRT_INTEGER_SCALING integer_scaling;
     CRT_VIEWPORT viewport;

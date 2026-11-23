@@ -4,12 +4,13 @@
 #include <windows.h>
 #include "ini.h"
 #include "crt_auto.h"
+#include "display_settings.h"
 
 #define FILE_EXISTS(a) (GetFileAttributes(a) != INVALID_FILE_ATTRIBUTES)
 
 typedef struct CNCDDRAWCONFIG
 {
-    RECT window_rect;
+    RECT window_rect; /* the window's client area: left/top -32000 = from window_position, right/bottom 0 = from window_size */
     char ini_path[MAX_PATH];
     char game_path[MAX_PATH];
     char dll_path[MAX_PATH];
@@ -19,38 +20,31 @@ typedef struct CNCDDRAWCONFIG
     char dll_file_ext[MAX_PATH];
     char game_section[MAX_PATH];
     INIFILE ini;
-    BOOL d3d9on12;
-    BOOL opengl_core;
 
     /* Optional settings */
 
-    BOOL fullscreen;
-    BOOL windowed;
-    BOOL windowed_auto; /* windowed=auto: follow what the game asks for */
-    BOOL fullscreen_setting; /* fullscreen as configured; with windowed=auto it only applies to fullscreen games */
-    BOOL maintas;
-    char aspect_ratio[16];
-    BOOL boxing;
+    DISPLAY_MODE display;
+    WINDOW_SIZE window_size;
+    WINDOW_POSITION window_position;
+    BOOL window_decorations;
+    BOOL window_resizable;
+    REMEMBER_WINDOW remember_window;
     int maxfps;
     BOOL vsync;
     BOOL adjmouse;
-    char shader[MAX_PATH];
-    BOOL crt_auto; /* shader=crt-auto: DOSBox Staging's crt-auto for VGA, with its own scaling */
-    CRT_AUTO_SETTINGS crt; /* crt-auto's DOSBox Staging settings: aspect, viewport, integer_scaling, colour */
+    CRT_AUTO_SETTINGS crt; /* shader and DOSBox Staging's [render] settings: aspect, viewport, integer_scaling, colour */
     char renderer[256];
     BOOL devmode;
-    BOOL border;
-    int save_settings;
-    BOOL resizable;
-    int d3d9_filter;
     int anti_aliased_fonts_min_size;
     int min_font_size;
-    int center_window;
-    char inject_resolution[128];
-    BOOL vhack;
     char screenshot_dir[MAX_PATH];
-    BOOL toggle_borderless;
-    BOOL toggle_upscaled;
+
+    /* Set at runtime from 'display' and Alt+Enter: windowed=1 fullscreen=0 is
+       a window, 0/1 fullscreen at the desktop resolution, 0/0 a mode switch
+       to the game's resolution, and 1/1 borderless, the mode switch's
+       fallback */
+    BOOL fullscreen;
+    BOOL windowed;
 
     /* Compatibility settings */
 
@@ -64,7 +58,6 @@ typedef struct CNCDDRAWCONFIG
     int fixchilds;
     BOOL hook_peekmessage;
     int windowed_bpp; /* 0 = the desktop's */
-    BOOL window_is_programs; /* set at runtime: a windowed program's own window, not saved */
 
     /* Undocumented settings */
 

@@ -54,6 +54,8 @@ DOSBOX_SHADERS = [
     ("vga_1080p", "crt/vga-1080p.glsl", "window"),
     ("vga_1080p_fake_double_scan", "crt/vga-1080p-fake-double-scan.glsl", "window"),
     ("sharp", "interpolation/sharp.glsl", "window"),
+    ("nearest", "interpolation/nearest.glsl", "window"),
+    ("bilinear", "interpolation/bilinear.glsl", "window"),
 ]
 
 
@@ -383,23 +385,28 @@ def generate(out_dir):
                     u, TYPES[types.pop()],
                     vs_members[u][1] if u in vs_members else -1,
                     ps_members[u][1] if u in ps_members else -1))
-            out.append(f"static const D3D11_UNIFORM d3d11_{name}_uniforms[] = {{\n"
-                       + "\n".join(rows) + "\n};")
+            # C has no empty initialiser: no uniforms is NULL, 0
+            if rows:
+                out.append(f"static const D3D11_UNIFORM d3d11_{name}_uniforms[] = {{\n"
+                           + "\n".join(rows) + "\n};")
+                uniforms = (f"d3d11_{name}_uniforms,"
+                            f" sizeof(d3d11_{name}_uniforms) / sizeof(d3d11_{name}_uniforms[0])")
+            else:
+                uniforms = "NULL, 0"
             out.append(
                 f"static const D3D11_SHADER d3d11_{name} = {{\n"
                 f'    "{rel}",\n'
                 f"    d3d11_{name}_vs, sizeof(d3d11_{name}_vs),\n"
                 f"    d3d11_{name}_ps, sizeof(d3d11_{name}_ps),\n"
                 f"    {vs_size}, {ps_size}, {texture_slot(ps_refl)}, {int(target == 'window')},\n"
-                f"    d3d11_{name}_uniforms,"
-                f" sizeof(d3d11_{name}_uniforms) / sizeof(d3d11_{name}_uniforms[0]),\n"
+                f"    {uniforms},\n"
                 "};")
 
         own = os.path.join(OWN, "directcrt.hlsl")
         for entry, profile in (("vs_quad", "vs_4_0"), ("ps_convert_pal8", "ps_4_0"),
                                ("ps_convert_rgb565", "ps_4_0"),
                                ("ps_convert_rgb555", "ps_4_0"),
-                               ("ps_convert_bgra32", "ps_4_0"), ("ps_plain", "ps_4_0")):
+                               ("ps_convert_bgra32", "ps_4_0")):
             out.append(c_bytes(f"d3d11_{entry}", fxc_compile(fxc, tmp, own, profile, entry)))
 
     glslang_ver = run([GLSLANG, "--version"]).splitlines()[0].split(":")[-1].strip()

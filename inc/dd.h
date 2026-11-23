@@ -40,11 +40,6 @@ HRESULT dd_CreateEx(GUID* lpGuid, LPVOID* lplpDD, REFIID iid, IUnknown* pUnkOute
 #define RESLIST_MINI 1
 #define RESLIST_FULL 2
 
-#define FILTER_NEAREST 0
-#define FILTER_LINEAR 1
-#define FILTER_CUBIC 2
-#define FILTER_LANCZOS 3
-
 #define SDM_MODE_SET_BY_GAME 0x00000001l
 #define SDM_LEAVE_WINDOWED   0x00000002l
 #define SDM_LEAVE_FULLSCREEN 0x00000004l
@@ -54,10 +49,6 @@ HRESULT dd_CreateEx(GUID* lpGuid, LPVOID* lplpDD, REFIID iid, IUnknown* pUnkOute
 #define LIMIT_BLTFAST 2
 #define LIMIT_UNLOCK 3
 #define LIMIT_PEEKMESSAGE 4
-
-#define CENTER_WINDOW_NEVER 0
-#define CENTER_WINDOW_AUTO 1
-#define CENTER_WINDOW_ALWAYS 2
 
 #ifndef CREATE_WAITABLE_TIMER_HIGH_RESOLUTION
 #define CREATE_WAITABLE_TIMER_HIGH_RESOLUTION 0x00000002
@@ -154,19 +145,17 @@ typedef struct CNCDDRAW
     HWND hwnd;
     WNDPROC wndproc;
     struct { DWORD x; DWORD y; } cursor;
-    int upscale_hack_width;
-    int upscale_hack_height;
     BOOL isredalert;
     BOOL iscnc1;
     BOOL iskkndx;
     BOOL isworms2;
-    LONG upscale_hack_active;
     HCURSOR old_cursor;
     int show_cursor_count;
     BOOL alt_key_down;
     BOOL bnet_active;
     BOOL bnet_was_fullscreen;
     BOOL bnet_was_upscaled;
+    BOOL bnet_was_resizable;
     RECT bnet_win_rect;
     POINT bnet_pos;
     void* last_freed_palette; /* Dungeon Keeper hack */
@@ -181,8 +170,15 @@ typedef struct CNCDDRAW
     DWORD gui_thread_id;
     BOOL show_driver_warning;
     BOOL windowed_hack;
-    BOOL auto_saw_fullscreen; /* windowed=auto: what the game has asked for so far */
-    BOOL auto_saw_normal;
+    BOOL saw_fullscreen; /* display: what the game has asked for so far (dd_SetCooperativeLevel) */
+    BOOL saw_normal;
+
+    struct
+    {
+        BOOL placed;        /* centre and size are set: where the window was last */
+        POINT centre;       /* of the client area, on the desktop */
+        SIZE size;          /* the client area */
+    } window;               /* window_position=auto and window_size */
 
     struct
     {

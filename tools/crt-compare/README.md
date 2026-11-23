@@ -11,7 +11,8 @@ tools/crt-compare/run.sh WORKDIR [CONFIGURATION] [CASE...]
 For example, from Git Bash in the repository: `tools/crt-compare/run.sh ../crt-work`.
 It tests `bin/<CONFIGURATION>` (default `Release`; use a build that doesn't
 draw debug text over the picture). Each case is `fs:WxH`, fullscreen on the
-primary monitor, or `win:WxH`, in a 1920x1080 window, for 320x200, 320x240,
+primary monitor (`display=fullscreen`), or `win:WxH`, in a 1920x1080 window
+(`display=window`, `window_size=1920x1080px`), for 320x200, 320x240,
 640x480 and 800x600. Without cases it runs all eight, which takes about five
 minutes. Leave the computer alone while it runs: the captures are of the
 screen.
@@ -67,7 +68,8 @@ the windowed cases use the fake double scan shader (320x200), `vga-1080p`
   Set `DOSBOX` to its `dosbox.exe` if it isn't in
   `%LOCALAPPDATA%\Programs\DOSBox Staging`. Your own DOSBox settings aren't
   used or changed (`--noprimaryconf`); `dosconf.py` writes a config with
-  DOSBox's defaults.
+  DOSBox's defaults. It needs DOSBox's web server (0.84 or later), which the
+  config turns on for 127.0.0.1, port 8086.
 - Python 3 with numpy and Pillow.
 - Git Bash and Windows PowerShell.
 
@@ -81,13 +83,18 @@ the windowed cases use the fake double scan shader (320x200), `vga-1080p`
    sets the video mode (13h for 320x200, VESA 151h, 101h and 103h for the
    others) and displays it.
 3. `capture.ps1` starts ddtest (with `shader=crt-auto` in its
-   `directcrt.ini`) and then DOSBox, each showing the picture, and captures
-   the screen or the window's client area.
-4. `compare.py` lines the captures up and compares them. "Same" allows
-   differences of 1/255 (rounding) and a few stray pixels, such as rounded
-   window corners.
+   `directcrt.ini`) and captures the screen or the window's client area.
+4. `dosshot.ps1` starts DOSBox and takes its rendered screenshot, the picture
+   after the shader exactly as DOSBox shows it, rather than a screen
+   capture. SHOW.COM writes a marker to memory once the picture is up, which
+   the script reads through DOSBox's web server; it then sends Alt+F5 (the
+   only way to ask for that screenshot, so the DOSBox window is brought to
+   the front) and shuts DOSBox down through the web server.
+5. `compare.py` centres DOSBox's screenshot, which is only the picture, on a
+   black canvas the size of DirectCRT's capture, lines them up and compares
+   them. "Same" allows differences of 1/255 (rounding) and a few stray
+   pixels, such as rounded window corners.
 
-Fullscreen DOSBox runs with `fullscreen_mode = forced-borderless`, because a
-GDI screen capture of its normal fullscreen window comes out black. That
-window is one pixel larger than the screen, so DOSBox's picture is one pixel
-to the right of DirectCRT's; `compare.py` allows for that.
+Leave the keyboard and mouse alone during a run: a click that brings another
+window to the front ends up in DirectCRT's capture, and a key press can end
+SHOW.COM.

@@ -259,7 +259,7 @@ static void test_settings_parse()
     CHECK(crt_auto_setting_name(crt_auto_setting_count()) == NULL);
 
     /* Other names change nothing */
-    CHECK(!crt_auto_set(&s, "shader", "crt-auto"));
+    CHECK(!crt_auto_set(&s, "renderer", "auto"));
 
     /* Invalid values give the default */
     CHECK(crt_auto_set(&s, "brightness", "80") && s.brightness == 80);
@@ -402,6 +402,38 @@ static void test_real_presets_parse()
     CHECK(fabsf(crt_auto_params_get(&p, "MASK_INTENSITY", -1) - 0.65f) < 1e-6f);
 }
 
+static void test_fixed_shaders()
+{
+    CRT_AUTO_SETTINGS s = crt_auto_default_settings();
+
+    CHECK(s.shader == CRT_SHADER_SETTING_CRT_AUTO);
+    CHECK(crt_auto_set(&s, "shader", "Nearest") && s.shader == CRT_SHADER_SETTING_NEAREST);
+    CHECK(!crt_auto_set(&s, "shader", "Nearest neighbor") && s.shader == CRT_SHADER_SETTING_CRT_AUTO);
+    CHECK(!crt_auto_set(&s, "shader", "crt/vga-1080p") && s.shader == CRT_SHADER_SETTING_CRT_AUTO);
+
+    /* sharp and nearest get the game's picture as it is, bilinear the doubled
+     * one; none of them snaps with integer_scaling = auto */
+    s = settings_with("shader", "sharp");
+    LAYOUT_WITH(s, NULL, 320, 200, 2560, 1440, CRT_SHADER_SHARP, 3, 320, 200, 320, 0, 1920, 1440);
+    LAYOUT_WITH(s, NULL, 640, 480, 3840, 2160, CRT_SHADER_SHARP, 4, 640, 480, 480, 0, 2880, 2160);
+
+    s = settings_with("shader", "nearest");
+    LAYOUT_WITH(s, NULL, 320, 200, 2560, 1440, CRT_SHADER_NEAREST, 3, 320, 200, 320, 0, 1920, 1440);
+    LAYOUT_WITH(s, NULL, 640, 480, 1920, 1080, CRT_SHADER_NEAREST, 2, 640, 480, 240, 0, 1440, 1080);
+
+    s = settings_with("shader", "bilinear");
+    LAYOUT_WITH(s, NULL, 320, 200, 2560, 1440, CRT_SHADER_BILINEAR, 3, 640, 400, 320, 0, 1920, 1440);
+    LAYOUT_WITH(s, NULL, 640, 480, 1920, 1080, CRT_SHADER_BILINEAR, 2, 640, 480, 240, 0, 1440, 1080);
+
+    /* A small window: still the fixed shader */
+    LAYOUT_WITH(s, NULL, 640, 480, 640, 480, CRT_SHADER_BILINEAR, 1, 640, 480, 0, 0, 640, 480);
+
+    /* integer_scaling = vertical snaps every shader */
+    s = settings_with("shader", "nearest");
+    crt_auto_set(&s, "integer_scaling", "vertical");
+    LAYOUT_WITH(s, NULL, 320, 200, 2560, 1440, CRT_SHADER_NEAREST, 3, 320, 200, 347, 20, 1867, 1400);
+}
+
 int main(void)
 {
     test_1440p();
@@ -418,6 +450,7 @@ int main(void)
     test_color();
     test_params();
     test_real_presets_parse();
+    test_fixed_shaders();
 
     printf("crt_auto: %d checks, %d failed\n", g_checks, g_failed);
     return g_failed ? 1 : 0;

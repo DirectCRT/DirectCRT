@@ -3,9 +3,10 @@ Staging or from DirectCRT with another renderer (the reference).
 
 usage: python -I compare.py DIRECTCRT.png REFERENCE.png OUTPREFIX [x y w h]
 
+A reference smaller than the DirectCRT capture is only the picture (DOSBox's
+rendered screenshot); it's centred on a black canvas of the capture's size.
 Finds the picture in each (the bounding box of non-black pixels), lines them
-up (DOSBox's forced-borderless fullscreen window can put its picture a pixel
-off), reports the per-channel differences, and writes:
+up (to a couple of pixels), reports the per-channel differences, and writes:
   OUTPREFIX_diff.png   |difference| x 8, whole canvas, half size
   OUTPREFIX_crops.png  the same 1:1 crops from both, side by side
 
@@ -30,7 +31,13 @@ def bbox(a):
 a_path, b_path, out = sys.argv[1], sys.argv[2], sys.argv[3]
 a = np.asarray(Image.open(a_path).convert('RGB')).astype(np.int16)
 b = np.asarray(Image.open(b_path).convert('RGB')).astype(np.int16)
-assert a.shape == b.shape, (a.shape, b.shape)
+if b.shape != a.shape:
+    assert b.shape[0] <= a.shape[0] and b.shape[1] <= a.shape[1], (a.shape, b.shape)
+    print('Reference is %dx%d, centred on %dx%d' % (b.shape[1], b.shape[0], a.shape[1], a.shape[0]))
+    canvas = np.zeros_like(a)
+    oy, ox = (a.shape[0] - b.shape[0]) // 2, (a.shape[1] - b.shape[1]) // 2
+    canvas[oy:oy + b.shape[0], ox:ox + b.shape[1]] = b
+    b = canvas
 
 print('DirectCRT picture at', bbox(a))
 print('Reference picture at', bbox(b))
@@ -40,7 +47,7 @@ if len(sys.argv) > 4:
 else:
     x, y, w, h = bbox(b)
 
-# Align: DOSBox's forced-borderless window can put the picture a pixel off
+# Align: a centred rendered screenshot can be a pixel off
 best = None
 for dy in range(-2, 3):
     for dx in range(-2, 3):

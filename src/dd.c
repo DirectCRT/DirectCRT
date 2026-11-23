@@ -8,7 +8,6 @@
 #include "mouse.h"
 #include "keyboard.h"
 #include "wndproc.h"
-#include "render_d3d9.h"
 #include "render_d3d11.h"
 #include "render_gdi.h"
 #include "render_ogl.h"
@@ -114,11 +113,6 @@ HRESULT dd_EnumDisplayModes(
         while (--max_w % 8);
     }
 
-    char* ires = &g_config.inject_resolution[0];
-
-    unsigned long custom_width = strtoul(ires, &ires, 0);
-    unsigned long custom_height = strtoul(ires + 1, &ires, 0);
-
     BOOL rlf = g_config.resolutions == RESLIST_FULL;
     BOOL rlm = g_config.resolutions == RESLIST_MINI;
 
@@ -154,8 +148,6 @@ HRESULT dd_EnumDisplayModes(
         { rlf ? 1280 : 0, rlf ? 540 : 0 },
         { rlf ? 1720 : 0, rlf ? 720 : 0 },
         { rlf ? 2560 : 0, rlf ? 1080 : 0 },
-        /* Inject custom resolution */
-        { custom_width, custom_height },
         { max_w, max_h },
     };
     
@@ -220,8 +212,6 @@ HRESULT dd_EnumDisplayModes(
         m.dmSize = sizeof(DEVMODE);
         i = 0;
 
-        BOOL custom_res_injected = FALSE;
-
         while (real_EnumDisplaySettingsA(NULL, i, &m))
         {
             if (refresh_rate == m.dmDisplayFrequency &&
@@ -232,13 +222,6 @@ HRESULT dd_EnumDisplayModes(
                 if (g_config.stronghold_hack && m.dmPelsWidth && (m.dmPelsWidth % 8))
                 {
                     while (--m.dmPelsWidth % 8);
-                }
-
-                if (!custom_res_injected && custom_width && custom_height)
-                {
-                    m.dmPelsWidth = custom_width;
-                    m.dmPelsHeight = custom_height;
-                    custom_res_injected = TRUE;
                 }
 
                 TRACE(
@@ -353,8 +336,7 @@ HRESULT dd_EnumDisplayModes(
             if (!resolutions[i].cx || !resolutions[i].cy)
                 continue;
 
-            if (!(resolutions[i].cx == custom_width && resolutions[i].cy == custom_height) &&
-                ((max_w && resolutions[i].cx > max_w) || (max_h && resolutions[i].cy > max_h)))
+            if ((max_w && resolutions[i].cx > max_w) || (max_h && resolutions[i].cy > max_h))
             {
                 DEVMODE m;
                 memset(&m, 0, sizeof(DEVMODE));
@@ -639,15 +621,7 @@ HRESULT dd_RestoreDisplayMode()
 
     if (!g_config.windowed)
     {
-        if (g_ddraw.renderer == d3d9_render_main && !g_config.nonexclusive)
-        {
-            if (!d3d9_reset(TRUE))
-                d3d9_release();
-        }
-        else
-        {
-            ChangeDisplaySettings(NULL, 0);
-        }
+        ChangeDisplaySettings(NULL, 0);
     }
 
     //real_ShowWindow(g_ddraw.hwnd, SW_MINIMIZE);
@@ -688,7 +662,7 @@ static CRT_AUTO_DISPLAY dd_crt_auto_display()
     return display;
 }
 
-/* Live reload of crt-auto's settings: called from a timer on the game's
+/* Live reload of the shader settings: called from a timer on the game's
  * window. When directcrt.ini has new ones, the picture is set up again with
  * them, as for Alt+Enter */
 void dd_poll_settings()
@@ -704,7 +678,7 @@ void dd_poll_settings()
         return;
     }
 
-    if (!g_config.crt_auto || !g_ddraw.render.thread || !g_ddraw.width || g_ddraw.bnet_active)
+    if (!g_ddraw.render.thread || !g_ddraw.width || g_ddraw.bnet_active)
     {
         /* For the next display mode */
         g_config.crt = crt;
@@ -725,6 +699,91 @@ void dd_poll_settings()
     g_config.crt = crt;
 
     dd_SetDisplayMode(0, 0, 0, 0);
+}
+
+/* Where a window's client area of width x height goes, on the desktop. In
+ * order: where the user moved it, window_position, or (auto) centred where
+ * the window was last or where the game put its own window, else on the
+ * screen. A window keeps its centre when its size changes. *clamp is set when
+ * the window should be kept on the screen */
+static POINT dd_window_origin(int width, int height, BOOL* clamp)
+{
+    POINT p;
+    POINT centre;
+
+    *clamp = FALSE;
+
+    if (g_config.window_rect.left != -32000 && g_config.window_rect.top != -32000)
+    {
+        /* The user's place, with the size it had then */
+        int cw = g_config.window_rect.right > 0 ? g_config.window_rect.right :
+            g_ddraw.window.placed ? g_ddraw.window.size.cx : width;
+        int ch = g_config.window_rect.bottom > 0 ? g_config.window_rect.bottom :
+            g_ddraw.window.placed ? g_ddraw.window.size.cy : height;
+
+        centre.x = g_config.window_rect.left + cw / 2;
+        centre.y = g_config.window_rect.top + ch / 2;
+    }
+    else if (!g_config.window_position.is_auto)
+    {
+        CRT_AUTO_DISPLAY display = dd_crt_auto_display();
+        int x, y;
+
+        ds_window_position_pixels(
+            &g_config.window_position,
+            display.desktop_width,
+            display.desktop_height,
+            display.scale,
+            &x,
+            &y);
+
+        p.x = x;
+        p.y = y;
+        return p;
+    }
+    else if (g_ddraw.window.placed)
+    {
+        centre = g_ddraw.window.centre;
+        *clamp = TRUE;
+    }
+    else
+    {
+        centre.x = (g_ddraw.mode.dmPelsWidth ? g_ddraw.mode.dmPelsWidth : width) / 2;
+        centre.y = (g_ddraw.mode.dmPelsHeight ? g_ddraw.mode.dmPelsHeight : height) / 2;
+        *clamp = TRUE;
+    }
+
+    p.x = centre.x - width / 2;
+    p.y = centre.y - height / 2;
+    return p;
+}
+
+/* Keep a window (its outer rect) in its monitor's work area, with the title
+ * bar visible when it's larger */
+static void dd_keep_on_screen(RECT* rc)
+{
+    MONITORINFO mi = { sizeof(mi) };
+    HMONITOR monitor = MonitorFromRect(rc, MONITOR_DEFAULTTONEAREST);
+
+    if (!monitor || !GetMonitorInfoA(monitor, &mi))
+        return;
+
+    RECT work = mi.rcWork;
+    LONG dx = 0, dy = 0;
+
+    if (rc->right > work.right)
+        dx = work.right - rc->right;
+
+    if (rc->left + dx < work.left)
+        dx = work.left - rc->left;
+
+    if (rc->bottom > work.bottom)
+        dy = work.bottom - rc->bottom;
+
+    if (rc->top + dy < work.top)
+        dy = work.top - rc->top;
+
+    OffsetRect(rc, dx, dy);
 }
 
 HRESULT dd_SetDisplayMode(DWORD dwWidth, DWORD dwHeight, DWORD dwBPP, DWORD dwFlags)
@@ -780,31 +839,49 @@ HRESULT dd_SetDisplayMode(DWORD dwWidth, DWORD dwHeight, DWORD dwBPP, DWORD dwFl
     BOOL zooming = g_ddraw.zoom.enabled;
     g_ddraw.zoom.enabled = FALSE;
 
-    g_ddraw.render.width = g_config.window_rect.right;
-    g_ddraw.render.height = g_config.window_rect.bottom;
-
-    /* temporary fix: center window for games that keep changing their resolution */
-    if (g_config.center_window &&
-        (g_ddraw.width || g_config.infantryhack || g_config.center_window == CENTER_WINDOW_ALWAYS) &&
+    /* An 'unscaled' window follows the game's resolution, also after the user
+       resized it */
+    if (g_config.window_size.unscaled &&
+        g_ddraw.width &&
         (g_ddraw.width != dwWidth || g_ddraw.height != dwHeight) &&
-        (
-            dwWidth > g_config.window_rect.right ||
-            dwHeight > g_config.window_rect.bottom ||
-            g_config.center_window == CENTER_WINDOW_ALWAYS)
-        )
+        g_config.window_rect.right > 0 &&
+        g_config.window_rect.bottom > 0)
     {
-        g_config.window_rect.left = -32000;
-        g_config.window_rect.top = -32000;
+        g_ddraw.window.size.cx = g_config.window_rect.right;
+        g_ddraw.window.size.cy = g_config.window_rect.bottom;
+        g_config.window_rect.right = 0;
+        g_config.window_rect.bottom = 0;
     }
 
     g_ddraw.width = dwWidth;
     g_ddraw.height = dwHeight;
     g_ddraw.bpp = dwBPP;
 
+    /* A window's client size: the user's, or window_size */
+    if (g_config.window_rect.right > 0 && g_config.window_rect.bottom > 0)
+    {
+        g_ddraw.render.width = g_config.window_rect.right;
+        g_ddraw.render.height = g_config.window_rect.bottom;
+    }
+    else
+    {
+        CRT_AUTO_DISPLAY display = dd_crt_auto_display();
+
+        ds_window_client_size(
+            &g_config.window_size,
+            display.desktop_width,
+            display.desktop_height,
+            display.scale,
+            dwWidth,
+            dwHeight,
+            &g_ddraw.render.width,
+            &g_ddraw.render.height);
+    }
+
     InterlockedExchange((LONG*)&g_ddraw.cursor.x, dwWidth / 2);
     InterlockedExchange((LONG*)&g_ddraw.cursor.y, dwHeight / 2);
 
-    BOOL border = g_config.border;
+    BOOL border = g_config.window_decorations;
     BOOL nonexclusive = FALSE;
 
     if (g_config.fullscreen)
@@ -841,16 +918,20 @@ HRESULT dd_SetDisplayMode(DWORD dwWidth, DWORD dwHeight, DWORD dwBPP, DWORD dwFl
         g_ddraw.render.height = g_ddraw.render.mode.dmPelsHeight;
 
         /* Resize and alt+enter are not supported yet with zooming */
-        g_config.resizable = FALSE;
+        g_config.window_resizable = FALSE;
         g_config.hotkeys.toggle_fullscreen = 0;
     }
+    else if (!g_config.windowed)
+    {
+        /* display=original: the monitor switches to the game's resolution, or
+           the closest mode it has (below) */
+        g_ddraw.render.width = g_ddraw.width;
+        g_ddraw.render.height = g_ddraw.height;
+    }
 
-    /* Never smaller than the game's resolution, except for a program in its own
-       window that was made smaller: it's shown smaller until the program
-       answers the new size */
-    BOOL own_window = g_config.window_is_programs && g_config.windowed && !g_config.fullscreen;
-
-    if ((!zooming || g_config.fullscreen) && !own_window)
+    /* Fullscreen is never smaller than the game's resolution, except when
+       borderless (below). A window can be: the picture is scaled down */
+    if ((!zooming || g_config.fullscreen) && !g_config.windowed)
     {
         if (g_ddraw.render.width < g_ddraw.width)
         {
@@ -968,7 +1049,6 @@ HRESULT dd_SetDisplayMode(DWORD dwWidth, DWORD dwHeight, DWORD dwBPP, DWORD dwFl
 
                             g_config.windowed = TRUE;
                             g_config.fullscreen = TRUE;
-                            g_config.toggle_borderless = TRUE;
                             border = FALSE;
 
                             /* prevent OpenGL from going automatically into fullscreen exclusive mode */
@@ -1004,11 +1084,10 @@ HRESULT dd_SetDisplayMode(DWORD dwWidth, DWORD dwHeight, DWORD dwBPP, DWORD dwFl
     g_ddraw.render.viewport.x = 0;
     g_ddraw.render.viewport.y = 0;
 
-    if (g_config.crt_auto)
     {
-        /* DOSBox Staging's crt-auto picks the shader from the screen pixels per
-         * game line and sizes the picture for it, with its aspect, viewport
-         * and integer_scaling settings */
+        /* As in DOSBox Staging: the picture's size from the aspect, viewport
+         * and integer_scaling settings, and with shader=crt-auto the shader
+         * from the screen pixels per game line */
         CRT_AUTO_DISPLAY display = dd_crt_auto_display();
 
         g_ddraw.render.crt =
@@ -1023,7 +1102,7 @@ HRESULT dd_SetDisplayMode(DWORD dwWidth, DWORD dwHeight, DWORD dwBPP, DWORD dwFl
         if (g_ddraw.render.crt.viewport_rejected)
         {
             TRACE(
-                "     crt-auto: the viewport is larger than the %dx%d desktop (scale %.2f), using fit\n",
+                "     the viewport is larger than the %dx%d desktop (scale %.2f), using fit\n",
                 display.desktop_width,
                 display.desktop_height,
                 display.scale);
@@ -1035,7 +1114,7 @@ HRESULT dd_SetDisplayMode(DWORD dwWidth, DWORD dwHeight, DWORD dwBPP, DWORD dwFl
         g_ddraw.render.viewport.height = g_ddraw.render.crt.height;
 
         TRACE(
-            "     crt-auto: %ux%u in %dx%d: %s, %d px/line, render %dx%d, picture %d,%d %dx%d\n",
+            "     picture: %ux%u in %dx%d: %s, %d px/line, render %dx%d, picture %d,%d %dx%d\n",
             g_ddraw.width,
             g_ddraw.height,
             g_ddraw.render.width,
@@ -1048,57 +1127,6 @@ HRESULT dd_SetDisplayMode(DWORD dwWidth, DWORD dwHeight, DWORD dwBPP, DWORD dwFl
             g_ddraw.render.crt.y,
             g_ddraw.render.crt.width,
             g_ddraw.render.crt.height);
-    }
-    else if (g_config.boxing)
-    {
-        for (int i = 20; i-- > 1;)
-        {
-            if (g_ddraw.width * i <= g_ddraw.render.width && g_ddraw.height * i <= g_ddraw.render.height)
-            {
-                g_ddraw.render.viewport.width = i * g_ddraw.width;
-                g_ddraw.render.viewport.height = i * g_ddraw.height;
-                break;
-            }
-        }
-
-        g_ddraw.render.viewport.y = g_ddraw.render.height / 2 - g_ddraw.render.viewport.height / 2;
-        g_ddraw.render.viewport.x = g_ddraw.render.width / 2 - g_ddraw.render.viewport.width / 2;
-    }
-    else if (g_config.maintas)
-    {
-        double dst_ar;
-        double src_ar = (double)g_ddraw.render.height / g_ddraw.render.width;;
-
-        if (g_config.aspect_ratio[0])
-        {
-            char* e = &g_config.aspect_ratio[0];
-
-            DWORD cx = strtoul(e, &e, 0);
-            DWORD cy = strtoul(e + 1, &e, 0);
-
-            dst_ar = (double)cy / cx;
-        }
-        else
-        {
-            dst_ar = (double)g_ddraw.height / g_ddraw.width;
-        }
-
-        g_ddraw.render.viewport.width = g_ddraw.render.width;
-        g_ddraw.render.viewport.height = (int)round(dst_ar * g_ddraw.render.viewport.width);
-
-        if (src_ar < dst_ar)
-        {
-            g_ddraw.render.viewport.width =
-                (int)round(((double)g_ddraw.render.viewport.width / g_ddraw.render.viewport.height) * g_ddraw.render.height);
-
-            g_ddraw.render.viewport.height = g_ddraw.render.height;
-        }
-
-        g_ddraw.render.viewport.width = min(g_ddraw.render.viewport.width, g_ddraw.render.width);
-        g_ddraw.render.viewport.height = min(g_ddraw.render.viewport.height, g_ddraw.render.height);
-
-        g_ddraw.render.viewport.y = g_ddraw.render.height / 2 - g_ddraw.render.viewport.height / 2;
-        g_ddraw.render.viewport.x = g_ddraw.render.width / 2 - g_ddraw.render.viewport.width / 2;
     }
 
     g_ddraw.render.scale_w = ((float)g_ddraw.render.viewport.width / g_ddraw.width);
@@ -1142,7 +1170,6 @@ HRESULT dd_SetDisplayMode(DWORD dwWidth, DWORD dwHeight, DWORD dwBPP, DWORD dwFl
         g_ddraw.mouse.rc.bottom = g_ddraw.render.viewport.height + g_ddraw.mouse.y_adjust;
     }
 
-    if (g_config.crt_auto)
     {
         /* With 'viewport=relative' the picture can be larger than the window;
          * keep the cursor in the window */
@@ -1219,7 +1246,7 @@ HRESULT dd_SetDisplayMode(DWORD dwWidth, DWORD dwHeight, DWORD dwBPP, DWORD dwFl
 
         if (IsWine())
         {
-            LONG remove_flags = !g_config.resizable ? (WS_MAXIMIZEBOX | WS_THICKFRAME) : 0;
+            LONG remove_flags = !g_config.window_resizable ? (WS_MAXIMIZEBOX | WS_THICKFRAME) : 0;
 
             real_SetWindowLongA(
                 g_ddraw.hwnd,
@@ -1227,25 +1254,22 @@ HRESULT dd_SetDisplayMode(DWORD dwWidth, DWORD dwHeight, DWORD dwBPP, DWORD dwFl
                 (real_GetWindowLongA(g_ddraw.hwnd, GWL_STYLE) | WS_MINIMIZEBOX) & ~(remove_flags));
         }
 
-        /* center the window with correct dimensions */
-        int cy = g_ddraw.mode.dmPelsWidth ? g_ddraw.mode.dmPelsWidth : g_ddraw.render.width;
-        int cx = g_ddraw.mode.dmPelsHeight ? g_ddraw.mode.dmPelsHeight : g_ddraw.render.height;
-        int x = (g_config.window_rect.left != -32000) ? g_config.window_rect.left : (cy / 2) - (g_ddraw.render.width / 2);
-        int y = (g_config.window_rect.top != -32000) ? g_config.window_rect.top : (cx / 2) - (g_ddraw.render.height / 2);
+        int x = 0;
+        int y = 0;
+        BOOL clamp = FALSE;
 
         if (g_config.fullscreen)
         {
-            x = y = 0;
-
             if (GetMenu(g_ddraw.hwnd))
             {
                 y = real_GetSystemMetrics(SM_CYMENU);
             }
         }
-        else if (border && g_config.window_rect.top == -32000 && y < 0)
+        else
         {
-            /* Make window titlebar visible if window does not fit into screen */
-            y = real_GetSystemMetrics(SM_CYCAPTION) + real_GetSystemMetrics(SM_CYSIZEFRAME);
+            POINT origin = dd_window_origin(g_ddraw.render.width, g_ddraw.render.height, &clamp);
+            x = origin.x;
+            y = origin.y;
         }
 
         if (util_is_minimized(g_ddraw.hwnd))
@@ -1258,6 +1282,24 @@ HRESULT dd_SetDisplayMode(DWORD dwWidth, DWORD dwHeight, DWORD dwBPP, DWORD dwFl
 
         AdjustWindowRectEx(&dst, style, GetMenu(g_ddraw.hwnd) != NULL, exstyle);
 
+        if (!g_config.fullscreen)
+        {
+            if (clamp)
+            {
+                /* The client area moves with its frame */
+                RECT before = dst;
+                dd_keep_on_screen(&dst);
+                x += dst.left - before.left;
+                y += dst.top - before.top;
+            }
+
+            g_ddraw.window.placed = TRUE;
+            g_ddraw.window.centre.x = x + g_ddraw.render.width / 2;
+            g_ddraw.window.centre.y = y + g_ddraw.render.height / 2;
+            g_ddraw.window.size.cx = g_ddraw.render.width;
+            g_ddraw.window.size.cy = g_ddraw.render.height;
+        }
+
         real_SetWindowPos(
             g_ddraw.hwnd, 
             HWND_NOTOPMOST, 
@@ -1268,20 +1310,7 @@ HRESULT dd_SetDisplayMode(DWORD dwWidth, DWORD dwHeight, DWORD dwBPP, DWORD dwFl
             SWP_SHOWWINDOW | SWP_FRAMECHANGED);
 
 
-        BOOL d3d9_active = FALSE;
-
-        if (g_ddraw.renderer == d3d9_render_main)
-        {
-            d3d9_active = d3d9_create();
-
-            if (!d3d9_active)
-            {
-                d3d9_release();
-                g_ddraw.show_driver_warning = TRUE;
-                g_ddraw.renderer = gdi_render_main;
-            }
-        }
-        else if (g_ddraw.renderer == ogl_render_main)
+        if (g_ddraw.renderer == ogl_render_main)
         {
             if (!ogl_create())
             {
@@ -1349,37 +1378,7 @@ HRESULT dd_SetDisplayMode(DWORD dwWidth, DWORD dwHeight, DWORD dwBPP, DWORD dwFl
             real_SetWindowLongA(g_ddraw.hwnd, GWL_EXSTYLE, exstyle & ~(WS_EX_CLIENTEDGE));
         }
 
-        BOOL d3d9_active = FALSE;
-
-        if (g_ddraw.renderer == d3d9_render_main)
-        {
-            if (g_config.nonexclusive)
-            {
-                if (util_is_minimized(g_ddraw.hwnd))
-                    real_ShowWindow(g_ddraw.hwnd, SW_RESTORE);
-
-                real_SetWindowPos(
-                    g_ddraw.hwnd,
-                    HWND_TOPMOST,
-                    0,
-                    0,
-                    g_ddraw.render.width,
-                    g_ddraw.render.height + menu_height,
-                    swp_flags);
-
-                swp_flags = SWP_SHOWWINDOW;
-            }
-
-            d3d9_active = d3d9_create();
-
-            if (!d3d9_active)
-            {
-                d3d9_release();
-                g_ddraw.show_driver_warning = TRUE;
-                g_ddraw.renderer = gdi_render_main;
-            }
-        }
-        else if (g_ddraw.renderer == ogl_render_main)
+        if (g_ddraw.renderer == ogl_render_main)
         {
             if (!ogl_create())
             {
@@ -1398,14 +1397,12 @@ HRESULT dd_SetDisplayMode(DWORD dwWidth, DWORD dwHeight, DWORD dwBPP, DWORD dwFl
             }
         }
 
-        if (!d3d9_active || g_config.nonexclusive)
         {
             if (!zooming && ChangeDisplaySettings(&g_ddraw.render.mode, CDS_FULLSCREEN) != DISP_CHANGE_SUCCESSFUL)
             {
                 g_ddraw.render.run = FALSE;
                 g_config.windowed = TRUE;
                 g_config.fullscreen = TRUE;
-                g_config.toggle_borderless = TRUE;
                 return dd_SetDisplayMode(dwWidth, dwHeight, dwBPP, dwFlags);
             }
 
@@ -1422,7 +1419,6 @@ HRESULT dd_SetDisplayMode(DWORD dwWidth, DWORD dwHeight, DWORD dwBPP, DWORD dwFl
                 g_ddraw.render.run = FALSE;
                 g_config.windowed = TRUE;
                 g_config.fullscreen = TRUE;
-                g_config.toggle_borderless = TRUE;
                 return dd_SetDisplayMode(dwWidth, dwHeight, dwBPP, dwFlags);
             }
         }
@@ -1446,9 +1442,6 @@ HRESULT dd_SetDisplayMode(DWORD dwWidth, DWORD dwHeight, DWORD dwBPP, DWORD dwFl
             g_ddraw.render.width,
             g_ddraw.render.height + menu_height,
             swp_flags);
-
-        if (d3d9_active && g_config.nonexclusive)
-            d3d9_reset(TRUE);
 
         g_ddraw.last_set_window_pos_tick = timeGetTime();
 
@@ -1544,29 +1537,28 @@ HRESULT dd_SetCooperativeLevel(HWND hwnd, DWORD dwFlags)
         }
     }
 
-    /* windowed=auto: follow the game. A windowed game gets a real window and a
-       fullscreen game gets fullscreen ('fullscreen' then only picks upscaled or
-       a real mode switch). The first exclusive fullscreen request decides for
-       good: later DDSCL_NORMAL calls are usually the game cleaning up, and an
-       Alt+Enter toggle has to survive the game calling this again. A normal
-       (windowed) request only counts before that. */
-    if (g_config.windowed_auto)
+    /* display: the first exclusive fullscreen request decides for good: later
+       DDSCL_NORMAL calls are usually the game cleaning up, and an Alt+Enter
+       toggle has to survive the game calling this again. A normal (windowed)
+       request only counts before that. */
+    if (dwFlags & DDSCL_FULLSCREEN)
     {
-        if (dwFlags & DDSCL_FULLSCREEN)
+        if (!g_ddraw.saw_fullscreen)
         {
-            if (!g_ddraw.auto_saw_fullscreen)
-            {
-                g_ddraw.auto_saw_fullscreen = TRUE;
-                g_config.windowed = FALSE;
-                g_config.fullscreen = g_config.fullscreen_setting;
-            }
+            g_ddraw.saw_fullscreen = TRUE;
+
+            DISPLAY_KIND kind = ds_display_start(g_config.display, 1);
+            g_config.windowed = kind == DISPLAY_KIND_WINDOW;
+            g_config.fullscreen = kind == DISPLAY_KIND_DESKTOP;
         }
-        else if ((dwFlags & DDSCL_NORMAL) && !g_ddraw.auto_saw_fullscreen && !g_ddraw.auto_saw_normal)
-        {
-            g_ddraw.auto_saw_normal = TRUE;
-            g_config.windowed = TRUE;
-            g_config.fullscreen = FALSE;
-        }
+    }
+    else if ((dwFlags & DDSCL_NORMAL) && !g_ddraw.saw_fullscreen && !g_ddraw.saw_normal)
+    {
+        g_ddraw.saw_normal = TRUE;
+
+        DISPLAY_KIND kind = ds_display_start(g_config.display, 0);
+        g_config.windowed = kind == DISPLAY_KIND_WINDOW;
+        g_config.fullscreen = kind == DISPLAY_KIND_DESKTOP;
     }
 
     if (!g_ddraw.hwnd)
@@ -1631,32 +1623,11 @@ HRESULT dd_SetCooperativeLevel(HWND hwnd, DWORD dwFlags)
         g_ddraw.iskkndx = strcmp(g_ddraw.title, "KKND Xtreme") == 0;
         g_ddraw.isworms2 = strcmp(g_ddraw.title, "worms2") == 0;
 
-        if (g_ddraw.iskkndx)
+        /* Worms 2: only the known executable */
+        if (g_ddraw.isworms2 &&
+            memcmp((char*)GetModuleHandleA(NULL) + 0x00010000, "\x17\x81\xC2\x00\x80\x00\x00\x89", 8) != 0)
         {
-            g_ddraw.upscale_hack_width = 640;
-            g_ddraw.upscale_hack_height = 480;
-        }
-        else if (g_ddraw.isredalert || g_ddraw.iscnc1)
-        {
-            g_ddraw.upscale_hack_width = 640;
-            g_ddraw.upscale_hack_height = 400;
-        }
-        else if (g_ddraw.isworms2)
-        {
-            if (memcmp((char*)GetModuleHandleA(NULL) + 0x00010000, "\x17\x81\xC2\x00\x80\x00\x00\x89", 8) != 0)
-            {
-                g_ddraw.isworms2 = FALSE;
-            }
-            else
-            {
-                g_ddraw.upscale_hack_width = 80;
-                g_ddraw.upscale_hack_height = 60;
-            }
-        }
-
-        if (g_config.vhack && !g_ddraw.isredalert && !g_ddraw.iscnc1 && !g_ddraw.iskkndx && !g_ddraw.isworms2)
-        {
-            g_config.vhack = 0;
+            g_ddraw.isworms2 = FALSE;
         }
     }
 
@@ -1755,16 +1726,20 @@ HRESULT dd_SetCooperativeLevel(HWND hwnd, DWORD dwFlags)
 
                 TRACE("     windowed bpp=%u\n", bpp);
 
-                /* The program chose its window's size and place, and that size
-                   is its mode: show it 1:1 where it is, not at a saved size
-                   (which would stretch it) or a saved position */
+                /* The program chose its window's size, and that size is its
+                   mode. The window gets window_size, centred where the
+                   program put it (window_position=auto) */
                 POINT origin = { 0, 0 };
                 real_ClientToScreen(hwnd, &origin);
-                g_config.window_rect.left = origin.x;
-                g_config.window_rect.top = origin.y;
-                g_config.window_rect.right = rc.right;
-                g_config.window_rect.bottom = rc.bottom;
-                g_config.window_is_programs = TRUE;
+
+                if (!g_ddraw.window.placed)
+                {
+                    g_ddraw.window.placed = TRUE;
+                    g_ddraw.window.centre.x = origin.x + rc.right / 2;
+                    g_ddraw.window.centre.y = origin.y + rc.bottom / 2;
+                    g_ddraw.window.size.cx = rc.right;
+                    g_ddraw.window.size.cy = rc.bottom;
+                }
 
                 dd_SetDisplayMode(rc.right, rc.bottom, bpp, 0);
             }
@@ -1873,15 +1848,7 @@ ULONG dd_Release()
 
         if (!g_config.windowed)
         {
-            if (g_ddraw.renderer == d3d9_render_main && !g_config.nonexclusive)
-            {
-                if (!d3d9_reset(TRUE))
-                    d3d9_release();
-            }
-            else
-            {
-                ChangeDisplaySettings(NULL, 0);
-            }
+            ChangeDisplaySettings(NULL, 0);
         }
 
         if (g_ddraw.renderer == ogl_render_main)
@@ -2074,38 +2041,11 @@ HRESULT dd_CreateEx(GUID* lpGuid, LPVOID* lplpDD, REFIID iid, IUnknown* pUnkOute
         }
 
         
-        if (_strcmpi(g_config.renderer, "direct3d9on12") == 0)
+        /* renderer: auto = Direct3D 11, then OpenGL (a 3.3 core context), then
+         * GDI. config.c has already mapped the old renderers to auto */
+        if (tolower(g_config.renderer[0]) == 's' || tolower(g_config.renderer[0]) == 'g') /* gdi */
         {
-            g_config.d3d9on12 = TRUE;
-        }
-        else if (_strcmpi(g_config.renderer, "openglcore") == 0)
-        {
-            g_config.opengl_core = TRUE;
-        }
-
-        /* crt-auto runs DOSBox Staging's shaders: in Direct3D 11, or in OpenGL
-         * with a 3.3 core context */
-        BOOL renderer_auto = _strcmpi(g_config.renderer, "auto") == 0;
-
-        BOOL crt_auto_d3d11 =
-            g_config.crt_auto && renderer_auto && d3d11_is_available();
-
-        BOOL crt_auto_ogl =
-            g_config.crt_auto && !crt_auto_d3d11 &&
-            (tolower(g_config.renderer[0]) == 'o' || renderer_auto);
-
-        if (crt_auto_ogl)
-        {
-            g_config.opengl_core = TRUE;
-        }
-
-        if (crt_auto_d3d11)
-        {
-            g_ddraw.renderer = d3d11_render_main;
-        }
-        else if (crt_auto_ogl && oglu_load_dll())
-        {
-            g_ddraw.renderer = ogl_render_main;
+            g_ddraw.renderer = gdi_render_main;
         }
         else if (_strcmpi(g_config.renderer, "direct3d11") == 0)
         {
@@ -2119,15 +2059,7 @@ HRESULT dd_CreateEx(GUID* lpGuid, LPVOID* lplpDD, REFIID iid, IUnknown* pUnkOute
                 g_ddraw.renderer = gdi_render_main;
             }
         }
-        else if (tolower(g_config.renderer[0]) == 'd') /* direct3d9 or direct3d9on12*/
-        {
-            g_ddraw.renderer = d3d9_render_main;
-        }
-        else if (tolower(g_config.renderer[0]) == 's' || tolower(g_config.renderer[0]) == 'g') /* gdi */
-        {
-            g_ddraw.renderer = gdi_render_main;
-        }
-        else if (tolower(g_config.renderer[0]) == 'o') /* opengl or openglcore */
+        else if (_strcmpi(g_config.renderer, "opengl") == 0)
         {
             if (oglu_load_dll())
             {
@@ -2141,9 +2073,9 @@ HRESULT dd_CreateEx(GUID* lpGuid, LPVOID* lplpDD, REFIID iid, IUnknown* pUnkOute
         }
         else /* auto */
         {
-            if (!IsWine() && d3d9_is_available())
+            if (d3d11_is_available())
             {
-                g_ddraw.renderer = d3d9_render_main;
+                g_ddraw.renderer = d3d11_render_main;
             }
             else if (oglu_load_dll())
             {

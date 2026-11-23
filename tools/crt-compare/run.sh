@@ -54,6 +54,7 @@ fi
 
 w() { cygpath -w "$1"; }
 PS="powershell -NoProfile -ExecutionPolicy Bypass -File $(w "$HERE/capture.ps1")"
+DOSSHOT="powershell -NoProfile -ExecutionPolicy Bypass -File $(w "$HERE/dosshot.ps1")"
 
 # VGA BIOS mode for each size: 13h, then VESA modes DOSBox's S3 BIOS has
 declare -A MODE=([320x200]=0x13 [320x240]=0x151 [640x480]=0x101 [800x600]=0x103)
@@ -79,20 +80,17 @@ setup_dcrt() {
     # The first run writes the default directcrt.ini
     (cd "$dir" && ./ddtest.exe --size 320x200 --bpp 8 --present flip --start --frames 2 >/dev/null 2>&1)
     set_ini "$dir/directcrt.ini" shader crt-auto
-    set_ini "$dir/directcrt.ini" savesettings 0
+    set_ini "$dir/directcrt.ini" remember_window off
     [ -n "$renderer" ] && set_ini "$dir/directcrt.ini" renderer "$renderer"
     local kv
     for kv in "${settings[@]}"; do
         set_ini "$dir/directcrt.ini" "${kv%%=*}" "${kv#*=}"
     done
     if [ "$windowed" = 1 ]; then
-        set_ini "$dir/directcrt.ini" windowed true
-        set_ini "$dir/directcrt.ini" fullscreen false
-        set_ini "$dir/directcrt.ini" width 1920
-        set_ini "$dir/directcrt.ini" height 1080
+        set_ini "$dir/directcrt.ini" display window
+        set_ini "$dir/directcrt.ini" window_size 1920x1080px
     else
-        set_ini "$dir/directcrt.ini" windowed auto
-        set_ini "$dir/directcrt.ini" fullscreen true
+        set_ini "$dir/directcrt.ini" display fullscreen
     fi
     if [ -n "$dxvk" ]; then
         cp "$dxvk/d3d11.dll" "$dxvk/dxgi.dll" "$dir/"
@@ -138,16 +136,16 @@ for c in "${cases[@]}"; do
         # Long waits: the NVIDIA overlay notice covers part of the screen at first
         $PS -Exe "$(w "$WORK/fs/ddtest.exe")" -ArgList "$args" -Out "$(w "$cap/dcrt_$tag.png")" -Delay 16
         if [ "$REFERENCE" = dosbox ]; then
-            python -I "$HERE/dosconf.py" "$(w "$WORK/dos/$res")" fullscreen "$conf" "${settings[@]}" >/dev/null
-            $PS -Exe "$(w "$DOSBOX")" -ArgList "--noprimaryconf --nolocalconf --conf $conf" -Out "$(w "$cap/${REFERENCE}_$tag.png")" -Delay 16
+            python -I "$HERE/dosconf.py" "$(w "$WORK/dos/$res")" fullscreen "$conf" "$(w "$WORK/dos/shots")" "${settings[@]}" >/dev/null
+            $DOSSHOT -Exe "$(w "$DOSBOX")" -ArgList "--noprimaryconf --nolocalconf --conf $conf" -Out "$(w "$cap/${REFERENCE}_$tag.png")" -CaptureDir "$(w "$WORK/dos/shots")"
         else
             $PS -Exe "$(w "$WORK/ref-fs/ddtest.exe")" -ArgList "$args" -Out "$(w "$cap/${REFERENCE}_$tag.png")" -Delay 16
         fi
     else
         $PS -Exe "$(w "$WORK/win/ddtest.exe")" -ArgList "$args" -Out "$(w "$cap/dcrt_$tag.png")" -Delay 8 -Client
         if [ "$REFERENCE" = dosbox ]; then
-            python -I "$HERE/dosconf.py" "$(w "$WORK/dos/$res")" "$WIN_LOGICAL" "$conf" "${settings[@]}" >/dev/null
-            $PS -Exe "$(w "$DOSBOX")" -ArgList "--noprimaryconf --nolocalconf --conf $conf" -Out "$(w "$cap/${REFERENCE}_$tag.png")" -Delay 8 -Client -Class SDL_app
+            python -I "$HERE/dosconf.py" "$(w "$WORK/dos/$res")" "$WIN_LOGICAL" "$conf" "$(w "$WORK/dos/shots")" "${settings[@]}" >/dev/null
+            $DOSSHOT -Exe "$(w "$DOSBOX")" -ArgList "--noprimaryconf --nolocalconf --conf $conf" -Out "$(w "$cap/${REFERENCE}_$tag.png")" -CaptureDir "$(w "$WORK/dos/shots")"
         else
             $PS -Exe "$(w "$WORK/ref-win/ddtest.exe")" -ArgList "$args" -Out "$(w "$cap/${REFERENCE}_$tag.png")" -Delay 8 -Client
         fi

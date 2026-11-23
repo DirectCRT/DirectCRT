@@ -25,6 +25,5 @@ BOOL util_unadjust_window_rect(LPRECT prc, DWORD dwStyle, BOOL fMenu, DWORD dwEx
 void util_set_window_rect(int x, int y, int width, int height, UINT flags);
 BOOL CALLBACK util_enum_thread_wnd_proc(HWND hwnd, LPARAM lParam);
 BOOL CALLBACK util_enum_child_proc(HWND hwnd, LPARAM lParam);
-BOOL util_detect_low_res_screen();
 
 #endif

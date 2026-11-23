@@ -31,10 +31,12 @@ apply when you press Enter or leave the box. Like a game changing its settings:
   as a fresh run (DirectCRT takes a windowed program's window size as its mode
   once, when the program sets its cooperative level)
 
-Windowed, the test window shows the picture 1:1, so its size is the resolution:
-resizing the window changes the resolution in the panel (and starts over at the
-new size, where the window is), and a new resolution in the panel resizes the
-window.
+Windowed, the test window's size is the resolution: resizing it changes the
+resolution in the panel (and starts over at the new size, where the window is),
+and a new resolution in the panel resizes it. Through Windows' own DirectDraw
+the picture is 1:1. DirectCRT scales it like any game in its own window: the
+window it shows is `window_size`, while ddtest still sees a window of its own
+size, so resizing DirectCRT's window doesn't change the resolution.
 
 **DirectDraw modes** lists the display modes the loaded `ddraw.dll` reports, after
 you press **List**; picking one fills in the resolution, bit depth and refresh rate.
@@ -55,10 +57,11 @@ info text and the mouse crosshair, left click marks a point, right click clears
 the marks.
 
 Presentation methods, matching what games do. They're what the program asks
-DirectDraw for. DirectCRT follows the request with `windowed=auto` (the default):
-a window for the windowed method, fullscreen for the others, upscaled with
-`fullscreen=true` or as a real mode switch with `fullscreen=false`.
-`windowed=true` or `windowed=false` force one or the other whatever is asked.
+DirectDraw for. DirectCRT follows the request with `display=auto` (the default):
+a window for the windowed method, fullscreen at the desktop resolution for the
+others. `display=original` switches the monitor to the resolution instead.
+`display=window` and `display=fullscreen` force one or the other whatever is
+asked.
 
 - **Exclusive fullscreen, page flipping** - a primary surface with one back buffer, `Flip`
 - **Exclusive fullscreen, Blt to the primary surface** - draw into an off-screen surface, `Blt` it to the primary

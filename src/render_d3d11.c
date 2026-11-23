@@ -109,7 +109,6 @@ typedef struct D3D11RENDERER
     ID3D11SamplerState* linear;
     ID3D11VertexShader* vs_quad;
     ID3D11PixelShader* ps_convert;
-    ID3D11PixelShader* ps_plain;
     ID3D11Buffer* window_cb;
     float window_cb_data[8];
     ID3D11Texture2D* surface_tex;
@@ -550,6 +549,14 @@ static BOOL d3d11_create_crt_auto()
         shader_res = "CRT_HYLLIAN";
         preset_res = "CRT_PRESET_VGA_4K";
         break;
+    case CRT_SHADER_NEAREST:
+        shader = &d3d11_nearest;
+        shader_res = "CRT_NEAREST";
+        break;
+    case CRT_SHADER_BILINEAR:
+        shader = &d3d11_bilinear;
+        shader_res = "CRT_BILINEAR";
+        break;
     case CRT_SHADER_SHARP:
     default:
         shader = &d3d11_sharp;
@@ -662,9 +669,7 @@ static BOOL d3d11_create_resources()
     if (FAILEDX(ID3D11Device_CreateInputLayout(
             g_d3d11.device, &ied, 1, d3d11_vs_quad, sizeof(d3d11_vs_quad), &g_d3d11.layout)) ||
         FAILEDX(ID3D11Device_CreateVertexShader(
-            g_d3d11.device, d3d11_vs_quad, sizeof(d3d11_vs_quad), NULL, &g_d3d11.vs_quad)) ||
-        FAILEDX(ID3D11Device_CreatePixelShader(
-            g_d3d11.device, d3d11_ps_plain, sizeof(d3d11_ps_plain), NULL, &g_d3d11.ps_plain)))
+            g_d3d11.device, d3d11_vs_quad, sizeof(d3d11_vs_quad), NULL, &g_d3d11.vs_quad)))
         return FALSE;
 
     /* The quad's winding flips with y */
@@ -721,9 +726,12 @@ static BOOL d3d11_create_resources()
     if (!d3d11_create_target(&g_d3d11.conv, g_ddraw.width, g_ddraw.height))
         return FALSE;
 
-    g_d3d11.crt_auto = g_config.crt_auto && d3d11_create_crt_auto();
+    g_d3d11.crt_auto = d3d11_create_crt_auto();
 
-    if (g_d3d11.crt_auto && g_d3d11.crt_pass.shader->window_pass)
+    if (!g_d3d11.crt_auto)
+        return FALSE;
+
+    if (g_d3d11.crt_pass.shader->window_pass)
     {
         g_d3d11.window_cb = d3d11_create_cbuffer(sizeof(g_d3d11.window_cb_data));
         memset(g_d3d11.window_cb_data, 0, sizeof(g_d3d11.window_cb_data));
@@ -771,7 +779,6 @@ static void d3d11_release_resources()
     SAFE_RELEASE(g_d3d11.surface_srv);
     SAFE_RELEASE(g_d3d11.surface_tex);
     SAFE_RELEASE(g_d3d11.ps_convert);
-    SAFE_RELEASE(g_d3d11.ps_plain);
     SAFE_RELEASE(g_d3d11.vs_quad);
     SAFE_RELEASE(g_d3d11.linear);
     SAFE_RELEASE(g_d3d11.point);
@@ -988,37 +995,11 @@ static void d3d11_draw_frame()
             memcpy(g_d3d11.window_cb_data, cb, sizeof(cb));
         }
 
+        /* nearest has linear_filtering off */
         d3d11_draw_pass(
             g_d3d11.back_rtv, g_d3d11.crt_pass.vs, g_d3d11.crt_pass.ps, &g_d3d11.crt_pass,
-            g_d3d11.adj.srv, NULL, g_d3d11.linear);
-    }
-    else
-    {
-        ID3D11DeviceContext_ClearRenderTargetView(g_d3d11.ctx, g_d3d11.back_rtv, black);
-
-        BOOL scaled;
-
-        if (g_ddraw.child_window_exists)
-        {
-            d3d11_set_viewport(0.0f, 0.0f, (float)g_ddraw.width, (float)g_ddraw.height);
-            scaled = FALSE;
-        }
-        else
-        {
-            d3d11_set_viewport(
-                (float)g_ddraw.render.viewport.x,
-                (float)g_ddraw.render.viewport.y,
-                (float)g_ddraw.render.viewport.width,
-                (float)g_ddraw.render.viewport.height);
-
-            scaled =
-                g_ddraw.render.viewport.width != g_ddraw.width ||
-                g_ddraw.render.viewport.height != g_ddraw.height;
-        }
-
-        d3d11_draw_pass(
-            g_d3d11.back_rtv, g_d3d11.vs_quad, g_d3d11.ps_plain, NULL,
-            g_d3d11.conv.srv, NULL, scaled && g_config.d3d9_filter ? g_d3d11.linear : g_d3d11.point);
+            g_d3d11.adj.srv, NULL,
+            g_ddraw.render.crt.shader == CRT_SHADER_NEAREST ? g_d3d11.point : g_d3d11.linear);
     }
 
 #ifdef _DEBUG

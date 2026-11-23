@@ -9,7 +9,6 @@
 #include "ddsurface.h"
 #include "hook.h"
 #include "mouse.h"
-#include "render_d3d9.h"
 #include "utils.h"
 #include "config.h"
 #include "versionhelpers.h"
@@ -687,113 +686,50 @@ BOOL util_get_lowest_resolution(
     return result;
 }
 
+/* Maximize fills the work area, where the picture is placed as in fullscreen;
+ * the second time the window goes back to window_size */
 void util_toggle_maximize()
 {
-    if (!g_config.resizable || !g_config.windowed || g_config.fullscreen || !g_ddraw.width)
+    if (!g_config.window_resizable || !g_config.windowed || g_config.fullscreen || !g_ddraw.width)
         return;
 
-    /* Do not allow cnc-ddraw maximize while macOS maximize is active */
+    /* Do not allow DirectCRT's maximize while macOS maximize is active */
     if (IsMacOS() && !g_config.window_rect.left && !g_config.window_rect.top)
         return;
 
     RECT client_rc;
-    RECT dst_rc;
+    RECT work_rc;
 
     LONG style = real_GetWindowLongA(g_ddraw.hwnd, GWL_STYLE);
     LONG exstyle = real_GetWindowLongA(g_ddraw.hwnd, GWL_EXSTYLE);
     BOOL got_menu = GetMenu(g_ddraw.hwnd) != NULL;
 
-    if (real_GetClientRect(g_ddraw.hwnd, &client_rc) && SystemParametersInfo(SPI_GETWORKAREA, 0, &dst_rc, 0))
+    if (!real_GetClientRect(g_ddraw.hwnd, &client_rc) || !SystemParametersInfo(SPI_GETWORKAREA, 0, &work_rc, 0))
+        return;
+
+    /* The client area of a window that fills the work area */
+    RECT max_rc = work_rc;
+    util_unadjust_window_rect(&max_rc, style, got_menu, exstyle);
+
+    int width = max_rc.right - max_rc.left;
+    int height = max_rc.bottom - max_rc.top;
+
+    if (client_rc.right == width && client_rc.bottom == height)
     {
-        int width = (dst_rc.right - dst_rc.left);
-        int height = (dst_rc.bottom - dst_rc.top);
-        int x = dst_rc.left;
-        int y = dst_rc.top;
+        g_config.window_rect.left = -32000;
+        g_config.window_rect.top = -32000;
+        g_config.window_rect.right = 0;
+        g_config.window_rect.bottom = 0;
 
-        if (client_rc.right != g_ddraw.width || client_rc.bottom != g_ddraw.height)
-        {
-            dst_rc.left = 0;
-            dst_rc.top = 0;
-            dst_rc.right = g_ddraw.width;
-            dst_rc.bottom = g_ddraw.height;
-
-            AdjustWindowRectEx(&dst_rc, style, got_menu, exstyle);
-        }
-        else if (g_config.boxing)
-        {
-            dst_rc.left = 0;
-            dst_rc.top = 0;
-            dst_rc.right = g_ddraw.width;
-            dst_rc.bottom = g_ddraw.height;
-
-            for (int i = 20; i-- > 1;)
-            {
-                if (width >= g_ddraw.width * i && height - 20 >= g_ddraw.height * i)
-                {
-                    dst_rc.right = g_ddraw.width * i;
-                    dst_rc.bottom = g_ddraw.height * i;
-                    break;
-                }
-            }
-
-            AdjustWindowRectEx(&dst_rc, style, got_menu, exstyle);
-        }
-        else if (g_config.maintas)
-        {
-            util_unadjust_window_rect(&dst_rc, style, got_menu, exstyle);
-
-            int w = dst_rc.right - dst_rc.left;
-            int h = dst_rc.bottom - dst_rc.top;
-
-            double dst_ar;
-            double src_ar = (double)h / w;
-
-            if (g_config.aspect_ratio[0])
-            {
-                char* e = &g_config.aspect_ratio[0];
-
-                DWORD cx = strtoul(e, &e, 0);
-                DWORD cy = strtoul(e + 1, &e, 0);
-
-                dst_ar = (double)cy / cx;
-            }
-            else
-            {
-                dst_ar = (double)g_ddraw.height / g_ddraw.width;
-            }
-
-            dst_rc.top = 0;
-            dst_rc.left = 0;
-            dst_rc.right = w;
-            dst_rc.bottom = (LONG)round(dst_ar * w);
-
-            if (src_ar < dst_ar)
-            {
-                dst_rc.right = (LONG)round(((double)dst_rc.right / dst_rc.bottom) * h);
-                dst_rc.bottom = h;
-            }
-
-            AdjustWindowRectEx(&dst_rc, style, got_menu, exstyle);
-        }
-
-        RECT pos_rc;
-        pos_rc.left = (width / 2) - ((dst_rc.right - dst_rc.left) / 2) + x;
-        pos_rc.top = (height / 2) - ((dst_rc.bottom - dst_rc.top) / 2) + y;
-        pos_rc.right = (dst_rc.right - dst_rc.left);
-        pos_rc.bottom = (dst_rc.bottom - dst_rc.top);
-
-        util_unadjust_window_rect(&pos_rc, style, got_menu, exstyle);
-        util_unadjust_window_rect(&dst_rc, style, got_menu, exstyle);
-
-        util_set_window_rect(
-            pos_rc.left,
-            pos_rc.top,
-            dst_rc.right - dst_rc.left,
-            dst_rc.bottom - dst_rc.top,
-            0);
+        util_set_window_rect(0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+    }
+    else
+    {
+        util_set_window_rect(max_rc.left, max_rc.top, width, height, 0);
     }
 }
 
+/* Alt+Enter: from a window to the fullscreen that 'display' gives, and back */
 void util_toggle_fullscreen()
 {
     /* Disable ALT+ENTER on battle.net and Infantry Online Zone List Window */
@@ -804,78 +740,46 @@ void util_toggle_fullscreen()
     if (IsMacOS() && !g_config.window_rect.left && !g_config.window_rect.top)
         return;
 
-    if (g_config.toggle_borderless && g_config.windowed)
+    mouse_unlock();
+
+    if (g_config.windowed && !g_config.fullscreen)
     {
-        if (!g_config.fullscreen)
-        {
-            mouse_unlock();
+        DISPLAY_KIND kind = ds_display_fullscreen_kind(g_config.display);
 
-            g_config.fullscreen = TRUE;
-            dd_SetDisplayMode(0, 0, 0, 0);
+        g_config.windowed = FALSE;
+        g_config.fullscreen = kind == DISPLAY_KIND_DESKTOP;
 
-            mouse_lock();
-        }
-        else
-        {
-            mouse_unlock();
+        dd_SetDisplayMode(0, 0, 0, SDM_LEAVE_WINDOWED);
+        util_update_bnet_pos(0, 0);
 
-            g_config.fullscreen = FALSE;
-            dd_SetDisplayMode(0, 0, 0, 0);
-
-            //mouse_lock();
-        }
+        mouse_lock();
     }
-    else 
+    else
     {
-        if (g_config.windowed)
+        /* Borderless (the fallback when a mode switch failed) has no mode to
+           restore */
+        BOOL was_borderless = g_config.windowed;
+
+        g_config.windowed = TRUE;
+        g_config.fullscreen = FALSE;
+
+        if (!was_borderless)
         {
-            mouse_unlock();
-
-            if (g_config.toggle_upscaled)
+            if (g_ddraw.render.thread)
             {
-                g_config.fullscreen = TRUE;
+                EnterCriticalSection(&g_ddraw.cs);
+                g_ddraw.render.run = FALSE;
+                ReleaseSemaphore(g_ddraw.render.sem, 1, NULL);
+                LeaveCriticalSection(&g_ddraw.cs);
+
+                WaitForSingleObject(g_ddraw.render.thread, INFINITE);
+                g_ddraw.render.thread = NULL;
             }
 
-            g_config.windowed = FALSE;
-            dd_SetDisplayMode(0, 0, 0, SDM_LEAVE_WINDOWED);
-            util_update_bnet_pos(0, 0);
-
-            mouse_lock();
+            ChangeDisplaySettings(NULL, g_ddraw.bnet_active ? CDS_FULLSCREEN : 0);
         }
-        else
-        {
-            mouse_unlock();
 
-            if (g_config.toggle_upscaled)
-            {
-                g_config.fullscreen = FALSE;
-            }
-
-            g_config.windowed = TRUE;
-
-            if (g_ddraw.renderer == d3d9_render_main && !g_config.nonexclusive)
-            {
-                d3d9_reset(g_config.windowed);
-            }
-            else
-            {
-                if (g_ddraw.render.thread)
-                {
-                    EnterCriticalSection(&g_ddraw.cs);
-                    g_ddraw.render.run = FALSE;
-                    ReleaseSemaphore(g_ddraw.render.sem, 1, NULL);
-                    LeaveCriticalSection(&g_ddraw.cs);
-
-                    WaitForSingleObject(g_ddraw.render.thread, INFINITE);
-                    g_ddraw.render.thread = NULL;
-                }
-
-                ChangeDisplaySettings(NULL, g_ddraw.bnet_active ? CDS_FULLSCREEN : 0);
-            }
-
-            dd_SetDisplayMode(0, 0, 0, SDM_LEAVE_FULLSCREEN);
-            //mouse_lock();
-        }
+        dd_SetDisplayMode(0, 0, 0, SDM_LEAVE_FULLSCREEN);
     }
 }
 
@@ -1046,81 +950,4 @@ BOOL CALLBACK util_enum_child_proc(HWND hwnd, LPARAM lparam)
 #else
     return FALSE;
 #endif
-}
-
-static unsigned char util_get_pixel(int x, int y)
-{
-    return ((unsigned char*)dds_GetBuffer(
-        g_ddraw.primary))[y * g_ddraw.primary->pitch + x * g_ddraw.primary->bytes_pp];
-}
-
-BOOL util_detect_low_res_screen()
-{
-    /* struct Copied from wkReSolution */
-    typedef struct
-    {
-        PVOID UnkTable1;
-        DWORD Unk1, Unk2, Unk3, Unk4;
-        PVOID UnkDD, UnkTable2;
-        DWORD Unk5;
-        DWORD RenderWidth, RenderHeight;
-        DWORD Unk6, Unk7;
-        DWORD WidthRT, HeightRT;
-        DWORD HalfWidth, HalfHeight;
-        DWORD Unk8;
-        PCHAR UnkC;
-        LPDIRECTDRAW lpDD;
-    } * LPW2DDSTRUCT;
-
-    static int* in_movie = (int*)0x00665F58;
-    static int* is_vqa_640 = (int*)0x0065D7BC;
-    static BYTE* should_stretch = (BYTE*)0x00607D78;
-    static LPW2DDSTRUCT* pW2DS;
-    
-    if (!pW2DS)
-        pW2DS = (LPW2DDSTRUCT*)((DWORD)GetModuleHandleA(NULL) + 0x799C4);
-
-    if (g_ddraw.width <= g_ddraw.upscale_hack_width || g_ddraw.height <= g_ddraw.upscale_hack_height)
-    {
-        return FALSE;
-    }
-
-    if (g_ddraw.isredalert)
-    {
-        if ((*in_movie && !*is_vqa_640) || *should_stretch)
-        {
-            return TRUE;
-        }
-
-        return FALSE;
-    }
-    else if (g_ddraw.iscnc1)
-    {
-        return
-            util_get_pixel(g_ddraw.upscale_hack_width + 1, 0) == 0 ||
-            util_get_pixel(g_ddraw.upscale_hack_width + 5, 1) == 0;
-    }
-    else if (g_ddraw.iskkndx)
-    {
-        return util_get_pixel(g_ddraw.width - 3, 3) == 0;
-    }
-    else if (g_ddraw.isworms2)
-    {
-        DWORD w2_width = *pW2DS ? (*pW2DS)->RenderWidth : 0;
-        DWORD w2_height = *pW2DS ? (*pW2DS)->RenderHeight : 0;
-
-        if (w2_width && w2_width < g_ddraw.width && w2_height && w2_height < g_ddraw.height)
-        {
-            if (g_ddraw.upscale_hack_width != w2_width || g_ddraw.upscale_hack_height != w2_height)
-            {
-                g_ddraw.upscale_hack_width = w2_width;
-                g_ddraw.upscale_hack_height = w2_height;
-                InterlockedExchange(&g_ddraw.upscale_hack_active, FALSE);
-            }
-
-            return TRUE;
-        }
-    }
-
-    return FALSE;
 }

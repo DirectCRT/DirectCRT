@@ -1,6 +1,6 @@
 # DirectCRT development plan
 
-Status: phase 2 done, as of 23 November 2026.
+Status: phase 3 started (the display settings are done), as of 23 November 2026.
 
 ## Goal
 
@@ -115,16 +115,16 @@ What we take:
 | About 280 per-game profiles in `src/config.c` | Keep; show them as per-game defaults in the OSD |
 | Compatibility settings (`nonexclusive`, `singlecpu`, `fixchilds`, `guard_lines`, `fake_mode`, `win_version`, `hook`, ...) | Keep, on an advanced page |
 | Game-specific hacks (`armadahack`, `tshack`, ...) | Keep, set by the profiles |
-| Window modes, Alt+Enter, saved window position, `toggle_borderless`, `toggle_upscaled` | Replace with `display` and the `window_*` settings in phase 3 (see [Display settings](#display-settings)). Done so far: `windowed=auto` (the new default) follows the game's request, a window for windowed games and fullscreen for fullscreen ones, with `fullscreen` choosing upscaled or a real mode switch; `true`/`false` still force it. Alt+Enter is no longer saved to the ini, so every start uses the configured mode. Windowed games now get the desktop's bit depth (32-bit), as with Windows' own DirectDraw, instead of a fixed 16-bit that cut 24/32-bit pictures down; `windowed_bpp=16` brings the old behaviour back. For now they're shown 1:1 where they put their window, and a saved window size and position (`savesettings`) no longer stretches or moves them; phase 3 scales them to `window_size` instead |
+| Window modes, Alt+Enter, saved window position, `toggle_borderless`, `toggle_upscaled` | Done in phase 3: replaced with `display` and the `window_*` settings (see [Display settings](#display-settings)). Windowed games keep the desktop's bit depth (32-bit) from phase 1; `windowed_bpp=16` brings the old 16-bit back |
 | Display modes: 8, 16 and 32-bit; `SetDisplayMode` rejects 24-bit | Add 24-bit in the presenter (convert to 32-bit on upload); some games use it |
 | Plain "Fullscreen", which switches the monitor to the game's own resolution | Keep as `display=original`, opt-in, with help text saying the monitor gets the game's resolution and there's no CRT shading |
 | Frame limiter and VSync (`maxfps`, `limiter_type`, `maxgameticks`, `minfps`, `vsync`) | Keep |
 | Mouse (`adjmouse`, cursor-unlock hotkeys, cursor fixes) | Keep, driven by the new scaling code |
 | Screenshots, debug logs, crash dumps | Keep; add a choice of raw or shaded screenshots |
-| `renderer` (gdi, opengl, openglcore, direct3d9, direct3d9on12, auto) | Replace with Direct3D 11, plus OpenGL (crt-auto only, without its libretro shader loading and GL 1.x/2.x paths) and the GDI fallback |
-| `shader`, `d3d9_filter`, libretro shader loading | Keep `shader` with DOSBox's values `crt-auto`, `sharp`, `nearest` and `bilinear`; remove the rest |
-| `width`, `height`, `maintas`, `aspect_ratio`, `boxing` | Replace with `window_size`, `viewport`, `aspect` and `integer_scaling`, for every shader |
-| `inject_resolution`, `vhack` | Remove (they make games render at high resolutions) |
+| `renderer` (gdi, opengl, openglcore, direct3d9, direct3d9on12, auto) | Done: Direct3D 11, OpenGL (crt-auto's pipeline only, in a 3.3 core context, without the libretro shader loading and GL 1.x/2.x paths) and GDI. Direct3D 9 is removed; `openglcore`, `direct3d9` and `direct3d9on12` read as `auto` |
+| `shader`, `d3d9_filter`, libretro shader loading | Done: `shader` has DOSBox's values `crt-auto`, `sharp`, `nearest` and `bilinear`, all through crt-auto's pipeline; the rest is removed |
+| `width`, `height`, `maintas`, `aspect_ratio`, `boxing` | Done: replaced with `window_size`, `viewport`, `aspect` and `integer_scaling`, for every shader |
+| `inject_resolution`, `vhack` | Done: removed (they make games render at high resolutions) |
 | XP build configurations, MinGW i486 build, old-Windows code paths | Remove. Done: the build configurations (DebugLogXP and DebugLogMiniXP are now DebugLog and DebugLogMini on the current toolset) and the i486 build scripts. The old-Windows code paths are left for phase 3 |
 | C++Builder config tool (`config/`) | Remove in phase 3; the overlay replaces it. Until then it's out of date: it still edits `ddraw.ini` |
 
@@ -400,6 +400,23 @@ otherwise keep the no-shading trap. `original` has to be chosen.
    surfaces, `WaitForVerticalBlank` plus `Blt`, colour-fill and colour-key
    blits, and palette fades, so it works as a regression test. Also remove
    the C++Builder config tool (`config/`).
+   - Done: the display settings, as described above, with unit tests
+     (`tests/test_display_settings.c`) and the old keys translated. Every
+     renderer uses crt-auto's layout and pipeline; `renderer=gdi` scales
+     with nearest neighbour into the same viewport. A mode switch that fails
+     falls back to borderless fullscreen. The game profiles for ctp2, Jazz2,
+     Jazz2_NonPlus and KKNDgame only set removed keys and are gone.
+     Battle.net's dialogs are shown 1:1. Alt+Page Down makes the window fill
+     the work area, with the picture placed in it like in any window, instead
+     of a size with the game's shape. Windows are at least 320x200.
+   - Done: crt-compare takes DOSBox's own rendered screenshot instead of a
+     screen capture, using DOSBox's web server to see when the picture is up
+     and to shut it down (`dosshot.ps1`). With the new settings
+     (`display=fullscreen`; `display=window` with `window_size=1920x1080px`)
+     all eight cases are the same as DOSBox on both renderers, now with no
+     offset between the pictures.
+   - Not done yet: when a game resizes its own window, the new size should
+     become its new resolution. For now it doesn't.
 4. **Overlay**, in this order: the status OSD; the full OSD with input
    capture; safe mode; the first-start toast and the tour.
 5. **Later.** HDR output first; deinterlacing and dedithering after it, at a

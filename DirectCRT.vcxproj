@@ -61,12 +61,12 @@
     <ClCompile Include="src\opengl_utils.c" />
     <ClCompile Include="src\ddpalette.c" />
     <ClCompile Include="src\render_ogl.c" />
-    <ClCompile Include="src\render_d3d9.c" />
     <ClCompile Include="src\render_d3d11.c" />
     <ClCompile Include="src\render_gdi.c" />
     <ClCompile Include="src\screenshot.c" />
     <ClCompile Include="src\config.c" />
     <ClCompile Include="src\crt_auto.c" />
+    <ClCompile Include="src\display_settings.c" />
     <ClCompile Include="src\ddsurface.c" />
     <ClCompile Include="src\versionhelpers.c" />
     <ClCompile Include="src\winapi_hooks.c" />
@@ -75,7 +75,6 @@
   <ItemGroup>
     <ClInclude Include="inc\blt.h" />
     <ClInclude Include="inc\crc32.h" />
-    <ClInclude Include="inc\d3d9shader.h" />
     <ClInclude Include="inc\d3dcaps.h" />
     <ClInclude Include="inc\ddclipper.h" />
     <ClInclude Include="inc\ddraw.h" />
@@ -101,7 +100,6 @@
     <ClInclude Include="inc\KHR\khrplatform.h" />
     <ClInclude Include="inc\lodepng.h" />
     <ClInclude Include="inc\mouse.h" />
-    <ClInclude Include="inc\render_d3d9.h" />
     <ClInclude Include="inc\render_d3d11.h" />
     <ClInclude Include="src\d3d11_shaders\d3d11_shaders.h" />
     <ClInclude Include="inc\debug.h" />
@@ -114,6 +112,7 @@
     <ClInclude Include="inc\screenshot.h" />
     <ClInclude Include="inc\config.h" />
     <ClInclude Include="inc\crt_auto.h" />
+    <ClInclude Include="inc\display_settings.h" />
     <ClInclude Include="inc\ddsurface.h" />
     <ClInclude Include="inc\version.h" />
     <ClInclude Include="inc\versionhelpers.h" />

@@ -131,6 +131,12 @@ def assemble():
     lab('noskipwrap')
     b(0x4D)                             # dec bp
     b(0x75); rel8('rowloop')            # jnz rowloop
+    # 'DCRT' at 0040:00F0 (the BIOS inter-application area): the picture is
+    # up, for dosshot.ps1, which reads it through DOSBox's web server
+    b(0x31, 0xC0)                       # xor ax,ax
+    b(0x8E, 0xC0)                       # mov es,ax
+    b(0x26, 0xC7, 0x06, 0xF0, 0x04, 0x44, 0x43)  # mov word [es:4F0h],'DC'
+    b(0x26, 0xC7, 0x06, 0xF2, 0x04, 0x52, 0x54)  # mov word [es:4F2h],'RT'
     # wait for a key, back to text mode
     b(0x30, 0xE4)                       # xor ah,ah
     b(0xCD, 0x16)                       # int 16h

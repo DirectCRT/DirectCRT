@@ -11,26 +11,35 @@ work.
 
 ## Status
 
-Early development. Today DirectCRT is cnc-ddraw with a few changes and a
-prototype of the CRT shading. [docs/development-plan.md](docs/development-plan.md)
-covers the goals, the decisions and the phases.
+Early development. DirectCRT is cnc-ddraw with new display settings and
+DOSBox Staging's CRT shading.
+[docs/development-plan.md](docs/development-plan.md) covers the goals, the
+decisions and the phases.
 
 Changes from cnc-ddraw so far:
 
-- `shader=crt-auto` in `directcrt.ini` (prototype) shades the picture with
-  DOSBox Staging's `crt-auto` for VGA: its own shaders, its choice of shader
-  for the screen size, its picture size and its colours, with the same result
-  pixel for pixel. It needs OpenGL 3.3, which `renderer=auto` then picks.
+- `shader=crt-auto`, the default, shades the picture with DOSBox Staging's
+  `crt-auto` for VGA: its own shaders, its choice of shader for the screen
+  size, its picture size and its colours, with the same result pixel for
+  pixel. `sharp`, `nearest` and `bilinear` are the other shaders. `aspect`,
+  `integer_scaling`, `viewport` and the colour settings work as in DOSBox,
+  with every shader, and changes to them apply while the game runs.
+- Renderers: Direct3D 11 (the default), OpenGL 3.3 and GDI (no shading).
+  Direct3D 9 and the libretro shader files are gone.
+- `display` decides fullscreen or a window: `auto` (the default) follows the
+  game, `window` and `fullscreen` force one, and `original` switches the
+  monitor to the game's resolution as Windows' own DirectDraw did. Fullscreen
+  is at the desktop resolution, so the shading has room to work.
+- Windows are `window_size` (DOSBox's `small`, `medium`, `large`, `WxH`, or
+  `unscaled`), with the picture placed in them as in fullscreen. Games that
+  run in their own window are scaled the same way and get the desktop's colour
+  depth instead of a fixed 16-bit. `window_position`, `window_decorations`,
+  `window_resizable` and `remember_window` replace `posX`, `posY`, `border`,
+  `resizable` and `savesettings`. Old keys are still read.
 - Settings are in `directcrt.ini`, global section `[directcrt]`. The file is
   created next to `ddraw.dll` the first time a game starts.
-- `windowed=auto` (the new default) follows the game: a window for games that ask
-  for one, fullscreen for the rest. Alt+Enter still switches, but it's no longer
-  saved, so every start uses the configured mode.
-- Games that run in their own window get the desktop's colour depth (32-bit),
-  instead of a fixed 16-bit, and are shown 1:1 at their own size and position.
 - The mouse is released when the game releases DirectDraw.
-- `unlockcursor_middleclick=true` adds a middle click as a way to release the
-  mouse.
+  `unlockcursor_middleclick=true` adds a middle click as a way to release it.
 - Logs and crash dumps are named `directcrt-*.log` and `directcrt-*.dmp`.
 - Windows XP and older aren't supported. DirectCRT targets Windows 10 and 11,
   Wine and Proton.
@@ -53,7 +62,7 @@ work.
 
 | Keys | Action |
 |---|---|
-| Alt+Enter | Switch between windowed and fullscreen |
+| Alt+Enter | Switch between a window and fullscreen |
 | Ctrl+Tab, or Right Alt+Right Ctrl | Release the mouse |
 | Alt+Page Down | Maximise the window |
 
@@ -94,6 +103,5 @@ code keeps its own licence:
 - Microsoft Detours: MIT ([src/detours/LICENSE.md](src/detours/LICENSE.md))
 - LodePNG: zlib (`src/lodepng.c`)
 - Khronos OpenGL headers: MIT-style (`inc/glcorearb.h`, `inc/wglext.h`, `inc/KHR/`)
-- Shaders in `inc/openglshader.h` and `inc/d3d9shader.h`: MIT, as noted in each one
 - DOSBox Staging's shaders in `third_party/dosbox-staging/`: MIT, except
   `sharp.glsl` (GPL-2.0-or-later); see its README

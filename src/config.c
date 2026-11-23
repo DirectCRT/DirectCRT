@@ -1,10 +1,8 @@
 #include <windows.h>
 #include <stdio.h>
-#include <d3d9.h>
 #include "fps_limiter.h"
 #include "config.h"
 #include "dd.h"
-#include "render_d3d9.h"
 #include "render_gdi.h"
 #include "render_ogl.h"
 #include "hook.h"
@@ -20,6 +18,7 @@ static int cfg_get_int(LPCSTR key, int default_value);
 static DWORD cfg_get_string(LPCSTR key, LPCSTR default_value, LPSTR out_string, DWORD out_size);
 static DWORD cfg_get_game_section(LPSTR buf, DWORD size);
 static void cfg_load_crt_auto_settings(CRT_AUTO_SETTINGS* settings);
+static void cfg_load_display_settings();
 static void cfg_ini_stat(WIN32_FILE_ATTRIBUTE_DATA* data);
 
 #define GET_INT(a,b,c) a = cfg_get_int(b, c); TRACE("%s=%d\n", b, a)
@@ -39,43 +38,24 @@ void cfg_load()
     cfg_ini_stat(&g_ini_seen);
     g_ini_changed = FALSE;
 
-    /* Optional settings */ 
+    /* Optional settings */
 
-    GET_INT(g_config.window_rect.right, "width", 0);
-    GET_INT(g_config.window_rect.bottom, "height", 0);
-    GET_BOOL(g_config.fullscreen, "fullscreen", FALSE);
-    char windowed[8];
-    GET_STRING("windowed", "auto", windowed, sizeof(windowed));
-    g_config.windowed_auto = _stricmp(windowed, "auto") == 0;
-    g_config.windowed =
-        !g_config.windowed_auto &&
-        (_stricmp(windowed, "yes") == 0 || _stricmp(windowed, "true") == 0 || _stricmp(windowed, "1") == 0);
-    g_config.fullscreen_setting = g_config.fullscreen;
-    GET_BOOL(g_config.maintas, "maintas", FALSE);
-    GET_STRING("aspect_ratio", "", g_config.aspect_ratio, sizeof(g_config.aspect_ratio));
-    GET_BOOL(g_config.boxing, "boxing", FALSE);
+    cfg_load_display_settings();
     GET_INT(g_config.maxfps, "maxfps", -1);
     GET_BOOL(g_config.vsync, "vsync", FALSE);
     GET_BOOL(g_config.adjmouse, "adjmouse", TRUE);
-    GET_STRING("shader", "Shaders\\interpolation\\catmull-rom-bilinear.glsl", g_config.shader, sizeof(g_config.shader));
-    g_config.crt_auto = _stricmp(g_config.shader, "crt-auto") == 0;
     cfg_load_crt_auto_settings(&g_config.crt);
-    GET_INT(g_config.window_rect.left, "posX", -32000);
-    GET_INT(g_config.window_rect.top, "posY", -32000);
     GET_STRING("renderer", "auto", g_config.renderer, sizeof(g_config.renderer));
+    const char* renderer = ds_legacy_renderer(g_config.renderer);
+    if (renderer)
+    {
+        TRACE("     renderer=%s is no longer available, using %s\n", g_config.renderer, renderer);
+        strncpy(g_config.renderer, renderer, sizeof(g_config.renderer) - 1);
+    }
     GET_BOOL(g_config.devmode, "devmode", FALSE);
-    GET_BOOL(g_config.border, "border", TRUE);
-    GET_INT(g_config.save_settings, "savesettings", 1);
-    GET_BOOL(g_config.resizable, "resizable", TRUE);
-    GET_INT(g_config.d3d9_filter, "d3d9_filter", FILTER_CUBIC);
     GET_INT(g_config.anti_aliased_fonts_min_size, "anti_aliased_fonts_min_size", 13);
     GET_INT(g_config.min_font_size, "min_font_size", 0);
-    GET_INT(g_config.center_window, "center_window", CENTER_WINDOW_AUTO);
-    GET_STRING("inject_resolution", "", g_config.inject_resolution, sizeof(g_config.inject_resolution));
-    GET_BOOL(g_config.vhack, "vhack", FALSE);
     GET_STRING("screenshotdir", ".\\Screenshots\\", g_config.screenshot_dir, sizeof(g_config.screenshot_dir));
-    GET_BOOL(g_config.toggle_borderless, "toggle_borderless", FALSE);
-    GET_BOOL(g_config.toggle_upscaled, "toggle_upscaled", FALSE);
 
     /* Compatibility settings */
 
@@ -145,55 +125,39 @@ void cfg_load()
     if (g_config.lock_mouse_top_left)
         g_config.adjmouse = FALSE;
 
-    if (g_config.aspect_ratio[0])
-        g_config.maintas = TRUE;
-
     ini_free(&g_config.ini);
 }
 
+/* remember_window: the window's size and position, if the user changed them */
 void cfg_save()
 {
-    if (!g_config.save_settings)
-        return;
-
-    /* A program that runs in its own window chose its size and place itself;
-       saving them would resize and move other games' windows */
-    if (g_config.window_is_programs)
+    if (g_config.remember_window == REMEMBER_WINDOW_OFF)
         return;
 
     /* Do not save settings while macOS maximize is active */
     if (IsMacOS() && !g_config.window_rect.left && !g_config.window_rect.top)
         return;
 
-    char buf[16];
-    char* section = g_config.save_settings == 1 ? "directcrt" : g_config.process_file_name;
+    char buf[32];
+    char* section =
+        g_config.remember_window == REMEMBER_WINDOW_GLOBAL ? "directcrt" : g_config.process_file_name;
 
-    if (g_config.window_rect.right)
+    if (g_config.window_rect.right > 0 && g_config.window_rect.bottom > 0)
     {
-        sprintf(buf, "%ld", g_config.window_rect.right);
-        WritePrivateProfileString(section, "width", buf, g_config.ini_path);
+        ds_format_size_pixels(buf, sizeof(buf), g_config.window_rect.right, g_config.window_rect.bottom);
+        WritePrivateProfileString(section, "window_size", buf, g_config.ini_path);
     }
 
-    if (g_config.window_rect.bottom)
+    /* A window left of or above the primary monitor isn't saved: window_position can't be negative */
+    if (g_config.window_rect.left != -32000 && g_config.window_rect.top != -32000 &&
+        g_config.window_rect.left >= 0 && g_config.window_rect.top >= 0)
     {
-        sprintf(buf, "%ld", g_config.window_rect.bottom);
-        WritePrivateProfileString(section, "height", buf, g_config.ini_path);
+        ds_format_position_pixels(buf, sizeof(buf), g_config.window_rect.left, g_config.window_rect.top);
+        WritePrivateProfileString(section, "window_position", buf, g_config.ini_path);
     }
 
-    if (g_config.window_rect.left != -32000)
-    {
-        sprintf(buf, "%ld", g_config.window_rect.left);
-        WritePrivateProfileString(section, "posX", buf, g_config.ini_path);
-    }
-
-    if (g_config.window_rect.top != -32000)
-    {
-        sprintf(buf, "%ld", g_config.window_rect.top);
-        WritePrivateProfileString(section, "posY", buf, g_config.ini_path);
-    }
-
-    /* The windowed/fullscreen state isn't saved: Alt+Enter lasts until the game
-       exits, so every start uses the configured mode */
+    /* Alt+Enter's state isn't saved: it lasts until the game exits, so every
+       start uses 'display' */
 
     /* Our own change, not one to reload */
     cfg_ini_stat(&g_ini_seen);
@@ -232,7 +196,7 @@ BOOL cfg_poll_crt_auto_settings(CRT_AUTO_SETTINGS* settings)
 
     g_ini_changed = FALSE;
 
-    TRACE("directcrt.ini changed, reading crt-auto's settings again\n");
+    TRACE("directcrt.ini changed, reading the shader settings again\n");
 
     ini_create(&g_config.ini, g_config.ini_path);
     cfg_load_crt_auto_settings(settings);
@@ -252,55 +216,68 @@ static void cfg_create_ini()
             "[directcrt]\n"
             "; ### Optional settings ###\n"
             "; Use the following settings to adjust the look and feel to your liking\n"
+            "; Where DOSBox Staging has the same setting, it has DOSBox's name and values\n"
             "\n"
             "\n"
-            "; Stretch to custom resolution, 0 = defaults to the size game requests\n"
-            "width=0\n"
-            "height=0\n"
+            "; Fullscreen or a window\n"
+            "; auto = what the game asks for: fullscreen for fullscreen games, a window for games that run in their own window\n"
+            "; window = always a window\n"
+            "; fullscreen = always fullscreen\n"
+            "; original = fullscreen games switch the monitor to the game's resolution, or the closest mode the monitor has,\n"
+            ";   as with Windows' own DirectDraw; for real CRTs and external scalers. With one screen pixel per line there's\n"
+            ";   no CRT shading, but the colour adjustments still apply. Games in their own window get a window\n"
+            "; Fullscreen is at the desktop resolution, except with 'original'. Alt+Enter switches between a window and fullscreen\n"
+            "display=auto\n"
             "\n"
-            "; Override the width/height settings shown above and always stretch to fullscreen\n"
-            "; Note: Can be combined with 'windowed=true' to get windowed-fullscreen aka borderless mode\n"
-            "; With 'windowed=auto' it only affects fullscreen games: true = upscaled to the screen,\n"
-            "; false = the monitor switches to the game's own resolution\n"
-            "fullscreen=false\n"
+            "; The size of the window's contents, without its title bar and borders\n"
+            "; default = medium\n"
+            "; small, medium, large = 4:3 sizes of 50%, 74% and 90% of the desktop height\n"
+            "; unscaled = the game's own resolution at 1:1, for games that misbehave when scaled\n"
+            "; WxH = a size in logical units (e.g. 1280x960; with display scaling at 150%, 1920x1440 pixels)\n"
+            "; WxHpx = a size in pixels (e.g. 1920x1440px)\n"
+            "; Note: The settings for the picture (aspect, integer_scaling, viewport) place it in the window, as in fullscreen\n"
+            "window_size=default\n"
             "\n"
-            "; Windowed or fullscreen. auto = do what the game asks for: a window for windowed games,\n"
-            "; fullscreen for fullscreen games. true = always windowed, false = always fullscreen\n"
-            "windowed=auto\n"
+            "; Where the window goes\n"
+            "; auto = centred on the screen, or where the game put its own window\n"
+            "; X,Y = the top left corner in logical units; X,Ypx = in pixels; X,Y% = a percentage of the desktop (e.g. 10,5%)\n"
+            "window_position=auto\n"
             "\n"
-            "; Maintain aspect ratio\n"
-            "maintas=false\n"
+            "; Show the window's title bar and borders\n"
+            "window_decorations=on\n"
             "\n"
-            "; Use custom aspect ratio - Example values: 4:3, 16:10, 16:9, 21:9\n"
-            "aspect_ratio=\n"
+            "; Let the user resize and maximize the window\n"
+            "window_resizable=on\n"
             "\n"
-            "; Windowboxing / Integer Scaling\n"
-            "boxing=false\n"
+            "; Save the window's size and position when the game exits, for the next start\n"
+            "; off = don't save; global = in the [directcrt] section; game = in the game's own section\n"
+            "; Note: Alt+Enter's state isn't saved; every start uses 'display'\n"
+            "remember_window=off\n"
             "\n"
             "; Real rendering rate, -1 = screen rate, 0 = unlimited, n = cap\n"
             "; Note: Does not have an impact on the game speed, to limit your game speed use 'maxgameticks='\n"
             "maxfps=-1\n"
             "\n"
-            "; Vertical synchronization, enable if you get tearing - (Requires 'renderer=auto/opengl*/direct3d9*/direct3d11')\n"
+            "; Vertical synchronization, enable if you get tearing (not with 'renderer=gdi')\n"
             "; Note: vsync=true can fix tearing but it will cause input lag\n"
             "vsync=false\n"
             "\n"
             "; Automatic mouse sensitivity scaling\n"
-            "; Note: Only works if stretching is enabled. Sensitivity will be adjusted according to the size of the window\n"
+            "; Note: Sensitivity will be adjusted according to the size of the picture\n"
             "adjmouse=true\n"
             "\n"
-            "; Preliminary libretro shader support - (Requires 'renderer=opengl*') https://github.com/libretro/glsl-shaders\n"
-            "; 2x scaling example: https://imgur.com/a/kxsM1oY - 4x scaling example: https://imgur.com/a/wjrhpFV\n"
-            "; You can specify a full path to a .glsl shader file here or use one of the values listed below\n"
-            "; Possible values: Nearest neighbor, Bilinear, Bicubic, Lanczos, xBR-lv2\n"
-            "; crt-auto = DOSBox Staging's CRT shading for VGA (prototype). It picks the shader and the picture size\n"
-            ";   itself (maintas, aspect_ratio and boxing are ignored) and uses Direct3D 11 with 'renderer=auto'\n"
-            ";   (OpenGL if Direct3D 11 isn't available). It also works with 'renderer=opengl' and 'renderer=direct3d11'\n"
-            "shader=Shaders\\interpolation\\catmull-rom-bilinear.glsl\n"
+            "; The shader, as in DOSBox Staging\n"
+            "; crt-auto = CRT shading for VGA, chosen by the number of screen pixels per line: sharp below two,\n"
+            ";   then vga-1080p, then crt-hyllian (DOSBox's vga-1440p and vga-4k presets)\n"
+            "; sharp = sharp pixels, smoothed only where the scaling isn't a whole number\n"
+            "; nearest = nearest neighbour\n"
+            "; bilinear = smooth\n"
+            "; Changes to the settings from here to 'blue_gain' apply while the game runs, when this file is saved;\n"
+            "; other changes need a restart\n"
+            "shader=crt-auto\n"
             "\n"
-            "; The settings below only apply to 'shader=crt-auto'. They have DOSBox Staging's names, values and\n"
-            "; defaults, so a DOSBox config's [render] values can be copied here. An invalid value gets the default\n"
-            "; Changes to them apply while the game runs, when this file is saved; other changes need a restart\n"
+            "; The settings below have DOSBox Staging's names, values and defaults, so a DOSBox config's [render]\n"
+            "; values can be copied here. An invalid value gets the default. They apply with every shader\n"
             "\n"
             "; Aspect ratio correction\n"
             "; auto, on = show 320x200 and 640x400 at 4:3, as on a CRT monitor; other modes have square pixels\n"
@@ -310,7 +287,7 @@ static void cfg_create_ini()
             "aspect=auto\n"
             "\n"
             "; Keep the scaling factor a whole number, so the picture still fits in the viewport\n"
-            "; auto = vertical, with 3.5x and 4.5x also allowed, and none above 5x (best for crt-auto)\n"
+            "; auto = with crt-auto: vertical, with 3.5x and 4.5x also allowed, and none above 5x; other shaders: off\n"
             "; vertical = whole numbers vertically; horizontal = whole numbers horizontally; off = fill the viewport\n"
             "integer_scaling=auto\n"
             "\n"
@@ -359,31 +336,14 @@ static void cfg_create_ini()
             "green_gain=100\n"
             "blue_gain=100\n"
             "\n"
-            "; Window position, -32000 = center to screen\n"
-            "posX=-32000\n"
-            "posY=-32000\n"
-            "\n"
-            "; Renderer, possible values: auto, opengl, openglcore, gdi, direct3d9, direct3d9on12, direct3d11 (auto = try direct3d9/opengl, fallback = gdi)\n"
+            "; Renderer\n"
+            "; auto = Direct3D 11, or OpenGL if Direct3D 11 isn't available\n"
+            "; direct3d11, opengl\n"
+            "; gdi = without shading or colour adjustments, for when neither works\n"
             "renderer=auto\n"
             "\n"
             "; Developer mode (don't lock the cursor)\n"
             "devmode=false\n"
-            "\n"
-            "; Show window borders in windowed mode\n"
-            "border=true\n"
-            "\n"
-            "; Save the window position and size on game exit and restore them on next game start\n"
-            "; (the windowed/fullscreen state from Alt+Enter isn't saved; it lasts until the game exits)\n"
-            "; Games that run in their own window keep the size and place they choose; nothing is saved for them\n"
-            "; Possible values: 0 = disabled, 1 = save to global 'directcrt' section, 2 = save to game specific section\n"
-            "savesettings=1\n"
-            "\n"
-            "; Should the window be resizable by the user in windowed mode?\n"
-            "resizable=true\n"
-            "\n"
-            "; Upscaling filter for the direct3d9* renderers (direct3d11 without crt-auto: 0 = nearest-neighbor, else bilinear)\n"
-            "; Possible values: 0 = nearest-neighbor, 1 = bilinear, 2 = bicubic, 3 = lanczos (bicubic/lanczos only support 16/32bit color depth games)\n"
-            "d3d9_filter=2\n"
             "\n"
             "; Disable font smoothing for fonts that are smaller than size X\n"
             "anti_aliased_fonts_min_size=13\n"
@@ -391,25 +351,8 @@ static void cfg_create_ini()
             "; Raise the size of small fonts to X\n"
             "min_font_size=0\n"
             "\n"
-            "; Center window to screen when game changes the display resolution\n"
-            "; Possible values: 0 = never center, 1 = automatic, 2 = always center\n"
-            "center_window=1\n"
-            "\n"
-            "; Inject a custom display resolution into the in-game resolution list - Example values: 960x540, 3840x2160\n"
-            "; Note: This setting can used for downscaling as well, you can insert resolutions higher than your monitor supports\n"
-            "inject_resolution=\n"
-            "\n"
-            "; Enable upscale hack for high resolution patches (Supports C&C1, Red Alert 1, Worms 2 and KKND Xtreme)\n"
-            "vhack=false\n"
-            "\n"
             "; Where should screenshots be saved\n"
             "screenshotdir=.\\Screenshots\\\n"
-            "\n"
-            "; Switch between windowed/borderless modes with alt+enter rather than windowed/fullscreen modes\n"
-            "toggle_borderless=false\n"
-            "\n"
-            "; Switch between windowed/fullscreen upscaled modes with alt+enter rather than windowed/fullscreen modes\n"
-            "toggle_upscaled=false\n"
             "\n"
             "\n"
             "\n"
@@ -432,7 +375,7 @@ static void cfg_create_ini()
             "; Note: Set this to a low value such as 5 or 10 if some parts of the game are not being displayed (e.g. menus or loading screens)\n"
             "minfps=0\n"
             "\n"
-            "; Disable fullscreen-exclusive mode for the direct3d9*/opengl* renderers\n"
+            "; Disable fullscreen-exclusive mode for the opengl renderer\n"
             "; Note: Can be used in case some GUI elements like buttons/textboxes/videos/etc.. are invisible\n"
             "nonexclusive=true\n"
             "\n"
@@ -509,24 +452,6 @@ static void cfg_create_ini()
             "\n"
             "; Screenshot\n"
             "keyscreenshot=0x2C\n"
-            "\n"
-            "\n"
-            "\n"
-            "; ### Config program settings ###\n"
-            "; The following settings are for cnc-ddraw config.exe\n"
-            "\n"
-            "\n"
-            "; cnc-ddraw config program language, possible values: auto, english, chinese, german, spanish, russian, hungarian, french, italian, vietnamese, polish\n"
-            "configlang=auto\n"
-            "\n"
-            "; cnc-ddraw config program theme, possible values: Windows10, Cobalt XEMedia\n"
-            "configtheme=Windows10\n"
-            "\n"
-            "; Hide the 'Compatibility Settings' tab in cnc-ddraw config\n"
-            "hide_compat_tab=false\n"
-            "\n"
-            "; Allow the users to 'Restore default settings' via cnc-ddraw config\n"
-            "allow_reset=true\n"
             "\n"
             "\n"
             "\n"
@@ -707,11 +632,8 @@ static void cfg_create_ini()
             "; Barney - Secret of the Rainbow\n"
             "[Barney]\n"
             "adjmouse=false\n"
-            "width=0\n"
-            "height=0\n"
-            "resizable=false\n"
-            "maintas=false\n"
-            "boxing=false\n"
+            "window_size=unscaled\n"
+            "window_resizable=off\n"
             "\n"
             "; Baldur's Gate II\n"
             "; Note: 'Use 3D Acceleration' must be disabled and 'Full Screen' must be enabled in BGConfig.exe\n"
@@ -761,15 +683,13 @@ static void cfg_create_ini()
             "; Callus 95 - CPS-1 (Capcom Play System 1) emulator\n"
             "[CALLUS95]\n"
             "game_handles_close=true\n"
-            "windowed=true\n"
-            "toggle_borderless=true\n"
+            "display=window\n"
             "devmode=true\n"
             "\n"
             "; Callus 95 - CPS-1 (Capcom Play System 1) emulator\n"
             "[CALLUS95p]\n"
             "game_handles_close=true\n"
-            "windowed=true\n"
-            "toggle_borderless=true\n"
+            "display=window\n"
             "devmode=true\n"
             "\n"
             "; Carmageddon\n"
@@ -786,11 +706,8 @@ static void cfg_create_ini()
             "[TIME32]\n"
             "renderer=gdi\n"
             "adjmouse=false\n"
-            "width=0\n"
-            "height=0\n"
-            "resizable=false\n"
-            "maintas=false\n"
-            "boxing=false\n"
+            "window_size=unscaled\n"
+            "window_resizable=off\n"
             "\n"
             "; Captain Claw\n"
             "[claw]\n"
@@ -844,8 +761,6 @@ static void cfg_create_ini()
             "adjmouse=true\n"
             "maxfps=60\n"
             "minfps=-1\n"
-            "maintas=false\n"
-            "boxing=false\n"
             "\n"
             "; Command & Conquer: Tiberian Sun Demo\n"
             "[SUN]\n"
@@ -855,8 +770,6 @@ static void cfg_create_ini()
             "adjmouse=true\n"
             "maxfps=60\n"
             "minfps=-1\n"
-            "maintas=false\n"
-            "boxing=false\n"
             "\n"
             "; Command & Conquer: Tiberian Sun - CnCNet\n"
             "[ts-spawn]\n"
@@ -866,8 +779,6 @@ static void cfg_create_ini()
             "adjmouse=true\n"
             "maxfps=60\n"
             "minfps=-1\n"
-            "maintas=false\n"
-            "boxing=false\n"
             "\n"
             "; Command & Conquer: Red Alert 2 - XWIS\n"
             "[ra2]\n"
@@ -876,8 +787,6 @@ static void cfg_create_ini()
             "tshack=true\n"
             "maxfps=60\n"
             "minfps=-1\n"
-            "maintas=false\n"
-            "boxing=false\n"
             "\n"
             "; Command & Conquer: Red Alert 2 - XWIS\n"
             "[Red Alert 2]\n"
@@ -886,8 +795,6 @@ static void cfg_create_ini()
             "tshack=true\n"
             "maxfps=60\n"
             "minfps=-1\n"
-            "maintas=false\n"
-            "boxing=false\n"
             "\n"
             "; Command & Conquer: Red Alert 2: Yuri's Revenge\n"
             "[gamemd]\n"
@@ -896,8 +803,6 @@ static void cfg_create_ini()
             "tshack=true\n"
             "maxfps=60\n"
             "minfps=-1\n"
-            "maintas=false\n"
-            "boxing=false\n"
             "\n"
             "; Command & Conquer: Red Alert 2: Yuri's Revenge - ?ModExe?\n"
             "[ra2md]\n"
@@ -906,8 +811,6 @@ static void cfg_create_ini()
             "tshack=true\n"
             "maxfps=60\n"
             "minfps=-1\n"
-            "maintas=false\n"
-            "boxing=false\n"
             "\n"
             "; Command & Conquer: Red Alert 2: Yuri's Revenge - CnCNet\n"
             "[gamemd-spawn]\n"
@@ -916,8 +819,6 @@ static void cfg_create_ini()
             "tshack=true\n"
             "maxfps=60\n"
             "minfps=-1\n"
-            "maintas=false\n"
-            "boxing=false\n"
             "\n"
             "; Command & Conquer: Red Alert 2: Yuri's Revenge - XWIS\n"
             "[Yuri's Revenge]\n"
@@ -926,8 +827,6 @@ static void cfg_create_ini()
             "tshack=true\n"
             "maxfps=60\n"
             "minfps=-1\n"
-            "maintas=false\n"
-            "boxing=false\n"
             "\n"
             "; Commandos\n"
             "[comandos]\n"
@@ -999,25 +898,14 @@ static void cfg_create_ini()
             "; ClueFinders Math Adventures 1.0\n"
             "[TCFM32]\n"
             "adjmouse=false\n"
-            "width=0\n"
-            "height=0\n"
-            "resizable=false\n"
-            "maintas=false\n"
-            "boxing=false\n"
+            "window_size=unscaled\n"
+            "window_resizable=off\n"
             "\n"
             "; ClueFinders Math Adventures 1.0\n"
             "[cfmath32]\n"
             "adjmouse=false\n"
-            "width=0\n"
-            "height=0\n"
-            "resizable=false\n"
-            "maintas=false\n"
-            "boxing=false\n"
-            "\n"
-            "; Call To Power 2\n"
-            "[ctp2]\n"
-            "maintas=false\n"
-            "boxing=false\n"
+            "window_size=unscaled\n"
+            "window_resizable=off\n"
             "\n"
             "; Corsairs Gold\n"
             "[corsairs]\n"
@@ -1067,8 +955,6 @@ static void cfg_create_ini()
             "[DEADLOCK]\n"
             "fixchilds=0\n"
             "adjmouse=false\n"
-            "maintas=false\n"
-            "boxing=false\n"
             "\n"
             "; Diablo\n"
             "[Diablo]\n"
@@ -1233,14 +1119,6 @@ static void cfg_create_ini()
             "resolutions=2\n"
             "game_handles_close=true\n"
             "\n"
-            "; Jazz Jackrabbit 2 plus\n"
-            "[Jazz2]\n"
-            "inject_resolution=800x450\n"
-            "\n"
-            "; Jazz Jackrabbit 2\n"
-            "[Jazz2_NonPlus]\n"
-            "inject_resolution=800x450\n"
-            "\n"
             "; Jungle Storm\n"
             "[Jstorm]\n"
             "no_compat_warning=true\n"
@@ -1291,18 +1169,14 @@ static void cfg_create_ini()
             "; Imperialism 2: The Age of Exploration\n"
             "[Imperialism II]\n"
             "adjmouse=false\n"
-            "width=0\n"
-            "height=0\n"
-            "resizable=false\n"
-            "maintas=false\n"
-            "boxing=false\n"
+            "window_size=unscaled\n"
+            "window_resizable=off\n"
             "\n"
             "; Icewind Dale 2\n"
             "; Note: 'Full Screen' must be enabled in Config.exe\n"
             "; Note: 1070x602 is the lowest possible 16:9 resolution for the Widescreen patch (600/601 height will crash)\n"
             "[iwd2]\n"
             "resolutions=2\n"
-            "inject_resolution=1070x602\n"
             "\n"
             "; Invictus\n"
             "[Invictus]\n"
@@ -1379,10 +1253,6 @@ static void cfg_create_ini()
             "[Konung2]\n"
             "fixchilds=0\n"
             "\n"
-            "; KKND Xtreme (With high resolution patch)\n"
-            "[KKNDgame]\n"
-            "vhack=true\n"
-            "\n"
             "; KKND2: Krossfire\n"
             "[KKND2]\n"
             "noactivateapp=true\n"
@@ -1415,37 +1285,26 @@ static void cfg_create_ini()
             "[LOCO]\n"
             "checkfile=.\\LEGO.INI\n"
             "fake_mode=1024x768x16\n"
-            "posX=0\n"
-            "posY=0\n"
-            "border=false\n"
-            "fullscreen=false\n"
+            "window_position=0,0px\n"
+            "window_decorations=off\n"
             "\n"
             "; Little Bear Kindergarten/Preschool Thinking Adventures: Parent's Progress Report\n"
             "[LBPR]\n"
             "adjmouse=false\n"
-            "width=0\n"
-            "height=0\n"
-            "resizable=false\n"
-            "maintas=false\n"
-            "boxing=false\n"
+            "window_size=unscaled\n"
+            "window_resizable=off\n"
             "\n"
             "; Little Bear Kindergarten/Preschool Thinking Adventures\n"
             "[LBSTART]\n"
             "adjmouse=false\n"
-            "width=0\n"
-            "height=0\n"
-            "resizable=false\n"
-            "maintas=false\n"
-            "boxing=false\n"
+            "window_size=unscaled\n"
+            "window_resizable=off\n"
             "\n"
             "; Little Bear Toddler Discovery Adventures\n"
             "[LBT]\n"
             "adjmouse=false\n"
-            "width=0\n"
-            "height=0\n"
-            "resizable=false\n"
-            "maintas=false\n"
-            "boxing=false\n"
+            "window_size=unscaled\n"
+            "window_resizable=off\n"
             "\n"
             "; Lionheart\n"
             "[Lionheart]\n"
@@ -1468,11 +1327,8 @@ static void cfg_create_ini()
             "nonexclusive=true\n"
             "no_compat_warning=true\n"
             "adjmouse=false\n"
-            "width=0\n"
-            "height=0\n"
-            "resizable=false\n"
-            "maintas=false\n"
-            "boxing=false\n"
+            "window_size=unscaled\n"
+            "window_resizable=off\n"
             "renderer=gdi\n"
             "hook=2\n"
             "win_version=nt4\n"
@@ -1482,11 +1338,8 @@ static void cfg_create_ini()
             "nonexclusive=true\n"
             "no_compat_warning=true\n"
             "adjmouse=false\n"
-            "width=0\n"
-            "height=0\n"
-            "resizable=false\n"
-            "maintas=false\n"
-            "boxing=false\n"
+            "window_size=unscaled\n"
+            "window_resizable=off\n"
             "renderer=gdi\n"
             "hook=2\n"
             "win_version=nt4\n"
@@ -1496,11 +1349,8 @@ static void cfg_create_ini()
             "nonexclusive=true\n"
             "no_compat_warning=true\n"
             "adjmouse=false\n"
-            "width=0\n"
-            "height=0\n"
-            "resizable=false\n"
-            "maintas=false\n"
-            "boxing=false\n"
+            "window_size=unscaled\n"
+            "window_resizable=off\n"
             "renderer=gdi\n"
             "hook=2\n"
             "win_version=nt4\n"
@@ -1564,9 +1414,8 @@ static void cfg_create_ini()
             "; Nox\n"
             "[NOX]\n"
             "checkfile=.\\NOX.ICD\n"
-            "renderer=direct3d9\n"
             "nonexclusive=false\n"
-            "windowed=false\n"
+            "display=fullscreen\n"
             "maxgameticks=125\n"
             "\n"
             "; Nox Reloaded\n"
@@ -1696,31 +1545,22 @@ static void cfg_create_ini()
             "; Reader Rabbit Thinking Ages 4-6 (US)\n"
             "[rrta32]\n"
             "adjmouse=false\n"
-            "width=0\n"
-            "height=0\n"
-            "resizable=false\n"
-            "maintas=false\n"
-            "boxing=false\n"
+            "window_size=unscaled\n"
+            "window_resizable=off\n"
             "\n"
             "; Reader Rabbit Reading Ages 4-6\n"
             "[rrirjw32]\n"
             "renderer=gdi\n"
             "adjmouse=false\n"
-            "width=0\n"
-            "height=0\n"
-            "resizable=false\n"
-            "maintas=false\n"
-            "boxing=false\n"
+            "window_size=unscaled\n"
+            "window_resizable=off\n"
             "\n"
             "; Reader Rabbit Reading Ages 6-9\n"
             "[irj2w32]\n"
             "renderer=gdi\n"
             "adjmouse=false\n"
-            "width=0\n"
-            "height=0\n"
-            "resizable=false\n"
-            "maintas=false\n"
-            "boxing=false\n"
+            "window_size=unscaled\n"
+            "window_resizable=off\n"
             "\n"
             "; Real War\n"
             "[RealWar]\n"
@@ -1764,7 +1604,7 @@ static void cfg_create_ini()
             "\n"
             "; Scooby-Doo(TM), Case File #1 The Glowing Bug Man - NOT WORKING YET\n"
             "[Case File #1]\n"
-            "windowed=true\n"
+            "display=window\n"
             "nonexclusive=true\n"
             "fake_mode=640x480x32\n"
             "\n"
@@ -1796,17 +1636,12 @@ static void cfg_create_ini()
             "armadahack=true\n"
             "nonexclusive=true\n"
             "adjmouse=true\n"
-            "maintas=false\n"
-            "boxing=false\n"
             "\n"
             "; Star Wars Rebellion\n"
             "[REBEXE]\n"
             "adjmouse=false\n"
-            "width=0\n"
-            "height=0\n"
-            "resizable=false\n"
-            "maintas=false\n"
-            "boxing=false\n"
+            "window_size=unscaled\n"
+            "window_resizable=off\n"
             "\n"
             "; Star Wars: Galactic Battlegrounds\n"
             "[battlegrounds]\n"
@@ -1942,19 +1777,14 @@ static void cfg_create_ini()
             "\n"
             "; The X-Files DVD\n"
             "[XFiles]\n"
-            "windowed=true\n"
-            "fullscreen=true\n"
-            "toggle_borderless=true\n"
+            "display=fullscreen\n"
             "\n"
             "; The Learning Company Launcher\n"
             "[TLCLauncher]\n"
             "tlc_hack=true\n"
             "adjmouse=false\n"
-            "width=0\n"
-            "height=0\n"
-            "resizable=false\n"
-            "maintas=false\n"
-            "boxing=false\n"
+            "window_size=unscaled\n"
+            "window_resizable=off\n"
             "\n"
             "; The Jungle Book Groove Party\n"
             "[Jungle_vr]\n"
@@ -1990,8 +1820,6 @@ static void cfg_create_ini()
             "maxgameticks=60\n"
             "adjmouse=true\n"
             "fixchilds=1\n"
-            "maintas=false\n"
-            "boxing=false\n"
             "\n"
             "; Tzar: The Burden of the Crown\n"
             "; Note: Must set 'DIRECTXDEVICE=0' in 'Tzar.ini'\n"
@@ -2032,14 +1860,12 @@ static void cfg_create_ini()
             "; Virtual On: Cyber Troopers\n"
             "[V_ON]\n"
             "devmode=true\n"
-            "windowed=true\n"
-            "fullscreen=true\n"
-            "toggle_borderless=true\n"
+            "display=fullscreen\n"
             "\n"
             "; Wall Street Trader 2000 - NOT WORKING YET\n"
             "[WSTrader]\n"
             "nonexclusive=false\n"
-            "windowed=false\n"
+            "display=fullscreen\n"
             "\n"
             "; WarCraft 2000: Nuclear Epidemic\n"
             "[war2000]\n"
@@ -2058,7 +1884,6 @@ static void cfg_create_ini()
             "\n"
             "; Worms 2\n"
             "[worms2]\n"
-            "vhack=true\n"
             "flipclear=true\n"
             "game_handles_close=true\n"
             "center_cursor_fix=true\n"
@@ -2247,8 +2072,182 @@ static DWORD cfg_get_string(LPCSTR key, LPCSTR default_value, LPSTR buf, DWORD s
     return ini_get_string(&g_config.ini, "directcrt", key, default_value, buf, size);
 }
 
-/* crt-auto's settings use DOSBox Staging's names, values and defaults. An
- * invalid value gets the default, as in DOSBox */
+/* An old cnc-ddraw key's value in one section, translated to its new key's
+ * value into buf; FALSE when the old key isn't set there */
+typedef BOOL(*CFG_LEGACY)(LPCSTR section, LPSTR buf, DWORD size);
+
+static BOOL cfg_copy(LPCSTR value, LPSTR buf, DWORD size)
+{
+    if (!value)
+        return FALSE;
+
+    strncpy(buf, value, size);
+    buf[size - 1] = 0;
+    return TRUE;
+}
+
+static DWORD cfg_get_raw(LPCSTR section, LPCSTR key, LPSTR buf, DWORD size)
+{
+    return ini_get_string(&g_config.ini, section, key, "", buf, size);
+}
+
+static BOOL cfg_legacy_display(LPCSTR section, LPSTR buf, DWORD size)
+{
+    char windowed[16], fullscreen[16];
+    cfg_get_raw(section, "windowed", windowed, sizeof(windowed));
+    cfg_get_raw(section, "fullscreen", fullscreen, sizeof(fullscreen));
+
+    return cfg_copy(ds_legacy_display(windowed, fullscreen), buf, size);
+}
+
+static BOOL cfg_legacy_window_size(LPCSTR section, LPSTR buf, DWORD size)
+{
+    char width[16], height[16];
+    cfg_get_raw(section, "width", width, sizeof(width));
+    cfg_get_raw(section, "height", height, sizeof(height));
+
+    return ds_legacy_window_size(width, height, buf, (int)size);
+}
+
+static BOOL cfg_legacy_window_position(LPCSTR section, LPSTR buf, DWORD size)
+{
+    char x[16], y[16];
+    cfg_get_raw(section, "posX", x, sizeof(x));
+    cfg_get_raw(section, "posY", y, sizeof(y));
+
+    return ds_legacy_window_position(x, y, buf, (int)size);
+}
+
+static BOOL cfg_legacy_border(LPCSTR section, LPSTR buf, DWORD size)
+{
+    return cfg_get_raw(section, "border", buf, size) > 0;
+}
+
+static BOOL cfg_legacy_resizable(LPCSTR section, LPSTR buf, DWORD size)
+{
+    return cfg_get_raw(section, "resizable", buf, size) > 0;
+}
+
+static BOOL cfg_legacy_remember_window(LPCSTR section, LPSTR buf, DWORD size)
+{
+    char value[16];
+    cfg_get_raw(section, "savesettings", value, sizeof(value));
+
+    return cfg_copy(ds_legacy_remember_window(value), buf, size);
+}
+
+static BOOL cfg_legacy_integer_scaling(LPCSTR section, LPSTR buf, DWORD size)
+{
+    char value[16];
+    cfg_get_raw(section, "boxing", value, sizeof(value));
+
+    int boxing;
+    if (!ds_parse_bool(value, &boxing) || !boxing)
+        return FALSE;
+
+    return cfg_copy("vertical", buf, size);
+}
+
+/* A setting that replaced old keys: in the game's section, the new key and
+ * then the old ones, then the same in the global section */
+static void cfg_get_new_or_old(
+    LPCSTR key,
+    LPCSTR default_value,
+    CFG_LEGACY legacy,
+    LPCSTR old_keys,
+    LPSTR buf,
+    DWORD size)
+{
+    LPCSTR sections[] = { g_config.game_section, "directcrt" };
+
+    for (int i = 0; i < 2; i++)
+    {
+        if (!sections[i][0])
+            continue;
+
+        if (cfg_get_raw(sections[i], key, buf, size) > 0)
+            return;
+
+        if (legacy && legacy(sections[i], buf, size))
+        {
+            TRACE("     [%s] has the old setting %s, read as %s=%s\n", sections[i], old_keys, key, buf);
+            return;
+        }
+    }
+
+    cfg_copy(default_value, buf, size);
+}
+
+static BOOL cfg_parse_on_off(LPCSTR key, LPCSTR value)
+{
+    int on;
+
+    if (!ds_parse_bool(value, &on))
+    {
+        TRACE("%s=%s is invalid, using on\n", key, value);
+        on = 1;
+    }
+
+    TRACE("%s=%s\n", key, on ? "on" : "off");
+    return on;
+}
+
+static void cfg_load_display_settings()
+{
+    char value[64];
+
+    cfg_get_new_or_old("display", "auto", cfg_legacy_display, "windowed/fullscreen", value, sizeof(value));
+    if (!ds_parse_display(value, &g_config.display))
+    {
+        TRACE("display=%s is invalid, using auto\n", value);
+        g_config.display = DISPLAY_AUTO;
+    }
+    TRACE("display=%s\n", ds_display_name(g_config.display));
+
+    cfg_get_new_or_old("window_size", "default", cfg_legacy_window_size, "width/height", value, sizeof(value));
+    if (ds_parse_window_size(value, &g_config.window_size))
+    {
+        TRACE("window_size=%s\n", value);
+    }
+    else
+    {
+        TRACE("window_size=%s is invalid, using default\n", value);
+        ds_parse_window_size("default", &g_config.window_size);
+    }
+
+    cfg_get_new_or_old("window_position", "auto", cfg_legacy_window_position, "posX/posY", value, sizeof(value));
+    if (ds_parse_window_position(value, &g_config.window_position))
+    {
+        TRACE("window_position=%s\n", value);
+    }
+    else
+    {
+        TRACE("window_position=%s is invalid, using auto\n", value);
+        ds_parse_window_position("auto", &g_config.window_position);
+    }
+
+    cfg_get_new_or_old("window_decorations", "on", cfg_legacy_border, "border", value, sizeof(value));
+    g_config.window_decorations = cfg_parse_on_off("window_decorations", value);
+
+    cfg_get_new_or_old("window_resizable", "on", cfg_legacy_resizable, "resizable", value, sizeof(value));
+    g_config.window_resizable = cfg_parse_on_off("window_resizable", value);
+
+    cfg_get_new_or_old("remember_window", "off", cfg_legacy_remember_window, "savesettings", value, sizeof(value));
+    if (!ds_parse_remember_window(value, &g_config.remember_window))
+    {
+        TRACE("remember_window=%s is invalid, using off\n", value);
+        g_config.remember_window = REMEMBER_WINDOW_OFF;
+    }
+    TRACE("remember_window=%s\n", ds_remember_window_name(g_config.remember_window));
+
+    /* Until the game sets its cooperative level, as for a fullscreen game */
+    DISPLAY_KIND kind = ds_display_start(g_config.display, 1);
+    g_config.windowed = kind == DISPLAY_KIND_WINDOW;
+    g_config.fullscreen = kind == DISPLAY_KIND_DESKTOP;
+}
+
+/* The shader and crt-auto's settings use DOSBox Staging's names, values and
+ * defaults. An invalid value gets the default, as in DOSBox */
 static void cfg_load_crt_auto_settings(CRT_AUTO_SETTINGS* settings)
 {
     *settings = crt_auto_default_settings();
@@ -2258,8 +2257,26 @@ static void cfg_load_crt_auto_settings(CRT_AUTO_SETTINGS* settings)
         const char* name = crt_auto_setting_name(i);
         const char* default_value = crt_auto_setting_default(i);
 
-        char value[64];
-        cfg_get_string(name, default_value, value, sizeof(value));
+        char value[MAX_PATH];
+        cfg_get_new_or_old(
+            name,
+            default_value,
+            strcmp(name, "integer_scaling") == 0 ? cfg_legacy_integer_scaling : NULL,
+            "boxing",
+            value,
+            sizeof(value));
+
+        /* cnc-ddraw's shader names and files */
+        if (strcmp(name, "shader") == 0)
+        {
+            const char* shader = ds_legacy_shader(value);
+
+            if (shader && _stricmp(shader, value) != 0)
+            {
+                TRACE("     shader=%s is no longer available, using %s\n", value, shader);
+                cfg_copy(shader, value, sizeof(value));
+            }
+        }
 
         if (crt_auto_set(settings, name, value))
         {
@@ -2277,7 +2294,8 @@ static BOOL cfg_get_bool(LPCSTR key, BOOL default_value)
     char value[8];
     cfg_get_string(key, default_value ? "Yes" : "No", value, sizeof(value));
 
-    return (_stricmp(value, "yes") == 0 || _stricmp(value, "true") == 0 || _stricmp(value, "1") == 0);
+    int on;
+    return ds_parse_bool(value, &on) ? on : default_value;
 }
 
 static int cfg_get_int(LPCSTR key, int default_value)

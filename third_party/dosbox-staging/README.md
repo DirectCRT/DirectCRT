@@ -1,6 +1,6 @@
 # DOSBox Staging shaders
 
-Unmodified copies of the files DirectCRT needs for `crt-auto`, at the same paths
+Unmodified copies of the files DirectCRT needs for its shaders, at the same paths
 as in the [DOSBox Staging](https://github.com/dosbox-staging/dosbox-staging)
 repository. They're built into `ddraw.dll` as resources (see `res.rc`).
 
@@ -14,7 +14,9 @@ here.
 | `resources/shaders/crt/crt-hyllian.glsl` | 3 or more screen pixels per game line | MIT |
 | `resources/shaders/crt/vga-1080p.glsl` | 2 to 3 pixels per line | MIT |
 | `resources/shaders/crt/vga-1080p-fake-double-scan.glsl` | 2 to 3 pixels per line, double-scanned modes of up to 216 lines | MIT |
-| `resources/shaders/interpolation/sharp.glsl` | under 2 pixels per line | GPL-2.0-or-later |
+| `resources/shaders/interpolation/sharp.glsl` | under 2 pixels per line, and `shader=sharp` | GPL-2.0-or-later |
+| `resources/shaders/interpolation/nearest.glsl` | `shader=nearest` | GPL-2.0-or-later |
+| `resources/shaders/interpolation/bilinear.glsl` | `shader=bilinear` | GPL-2.0-or-later |
 | `resources/shader-presets/crt/crt-hyllian/vga-1440p.preset` | crt-hyllian settings for 3 to 4 pixels per line | (data) |
 | `resources/shader-presets/crt/crt-hyllian/vga-4k.preset` | crt-hyllian settings for 4 or more pixels per line | (data) |
 
