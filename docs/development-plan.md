@@ -421,6 +421,16 @@ otherwise keep the no-shading trap. `original` has to be chosen.
      and the list of games with profiles are gone. A game's own section is
      only `[game]` now (cnc-ddraw also read `[game/wine]`, `[game/2]` to
      `[game/9]` and `checkfile`, which only the profiles used).
+   - Done: ddtest as a regression test. `--ddraw 1|2|4|7` picks the
+     interface (`DirectDrawCreate` plus `QueryInterface`, `DDSURFACEDESC`
+     before version 4), `--present vblank` waits for the vertical blank and
+     `Blt`s, the `fade` pattern fades the palette, and the `blits` pattern
+     does colour fills, colour-keyed `Blt` and `BltFast`, and GDI text on the
+     surface, then reads the surface back and checks it (exit code 4 when it
+     fails). `tools/ddtest/regress.ps1` runs it across versions, methods and
+     depths: all 52 runs pass on DirectCRT, and on Windows' own DirectDraw
+     in the modes it offers. Deliberately wrong colour-key and fill values
+     make the check fail.
    - Not done yet: when a game resizes its own window, the new size should
      become its new resolution. For now it doesn't.
 4. **Overlay**, in this order: the status OSD; the full OSD with input
@@ -437,8 +447,11 @@ otherwise keep the no-shading trap. `original` has to be chosen.
 ## Testing
 
 - **ddtest** (`tools/ddtest`): test patterns at any resolution and bit depth,
-  four presentation methods, scripted runs (`--start --frames N --log FILE`)
-  and PNG dumps (`--dump DIR`). See its README.
+  five presentation methods, DirectDraw interface versions 1, 2, 4 and 7,
+  scripted runs (`--start --frames N --log FILE`) and PNG dumps
+  (`--dump DIR`). Its blits pattern checks DirectDraw's and GDI's drawing on
+  the surface, and `tools/ddtest/regress.ps1` runs that across every
+  combination as a regression test. See its README.
 - **crt-compare** (`tools/crt-compare`): shows the same pictures in DirectCRT
   and DOSBox Staging, captures both and compares them pixel by pixel. Both
   renderers have to pass it, and match each other (`REFERENCE=opengl`).

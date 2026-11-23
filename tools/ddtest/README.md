@@ -2,7 +2,9 @@
 
 A small DirectDraw program that shows test patterns at any resolution and bit
 depth. It's for checking scaling, CRT shading, aspect ratio, colour, frame pacing
-and mouse mapping without needing a real game.
+and mouse mapping without needing a real game. Its blits pattern checks its own
+result, which makes it a regression test for DirectDraw itself (see
+[Regression test](#regression-test)).
 
 It loads whichever `ddraw.dll` Windows finds first: the one next to `ddtest.exe`,
 otherwise Windows' own. The status line and the in-picture info text show which
@@ -27,9 +29,10 @@ apply when you press Enter or leave the box. Like a game changing its settings:
 - fullscreen, a new resolution, bit depth or refresh rate, or another fullscreen
   presentation method, is a display mode change on the same DirectDraw object
 - windowed, a new bit depth recreates the surfaces in the same window
-- switching between windowed and fullscreen, or a new windowed size, starts over
-  as a fresh run (DirectCRT takes a windowed program's window size as its mode
-  once, when the program sets its cooperative level)
+- switching between windowed and fullscreen, a new windowed size or another
+  interface version starts over as a fresh run (DirectCRT takes a windowed
+  program's window size as its mode once, when the program sets its
+  cooperative level)
 
 Windowed, the test window's size is the resolution: resizing it changes the
 resolution in the panel (and starts over at the new size, where the window is),
@@ -65,8 +68,17 @@ asked.
 
 - **Exclusive fullscreen, page flipping** - a primary surface with one back buffer, `Flip`
 - **Exclusive fullscreen, Blt to the primary surface** - draw into an off-screen surface, `Blt` it to the primary
+- **Exclusive fullscreen, WaitForVerticalBlank, then Blt to the primary** - the same, waiting for the vertical blank first, as many games did instead of flipping
 - **Exclusive fullscreen, write the primary surface** - write straight into the primary surface
 - **Windowed** - normal cooperative level, a clipper, and `Blt` into the window
+
+**Interface** picks the DirectDraw interface the program uses, as games of
+different years did: `IDirectDraw` (DirectX 1 to 3, from `DirectDrawCreate`),
+`IDirectDraw2` (DirectX 5) or `IDirectDraw4` (DirectX 6), asked for with
+`QueryInterface`, or `IDirectDraw7` (DirectX 7, from `DirectDrawCreateEx`).
+The surfaces, surface descriptions and calls are that version's: version 1
+sets the display mode without a refresh rate, and versions 1 and 2 restore
+lost surfaces one by one, having no `RestoreAllSurfaces`.
 
 24-bit works only windowed through DirectCRT: neither DirectCRT nor Windows' own
 DirectDraw on current graphics cards offers 24-bit display modes, and Windows'
@@ -89,6 +101,8 @@ All patterns are generated for the current size.
 | Motion | sweeping bar and line, bouncing square, frame counter: tearing, VSync, frame pacing |
 | Interlaced | every other line black, for deinterlacing |
 | Palette cycling | in 8-bit modes, `SetEntries` every frame (the greys stay fixed) |
+| Palette fade | colour bars fading to black and back over three seconds; in 8-bit modes with `SetEntries` on all 256 entries every frame, as games faded between screens, otherwise drawn |
+| DirectDraw blits and GDI text | ddtest draws on the surface with DirectDraw and GDI, then reads it back and checks it: `Blt` colour fills, a sprite blitted with a source colour key by `Blt` and by `BltFast` (its own off-screen surface, drawn with `Lock` every frame), and text drawn with `TextOut` through the surface's `GetDC`. The fills and sprites must be exact, the colour key letting the background through, and the text white on its black background. The info text and the status line show the result; see [Regression test](#regression-test) |
 | White field | full white, for mask strength and brightness |
 | Test image | a built-in 4500 x 3000 landscape photo (`testimage.png`, embedded in `ddtest.exe`), 1:1, centred and cropped; Ctrl+arrows move it. Fine natural detail, and a large smooth sky (Ctrl+Up to see it) that's smooth at 24 and 32-bit and bands at 16-bit |
 | Image file | a PNG/BMP/JPEG/GIF/TIFF of your own, 1:1, centred and cropped; Ctrl+arrows move it |
@@ -100,21 +114,49 @@ so gradients show 8-bit banding on purpose.
 
 ```
 --size WxH, --width N, --height N, --bpp 8|16|24|32, --refresh HZ, --fps N
---present flip|blt|lock|windowed, --pattern NAME|NUMBER, --image FILE
+--ddraw 1|2|4|7      the IDirectDraw interface version (7)
+--present flip|blt|vblank|lock|windowed, --pattern NAME|NUMBER, --image FILE
 --info 0|1           the info text in the picture (same as I)
 --mouse 0|1          the mouse crosshair (same as M)
 --start              run straight away
 --dump DIR           save the patterns (or just --pattern) as PNGs and exit, no DirectDraw
 --frame N            animation frame for --dump
---frames N           with --start: exit after N frames (exit code 0, or 3 if DirectDraw failed)
+--frames N           with --start: exit after N frames (exit code 0; 3 if DirectDraw
+                     failed; 4 if the blits pattern's check failed)
 --log FILE           with --frames: write the result to FILE
 ```
 
 Pattern names: `bars`, `ramps`, `grid`, `pixels`, `geometry`, `dither`, `text`,
-`motion`, `interlaced`, `palette`, `white`, `testimage`, `image`.
+`motion`, `interlaced`, `palette`, `fade`, `blits`, `white`, `testimage`,
+`image`. `ddtest.ini` keeps the presentation method and the pattern by name;
+the numbers older versions saved still work.
 
 Example: run 320x240 8-bit with page flipping for 300 frames and log the result:
 
 ```
 ddtest --size 320x240 --bpp 8 --present flip --pattern grid --start --frames 300 --log result.txt
 ```
+
+## Regression test
+
+`regress.ps1` runs the blits pattern with every interface version (1, 2, 4,
+7), presentation method and bit depth (8, 16, 32; windowed once, at the
+desktop's), and prints a table:
+
+```
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\ddtest\regress.ps1
+```
+
+It tests `bin\Release\ddraw.dll` with `bin\Release\ddtest.exe` by default,
+copied to a new folder under `%TEMP%` with a default `directcrt.ini`, so your
+own settings don't matter. `-Dll` and `-Exe` pick others, `-System` tests
+Windows' own DirectDraw, and `-Versions 1,7`, `-Methods flip,blt`,
+`-Depths 8,32`, `-Size 800x600` and `-Frames 120` narrow or change the runs.
+It exits with 1 if a run failed. A display mode the DLL doesn't offer counts
+as skipped: Windows' own DirectDraw sometimes refuses 8 and 16-bit modes on
+Windows 10 and 11.
+
+The fullscreen runs take over the screen, about two minutes for the whole
+table; leave the mouse and keyboard alone. A frame whose surfaces were lost
+(for example just after a mode switch) isn't checked, so a run can check a
+few frames fewer than it ran.

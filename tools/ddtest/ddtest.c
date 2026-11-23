@@ -9,12 +9,14 @@
  *
  * Command line (all optional):
  *   --size WxH  --width N  --height N  --bpp 8|16|24|32  --refresh HZ  --fps N
- *   --present flip|blt|lock|windowed  --pattern NAME|NUMBER  --image FILE
+ *   --ddraw 1|2|4|7  --present flip|blt|vblank|lock|windowed
+ *   --pattern NAME|NUMBER  --image FILE
  *   --start          run straight away
  *   --dump DIR       save every pattern (or just --pattern) as PNG files and exit,
  *                    without using DirectDraw; --frame N picks the animation frame
  *   --frames N       with --start: exit after N frames (exit code 0), or with
- *                    exit code 3 if DirectDraw failed
+ *                    exit code 3 if DirectDraw failed, 4 if the blits
+ *                    pattern's self-check failed
  *   --log FILE       with --frames: write the result to FILE
  */
 
@@ -43,22 +45,36 @@
 /* ---------------------------------------------------------------------- */
 /* Settings                                                                */
 
-enum { PRESENT_FLIP, PRESENT_BLT, PRESENT_LOCK, PRESENT_WINDOWED, PRESENT_COUNT };
+enum { PRESENT_FLIP, PRESENT_BLT, PRESENT_VBLANK, PRESENT_LOCK, PRESENT_WINDOWED, PRESENT_COUNT };
 
 /* What the program asks DirectDraw for. DirectCRT follows it with
    display=auto; display=window/fullscreen override it. */
 static const char* PRESENT_NAMES[PRESENT_COUNT] = {
     "Exclusive fullscreen, page flipping",
     "Exclusive fullscreen, Blt to the primary surface",
+    "Exclusive fullscreen, WaitForVerticalBlank, then Blt to the primary",
     "Exclusive fullscreen, write the primary surface",
     "Windowed (normal cooperative level), Blt to the window",
 };
 
-static const char* PRESENT_SHORT[PRESENT_COUNT] = { "flip", "blt", "lock", "windowed" };
+static const char* PRESENT_SHORT[PRESENT_COUNT] = { "flip", "blt", "vblank", "lock", "windowed" };
 
 static const char* PRESENT_DESC[PRESENT_COUNT] = {
-    "page flipping", "Blt to primary", "writing the primary", "windowed",
+    "page flipping", "Blt to primary", "vblank, then Blt", "writing the primary", "windowed",
 };
+
+/* The DirectDraw interface a game asks for */
+static const int DDRAW_VERSIONS[] = { 1, 2, 4, 7 };
+static const char* DDRAW_NAMES[] = { "IDirectDraw", "IDirectDraw2", "IDirectDraw4", "IDirectDraw7" };
+#define DDRAW_COUNT ((int)(sizeof(DDRAW_VERSIONS) / sizeof(DDRAW_VERSIONS[0])))
+
+static const char* ddraw_name(int version)
+{
+    for (int i = 0; i < DDRAW_COUNT; i++)
+        if (DDRAW_VERSIONS[i] == version)
+            return DDRAW_NAMES[i];
+    return "?";
+}
 
 static const int BPP_VALUES[] = { 8, 16, 24, 32 };
 #define BPP_COUNT ((int)(sizeof(BPP_VALUES) / sizeof(BPP_VALUES[0])))
@@ -68,6 +84,7 @@ static const int BPP_VALUES[] = { 8, 16, 24, 32 };
 typedef struct Settings
 {
     int width, height, bpp, refresh, fps;
+    int ddraw; /* 1, 2, 4 or 7 */
     int present, pattern;
     BOOL info, mouse;
     char image_path[MAX_PATH];
@@ -80,6 +97,7 @@ static void settings_default(Settings* s)
     s->height = 480;
     s->bpp = 8;
     s->fps = 60;
+    s->ddraw = 7;
     s->present = PRESENT_FLIP;
     s->pattern = PAT_COLOR_BARS;
     s->info = TRUE;
@@ -99,6 +117,7 @@ enum
     ID_MODES, ID_QUERY, ID_STATUS,
     ID_BPP0 = 1100,     /* radio buttons, one per BPP_VALUES entry */
     ID_PRESENT0 = 1110, /* radio buttons, one per presentation method */
+    ID_DDRAW0 = 1120,   /* radio buttons, one per DDRAW_VERSIONS entry */
 };
 
 /* Posted to the panel when a text box loses the focus, so its value is
@@ -129,11 +148,11 @@ static struct
     HFONT font;
     HWND panel, display;
     HWND cb_res, ed_width, ed_height, rb_bpp[BPP_COUNT], ed_refresh, ed_fps;
-    HWND rb_present[PRESENT_COUNT], cb_pattern, chk_info, chk_mouse;
+    HWND rb_ddraw[DDRAW_COUNT], rb_present[PRESENT_COUNT], cb_pattern, chk_info, chk_mouse;
     HWND ed_image, cb_modes, st_status;
     HWND bt_browse, bt_imgsize, bt_query, bt_run, bt_stop;
     HWND lb_size, lb_x, lb_bpp, lb_refresh, lb_hz, lb_fps, lb_fps_unit;
-    HWND lb_present, st_present_note, lb_pattern, lb_image, st_image_note, lb_modes, st_help;
+    HWND lb_ddraw, lb_present, st_present_note, lb_pattern, lb_image, st_image_note, lb_modes, st_help;
     int dpi;
 
     char exe_dir[MAX_PATH];
@@ -141,11 +160,16 @@ static struct
 
     HMODULE ddraw_mod;
     char ddraw_path[MAX_PATH + 32];
+    HRESULT (WINAPI* DirectDrawCreate)(GUID*, LPDIRECTDRAW*, IUnknown*);
     HRESULT (WINAPI* DirectDrawCreateEx)(GUID*, LPVOID*, REFIID, IUnknown*);
 
+    /* Any interface version, held as version 7 (see dd_create) */
     LPDIRECTDRAW7 dd;
+    int dd_version;
     BOOL dd_fullscreen;
     LPDIRECTDRAWSURFACE7 primary, back, offscreen;
+    LPDIRECTDRAWSURFACE7 sprite; /* the blits pattern's sprite */
+    int sprite_size;
     LPDIRECTDRAWPALETTE pal;
     BOOL pal_dirty;
     LPDIRECTDRAWCLIPPER clipper;
@@ -180,6 +204,11 @@ static struct
 
     uint32_t quit_after_frames;
     char log_path[MAX_PATH];
+
+    /* The blits pattern's self-check since the run or mode change */
+    uint32_t check_frames, check_failed;
+    BOOL check_frame_failed;
+    char check_msg[320]; /* the first failure */
 
     char error[512];
 } g;
@@ -269,7 +298,7 @@ static BOOL dd_ok(HRESULT hr, const char* what)
 static BOOL load_ddraw(void)
 {
     if (g.ddraw_mod)
-        return g.DirectDrawCreateEx != NULL;
+        return g.DirectDrawCreate != NULL;
 
     /* No path: Windows looks next to the exe first, then in the system folder */
     g.ddraw_mod = LoadLibraryA("ddraw.dll");
@@ -292,12 +321,14 @@ static BOOL load_ddraw(void)
               _stricmp(dir, g.exe_dir) == 0 ? "  (next to ddtest.exe)" : "");
     g.ddraw_path[sizeof(g.ddraw_path) - 1] = '\0';
 
+    g.DirectDrawCreate = (HRESULT (WINAPI*)(GUID*, LPDIRECTDRAW*, IUnknown*))
+        GetProcAddress(g.ddraw_mod, "DirectDrawCreate");
     g.DirectDrawCreateEx = (HRESULT (WINAPI*)(GUID*, LPVOID*, REFIID, IUnknown*))
         GetProcAddress(g.ddraw_mod, "DirectDrawCreateEx");
 
-    if (!g.DirectDrawCreateEx)
+    if (!g.DirectDrawCreate)
     {
-        set_error("This ddraw.dll has no DirectDrawCreateEx");
+        set_error("This ddraw.dll has no DirectDrawCreate");
         return FALSE;
     }
 
@@ -315,7 +346,72 @@ static void unload_ddraw(void)
 
     FreeLibrary(g.ddraw_mod);
     g.ddraw_mod = NULL;
+    g.DirectDrawCreate = NULL;
     g.DirectDrawCreateEx = NULL;
+}
+
+/* ---------------------------------------------------------------------- */
+/* DirectDraw interface versions                                           */
+
+/* --ddraw picks the interface a game would use: IDirectDraw (DirectX 1 to
+   3), created with DirectDrawCreate; IDirectDraw2 (DirectX 5) or
+   IDirectDraw4 (DirectX 6), asked for with QueryInterface on that; or
+   IDirectDraw7, created with DirectDrawCreateEx. Each version adds methods
+   at the end of the one before, and the methods ddtest calls take the same
+   arguments in all of them, except SetDisplayMode and RestoreAllSurfaces
+   (below). The surface descriptions differ in size, and dwSize tells
+   DirectDraw which one it has (dd_desc_size). So objects of every version
+   are kept, and called, as version 7 ones. The surfaces are those of the
+   version that created them: IDirectDrawSurface for 1 and 2,
+   IDirectDrawSurface4 for 4. */
+static BOOL dd_create(int version, LPDIRECTDRAW7* out)
+{
+    *out = NULL;
+
+    if (version == 7)
+    {
+        if (!g.DirectDrawCreateEx)
+        {
+            set_error("This ddraw.dll has no DirectDrawCreateEx");
+            return FALSE;
+        }
+
+        return dd_ok(g.DirectDrawCreateEx(NULL, (LPVOID*)out, &IID_IDirectDraw7, NULL), "DirectDrawCreateEx");
+    }
+
+    LPDIRECTDRAW dd1 = NULL;
+    if (!dd_ok(g.DirectDrawCreate(NULL, &dd1, NULL), "DirectDrawCreate"))
+        return FALSE;
+
+    if (version == 1)
+    {
+        *out = (LPDIRECTDRAW7)dd1;
+        return TRUE;
+    }
+
+    HRESULT hr = IDirectDraw_QueryInterface(dd1, version == 2 ? &IID_IDirectDraw2 : &IID_IDirectDraw4, (LPVOID*)out);
+    IDirectDraw_Release(dd1);
+
+    if (FAILED(hr))
+        *out = NULL;
+
+    return dd_ok(hr, version == 2 ? "QueryInterface (IDirectDraw2)" : "QueryInterface (IDirectDraw4)");
+}
+
+/* DDSURFACEDESC for the first three versions, DDSURFACEDESC2 after. The
+   first is the start of the second, so a DDSURFACEDESC2 holds either. */
+static DWORD dd_desc_size(void)
+{
+    return g.dd_version >= 4 ? sizeof(DDSURFACEDESC2) : sizeof(DDSURFACEDESC);
+}
+
+/* IDirectDraw's has no refresh rate or flags */
+static HRESULT dd_set_display_mode(const Settings* s)
+{
+    if (g.dd_version == 1)
+        return IDirectDraw_SetDisplayMode((LPDIRECTDRAW)g.dd, (DWORD)s->width, (DWORD)s->height, (DWORD)s->bpp);
+
+    return IDirectDraw7_SetDisplayMode(g.dd, (DWORD)s->width, (DWORD)s->height, (DWORD)s->bpp, (DWORD)s->refresh, 0);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -423,11 +519,84 @@ static void convert_to_surface(const Canvas* c, BYTE* dst, LONG pitch, DWORD sw,
     }
 }
 
+/* One colour in the surface's pixel format, as convert_to_surface writes it */
+static uint32_t surface_value(uint32_t p)
+{
+    const DDPIXELFORMAT* pf = &g.pf;
+
+    if (pf->dwFlags & DDPF_PALETTEINDEXED8)
+        return palette_lookup(p);
+
+    return ((COL_R(p) >> (8 - mask_bits(pf->dwRBitMask))) << mask_shift(pf->dwRBitMask)) |
+           ((COL_G(p) >> (8 - mask_bits(pf->dwGBitMask))) << mask_shift(pf->dwGBitMask)) |
+           ((COL_B(p) >> (8 - mask_bits(pf->dwBBitMask))) << mask_shift(pf->dwBBitMask));
+}
+
+/* What convert_to_surface wrote for a canvas pixel */
+static uint32_t canvas_value(int x, int y)
+{
+    const Canvas* c = &g.canvas;
+    int i = y * c->w + x;
+
+    if (g.pf.dwFlags & DDPF_PALETTEINDEXED8)
+        return c->use_idx ? c->idx[i] : palette_lookup(c->px[i]);
+
+    return surface_value(c->px[i]);
+}
+
+static uint32_t read_value(const BYTE* base, LONG pitch, int x, int y)
+{
+    const BYTE* row = base + (size_t)y * pitch;
+
+    switch (g.pf.dwRGBBitCount)
+    {
+    case 8: return row[x];
+    case 16: return ((const uint16_t*)row)[x];
+    case 24: return row[x * 3] | ((uint32_t)row[x * 3 + 1] << 8) | ((uint32_t)row[x * 3 + 2] << 16);
+    default: return ((const uint32_t*)row)[x];
+    }
+}
+
+static void write_value(BYTE* base, LONG pitch, int x, int y, uint32_t v)
+{
+    BYTE* row = base + (size_t)y * pitch;
+
+    switch (g.pf.dwRGBBitCount)
+    {
+    case 8: row[x] = (BYTE)v; break;
+    case 16: ((uint16_t*)row)[x] = (uint16_t)v; break;
+    case 24: row[x * 3] = (BYTE)v; row[x * 3 + 1] = (BYTE)(v >> 8); row[x * 3 + 2] = (BYTE)(v >> 16); break;
+    default: ((uint32_t*)row)[x] = v; break;
+    }
+}
+
+/* The same colour on the screen. In 8-bit modes that's the palette entries'
+   colours: GDI may pick another entry of the same colour. */
+static BOOL same_colour(uint32_t a, uint32_t b)
+{
+    if (g.pf.dwFlags & DDPF_PALETTEINDEXED8)
+        return g.base_pal[a & 255] == g.base_pal[b & 255];
+
+    return ((a ^ b) & (g.pf.dwRBitMask | g.pf.dwGBitMask | g.pf.dwBBitMask)) == 0;
+}
+
+static const char* value_text(uint32_t v, char* buf, int len)
+{
+    if (g.pf.dwFlags & DDPF_PALETTEINDEXED8)
+        _snprintf(buf, len - 1, "index %u (#%06X)", v & 255, g.base_pal[v & 255]);
+    else
+        _snprintf(buf, len - 1, "0x%0*X", (int)(g.pf.dwRGBBitCount + 3) / 4, v);
+    buf[len - 1] = '\0';
+    return buf;
+}
+
 /* ---------------------------------------------------------------------- */
 /* DirectDraw setup and teardown                                           */
 
 static void release_surfaces(void)
 {
+    if (g.sprite) { IDirectDrawSurface7_Release(g.sprite); g.sprite = NULL; }
+    g.sprite_size = 0;
     if (g.offscreen) { IDirectDrawSurface7_Release(g.offscreen); g.offscreen = NULL; }
     if (g.back) { IDirectDrawSurface7_Release(g.back); g.back = NULL; }
     if (g.primary) { IDirectDrawSurface7_Release(g.primary); g.primary = NULL; }
@@ -562,7 +731,7 @@ static BOOL create_surfaces(const Settings* s)
     HRESULT hr;
 
     ZeroMemory(&sd, sizeof(sd));
-    sd.dwSize = sizeof(sd);
+    sd.dwSize = dd_desc_size();
 
     if (s->present == PRESENT_FLIP)
     {
@@ -606,7 +775,7 @@ static BOOL create_surfaces(const Settings* s)
             return FALSE;
     }
 
-    if (s->present == PRESENT_BLT || s->present == PRESENT_WINDOWED)
+    if (s->present == PRESENT_BLT || s->present == PRESENT_VBLANK || s->present == PRESENT_WINDOWED)
     {
         DDPIXELFORMAT primary_pf;
         ZeroMemory(&primary_pf, sizeof(primary_pf));
@@ -615,7 +784,7 @@ static BOOL create_surfaces(const Settings* s)
         g.primary_bpp = (int)primary_pf.dwRGBBitCount;
 
         ZeroMemory(&sd, sizeof(sd));
-        sd.dwSize = sizeof(sd);
+        sd.dwSize = dd_desc_size();
         sd.dwFlags = DDSD_CAPS | DDSD_WIDTH | DDSD_HEIGHT;
         sd.ddsCaps.dwCaps = DDSCAPS_OFFSCREENPLAIN;
         sd.dwWidth = (DWORD)s->width;
@@ -688,9 +857,9 @@ static BOOL start(const Settings* s)
 
     if (!g.dd)
     {
-        hr = g.DirectDrawCreateEx(NULL, (LPVOID*)&g.dd, &IID_IDirectDraw7, NULL);
-        if (!dd_ok(hr, "DirectDrawCreateEx"))
+        if (!dd_create(s->ddraw, &g.dd))
             return FALSE;
+        g.dd_version = s->ddraw;
 
         hr = IDirectDraw7_SetCooperativeLevel(g.dd, g.display,
             fullscreen ? (DDSCL_EXCLUSIVE | DDSCL_FULLSCREEN | DDSCL_ALLOWREBOOT) : DDSCL_NORMAL);
@@ -702,14 +871,14 @@ static BOOL start(const Settings* s)
 
     if (fullscreen)
     {
-        hr = IDirectDraw7_SetDisplayMode(g.dd, (DWORD)s->width, (DWORD)s->height, (DWORD)s->bpp, (DWORD)s->refresh, 0);
+        hr = dd_set_display_mode(s);
         if (!dd_ok(hr, "SetDisplayMode"))
         {
             if (s->bpp == 24)
                 append_error(". This ddraw.dll has no 24-bit display modes: DirectCRT doesn't offer them, "
                              "and neither does Windows' own DirectDraw on current graphics cards.");
             else if (hr == DDERR_INVALIDMODE || hr == DDERR_UNSUPPORTEDMODE)
-                append_error(". This ddraw.dll doesn't offer that mode; Query lists the ones it does.");
+                append_error(". This ddraw.dll doesn't offer that mode; List shows the ones it does.");
             return FALSE;
         }
 
@@ -732,6 +901,8 @@ static BOOL start(const Settings* s)
     g.click_count = 0;
     g.click_next = 0;
     g.next_frame.QuadPart = 0;
+    g.check_frames = g.check_failed = 0;
+    g.check_msg[0] = '\0';
     QueryPerformanceCounter(&g.fps_t0);
     g.run_t0 = g.fps_t0;
     return TRUE;
@@ -762,8 +933,8 @@ static void draw_info(Canvas* c)
     char line[MAX_PATH + 96];
     int y = 2;
 
-    _snprintf(line, sizeof(line) - 1, "%d x %d, %d-bit, %s", g.cur.width, g.cur.height, g.cur.bpp,
-              PRESENT_DESC[g.cur.present]);
+    _snprintf(line, sizeof(line) - 1, "%d x %d, %d-bit, %s, %s", g.cur.width, g.cur.height, g.cur.bpp,
+              PRESENT_DESC[g.cur.present], ddraw_name(g.cur.ddraw));
     line[sizeof(line) - 1] = '\0';
     y += cv_label(c, 3, y, ts, WHITE, BLACK, line);
 
@@ -780,6 +951,17 @@ static void draw_info(Canvas* c)
         _snprintf(line, sizeof(line) - 1, "Picture moved %d, %d from centred", g.pan_x, g.pan_y);
         line[sizeof(line) - 1] = '\0';
         y += cv_label(c, 3, y, ts, WHITE, BLACK, line);
+    }
+
+    if (g.cur.pattern == PAT_BLITS && g.check_frames)
+    {
+        if (g.check_failed)
+            _snprintf(line, sizeof(line) - 1, "Self-check FAILED in %u of %u frames: %s", g.check_failed,
+                      g.check_frames, g.check_msg);
+        else
+            _snprintf(line, sizeof(line) - 1, "Self-check passed, %u frames", g.check_frames);
+        line[sizeof(line) - 1] = '\0';
+        y += cv_label(c, 3, y, ts, g.check_failed ? COL(255, 102, 102) : COL(102, 255, 102), BLACK, line);
     }
 
     cv_label(c, 3, y, ts, COL(160, 160, 160), BLACK,
@@ -823,8 +1005,347 @@ static void draw_mouse(Canvas* c)
 
 static void restore_surfaces(void)
 {
-    if (FAILED(IDirectDraw7_RestoreAllSurfaces(g.dd)))
+    HRESULT hr;
+
+    if (g.dd_version >= 4)
+    {
+        hr = IDirectDraw7_RestoreAllSurfaces(g.dd);
+    }
+    else
+    {
+        /* IDirectDraw and IDirectDraw2 have no RestoreAllSurfaces; the back
+           buffer comes back with the primary */
+        hr = IDirectDrawSurface7_Restore(g.primary);
+        if (SUCCEEDED(hr) && g.offscreen)
+            hr = IDirectDrawSurface7_Restore(g.offscreen);
+        if (SUCCEEDED(hr) && g.sprite)
+            hr = IDirectDrawSurface7_Restore(g.sprite);
+    }
+
+    if (FAILED(hr))
         Sleep(50); /* e.g. while alt-tabbed out of exclusive fullscreen */
+}
+
+/* 8-bit modes: the palette pattern cycles the colour cube's entries, the
+   fade pattern scales all 256; the others get the base palette back */
+static void update_palette(void)
+{
+    BOOL cycle = g.cur.pattern == PAT_PALETTE, fade = g.cur.pattern == PAT_FADE;
+
+    if (!g.pal || (!cycle && !fade && !g.pal_dirty))
+        return;
+
+    int level = fade ? fade_level(g.frame) : 256;
+    PALETTEENTRY pe[256];
+
+    for (int i = 0; i < 256; i++)
+    {
+        uint32_t col = cycle && i < PAL_CYCLE_COUNT ? g.base_pal[(i + g.frame) % PAL_CYCLE_COUNT] : g.base_pal[i];
+        pe[i].peRed = (BYTE)(COL_R(col) * level / 256);
+        pe[i].peGreen = (BYTE)(COL_G(col) * level / 256);
+        pe[i].peBlue = (BYTE)(COL_B(col) * level / 256);
+        pe[i].peFlags = 0;
+    }
+
+    IDirectDrawPalette_SetEntries(g.pal, 0, 0, cycle ? PAL_CYCLE_COUNT : 256, pe);
+    g.pal_dirty = cycle || fade;
+}
+
+/* ---------------------------------------------------------------------- */
+/* The blits pattern: blits and GDI text on the surface, read back and     */
+/* checked                                                                 */
+
+/* The first failure in a frame counts; the first of the run is kept */
+static void check_fail(const char* fmt, ...)
+{
+    if (g.check_frame_failed)
+        return;
+
+    g.check_frame_failed = TRUE;
+
+    if (g.check_msg[0])
+        return;
+
+    int n = _snprintf(g.check_msg, sizeof(g.check_msg) - 1, "frame %u: ", g.frame);
+    if (n < 0)
+        n = 0;
+
+    va_list ap;
+    va_start(ap, fmt);
+    _vsnprintf(g.check_msg + n, sizeof(g.check_msg) - 1 - n, fmt, ap);
+    g.check_msg[sizeof(g.check_msg) - 1] = '\0';
+    va_end(ap);
+}
+
+/* An off-screen surface in the target's format with the source colour key
+   set. It's drawn every frame, which also tests locking a second surface. */
+static BOOL prepare_sprite(int size)
+{
+    HRESULT hr;
+
+    if (g.sprite && g.sprite_size != size)
+    {
+        IDirectDrawSurface7_Release(g.sprite);
+        g.sprite = NULL;
+    }
+
+    if (!g.sprite)
+    {
+        DDSURFACEDESC2 sd;
+        ZeroMemory(&sd, sizeof(sd));
+        sd.dwSize = dd_desc_size();
+        sd.dwFlags = DDSD_CAPS | DDSD_WIDTH | DDSD_HEIGHT | DDSD_PIXELFORMAT;
+        sd.ddsCaps.dwCaps = DDSCAPS_OFFSCREENPLAIN;
+        sd.dwWidth = sd.dwHeight = (DWORD)size;
+        sd.ddpfPixelFormat = g.pf;
+
+        hr = IDirectDraw7_CreateSurface(g.dd, &sd, &g.sprite, NULL);
+        if (FAILED(hr))
+        {
+            g.sprite = NULL;
+            check_fail("CreateSurface (sprite) failed: %s", dderr_name(hr));
+            return FALSE;
+        }
+        g.sprite_size = size;
+
+        DDCOLORKEY key;
+        key.dwColorSpaceLowValue = key.dwColorSpaceHighValue = surface_value(BLITS_KEY);
+        hr = IDirectDrawSurface7_SetColorKey(g.sprite, DDCKEY_SRCBLT, &key);
+        if (FAILED(hr))
+        {
+            check_fail("SetColorKey failed: %s", dderr_name(hr));
+            return FALSE;
+        }
+    }
+
+    DDSURFACEDESC2 sd;
+    ZeroMemory(&sd, sizeof(sd));
+    sd.dwSize = dd_desc_size();
+
+    hr = IDirectDrawSurface7_Lock(g.sprite, NULL, (LPDDSURFACEDESC2)&sd, DDLOCK_WAIT | DDLOCK_WRITEONLY, NULL);
+    if (FAILED(hr))
+    {
+        check_fail("Lock (sprite) failed: %s", dderr_name(hr));
+        return FALSE;
+    }
+
+    for (int y = 0; y < size; y++)
+        for (int x = 0; x < size; x++)
+            write_value((BYTE*)sd.lpSurface, sd.lPitch, x, y, surface_value(blits_sprite_pixel(x, y, size)));
+
+    IDirectDrawSurface7_Unlock(g.sprite, NULL);
+    return TRUE;
+}
+
+static BOOL rect_inside(const RECT* r, int w, int h)
+{
+    return r->left >= 0 && r->top >= 0 && r->right <= w && r->bottom <= h && r->left < r->right && r->top < r->bottom;
+}
+
+/* Colour fills, the sprite with Blt and BltFast and a source colour key,
+   then GDI text, all on the frame the canvas was written to. Then the
+   surface is read back: the fills and the sprites must be exact (the key
+   letting the canvas through), the text only white on black. */
+static void blits_draw_and_check(LPDIRECTDRAWSURFACE7 target)
+{
+    BlitsLayout l;
+    blits_layout(g.cur.width, g.cur.height, g.frame, &l);
+
+    int w = g.cur.width, h = g.cur.height;
+    HRESULT hr;
+    BOOL lost = FALSE;
+    g.check_frame_failed = FALSE;
+
+    for (int i = 0; i < 4; i++)
+    {
+        if (!rect_inside(&l.fill[i], w, h))
+            continue;
+
+        DDBLTFX fx;
+        ZeroMemory(&fx, sizeof(fx));
+        fx.dwSize = sizeof(fx);
+        fx.dwFillColor = surface_value(l.fill_color[i]);
+
+        hr = IDirectDrawSurface7_Blt(target, &l.fill[i], NULL, NULL, DDBLT_COLORFILL | DDBLT_WAIT, &fx);
+        lost |= hr == DDERR_SURFACELOST;
+        if (FAILED(hr))
+            check_fail("Blt (colour fill) failed: %s", dderr_name(hr));
+    }
+
+    RECT sprite_rect[2];
+    BOOL sprite_drawn[2] = { FALSE, FALSE };
+    for (int i = 0; i < 2; i++)
+    {
+        sprite_rect[i].left = l.sprite_pos[i].x;
+        sprite_rect[i].top = l.sprite_pos[i].y;
+        sprite_rect[i].right = l.sprite_pos[i].x + l.sprite_size;
+        sprite_rect[i].bottom = l.sprite_pos[i].y + l.sprite_size;
+    }
+
+    if (prepare_sprite(l.sprite_size))
+    {
+        if (rect_inside(&sprite_rect[0], w, h))
+        {
+            hr = IDirectDrawSurface7_Blt(target, &sprite_rect[0], g.sprite, NULL, DDBLT_KEYSRC | DDBLT_WAIT, NULL);
+            lost |= hr == DDERR_SURFACELOST;
+            if (FAILED(hr))
+                check_fail("Blt (source colour key) failed: %s", dderr_name(hr));
+            sprite_drawn[0] = SUCCEEDED(hr);
+        }
+
+        if (rect_inside(&sprite_rect[1], w, h))
+        {
+            hr = IDirectDrawSurface7_BltFast(target, (DWORD)sprite_rect[1].left, (DWORD)sprite_rect[1].top, g.sprite,
+                                             NULL, DDBLTFAST_SRCCOLORKEY | DDBLTFAST_WAIT);
+            lost |= hr == DDERR_SURFACELOST;
+            if (FAILED(hr))
+                check_fail("BltFast (source colour key) failed: %s", dderr_name(hr));
+            sprite_drawn[1] = SUCCEEDED(hr);
+        }
+    }
+
+    RECT text_rect[BLITS_LINES];
+    int text_count = 0;
+    HDC dc;
+
+    hr = IDirectDrawSurface7_GetDC(target, &dc);
+    lost |= hr == DDERR_SURFACELOST;
+    if (FAILED(hr))
+    {
+        check_fail("GetDC failed: %s", dderr_name(hr));
+    }
+    else
+    {
+        HFONT font = CreateFontA(-l.text_height, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+                                 OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, NONANTIALIASED_QUALITY,
+                                 DEFAULT_PITCH | FF_SWISS, "Arial");
+        HGDIOBJ old_font = SelectObject(dc, font);
+        SetTextColor(dc, RGB(255, 255, 255));
+        SetBkColor(dc, RGB(0, 0, 0));
+        SetBkMode(dc, OPAQUE);
+
+        for (int i = 0; i < BLITS_LINES; i++)
+        {
+            char text[64];
+            blits_text(i, g.frame, text, sizeof(text));
+            int len = (int)strlen(text);
+            int x = l.gdi_area.left + 4, y = l.gdi_area.top + 4 + i * (l.text_height + 4);
+
+            TextOutA(dc, x, y, text, len);
+
+            /* The opaque box TextOut fills: the text's extent */
+            SIZE sz;
+            GetTextExtentPoint32A(dc, text, len, &sz);
+            RECT r = { x, y, x + sz.cx, y + sz.cy };
+            if (r.right > w) r.right = w;
+            if (r.bottom > h) r.bottom = h;
+            if (r.left < r.right && r.top < r.bottom)
+                text_rect[text_count++] = r;
+        }
+
+        SelectObject(dc, old_font);
+        DeleteObject(font);
+        IDirectDrawSurface7_ReleaseDC(target, dc);
+    }
+
+    DDSURFACEDESC2 sd;
+    ZeroMemory(&sd, sizeof(sd));
+    sd.dwSize = dd_desc_size();
+
+    hr = IDirectDrawSurface7_Lock(target, NULL, (LPDDSURFACEDESC2)&sd, DDLOCK_WAIT | DDLOCK_READONLY, NULL);
+    lost |= hr == DDERR_SURFACELOST;
+
+    /* Lost surfaces (alt-tabbed out) aren't a failure; the frame is skipped */
+    if (lost)
+    {
+        if (SUCCEEDED(hr))
+            IDirectDrawSurface7_Unlock(target, NULL);
+        return;
+    }
+
+    if (FAILED(hr))
+    {
+        check_fail("Lock (to read back) failed: %s", dderr_name(hr));
+    }
+    else
+    {
+        const BYTE* base = (const BYTE*)sd.lpSurface;
+        LONG pitch = sd.lPitch;
+        char a[48], b[48];
+
+        for (int i = 0; i < 4 && !g.check_frame_failed; i++)
+        {
+            if (!rect_inside(&l.fill[i], w, h))
+                continue;
+
+            uint32_t want = surface_value(l.fill_color[i]);
+            for (int y = l.fill[i].top; y < l.fill[i].bottom && !g.check_frame_failed; y++)
+                for (int x = l.fill[i].left; x < l.fill[i].right; x++)
+                {
+                    uint32_t v = read_value(base, pitch, x, y);
+                    if (!same_colour(v, want))
+                    {
+                        check_fail("colour fill %d: pixel %d, %d is %s, should be %s", i + 1, x, y,
+                                   value_text(v, a, sizeof(a)), value_text(want, b, sizeof(b)));
+                        break;
+                    }
+                }
+        }
+
+        for (int i = 0; i < 2 && !g.check_frame_failed; i++)
+        {
+            if (!sprite_drawn[i])
+                continue;
+
+            for (int sy = 0; sy < l.sprite_size && !g.check_frame_failed; sy++)
+                for (int sx = 0; sx < l.sprite_size; sx++)
+                {
+                    int x = sprite_rect[i].left + sx, y = sprite_rect[i].top + sy;
+                    uint32_t sp = blits_sprite_pixel(sx, sy, l.sprite_size);
+                    uint32_t want = sp == BLITS_KEY ? canvas_value(x, y) : surface_value(sp);
+                    uint32_t v = read_value(base, pitch, x, y);
+
+                    if (!same_colour(v, want))
+                    {
+                        check_fail("%s: pixel %d, %d is %s, should be %s (%s)", i ? "BltFast" : "Blt", x, y,
+                                   value_text(v, a, sizeof(a)), value_text(want, b, sizeof(b)),
+                                   sp == BLITS_KEY ? "the colour key lets the background through" : "the sprite");
+                        break;
+                    }
+                }
+        }
+
+        uint32_t white = surface_value(WHITE), black = surface_value(BLACK);
+        for (int i = 0; i < text_count && !g.check_frame_failed; i++)
+        {
+            int text_pixels = 0;
+
+            for (int y = text_rect[i].top; y < text_rect[i].bottom && !g.check_frame_failed; y++)
+                for (int x = text_rect[i].left; x < text_rect[i].right; x++)
+                {
+                    uint32_t v = read_value(base, pitch, x, y);
+                    if (same_colour(v, white))
+                    {
+                        text_pixels++;
+                    }
+                    else if (!same_colour(v, black))
+                    {
+                        check_fail("GDI text: pixel %d, %d is %s, neither the white text nor its black background",
+                                   x, y, value_text(v, a, sizeof(a)));
+                        break;
+                    }
+                }
+
+            if (!g.check_frame_failed && text_pixels == 0)
+                check_fail("GDI text: line %d drew nothing", i + 1);
+        }
+
+        IDirectDrawSurface7_Unlock(target, NULL);
+    }
+
+    g.check_frames++;
+    if (g.check_frame_failed)
+        g.check_failed++;
 }
 
 static void render_frame(void)
@@ -846,6 +1367,7 @@ static void render_frame(void)
     ctx.image = g.image;
     ctx.image_w = g.image_w;
     ctx.image_h = g.image_h;
+    ctx.app_blits = TRUE;
 
     /* The shape of the screen the picture fills, for the patterns that should
        look round or square. Windowed: the window, so square pixels.
@@ -868,41 +1390,12 @@ static void render_frame(void)
     if (g.cur.info)
         draw_info(&g.canvas);
 
-    if (g.pal)
-    {
-        if (g.cur.pattern == PAT_PALETTE)
-        {
-            PALETTEENTRY pe[PAL_CYCLE_COUNT];
-            for (int i = 0; i < PAL_CYCLE_COUNT; i++)
-            {
-                uint32_t col = g.base_pal[(i + g.frame) % PAL_CYCLE_COUNT];
-                pe[i].peRed = (BYTE)COL_R(col);
-                pe[i].peGreen = (BYTE)COL_G(col);
-                pe[i].peBlue = (BYTE)COL_B(col);
-                pe[i].peFlags = 0;
-            }
-            IDirectDrawPalette_SetEntries(g.pal, 0, 0, PAL_CYCLE_COUNT, pe);
-            g.pal_dirty = TRUE;
-        }
-        else if (g.pal_dirty)
-        {
-            PALETTEENTRY pe[PAL_CYCLE_COUNT];
-            for (int i = 0; i < PAL_CYCLE_COUNT; i++)
-            {
-                pe[i].peRed = (BYTE)COL_R(g.base_pal[i]);
-                pe[i].peGreen = (BYTE)COL_G(g.base_pal[i]);
-                pe[i].peBlue = (BYTE)COL_B(g.base_pal[i]);
-                pe[i].peFlags = 0;
-            }
-            IDirectDrawPalette_SetEntries(g.pal, 0, 0, PAL_CYCLE_COUNT, pe);
-            g.pal_dirty = FALSE;
-        }
-    }
+    update_palette();
 
     LPDIRECTDRAWSURFACE7 target = draw_target();
     DDSURFACEDESC2 sd;
     ZeroMemory(&sd, sizeof(sd));
-    sd.dwSize = sizeof(sd);
+    sd.dwSize = dd_desc_size();
 
     HRESULT hr = IDirectDrawSurface7_Lock(target, NULL, &sd, DDLOCK_WAIT | DDLOCK_WRITEONLY, NULL);
     if (hr == DDERR_SURFACELOST)
@@ -919,14 +1412,30 @@ static void render_frame(void)
     convert_to_surface(&g.canvas, (BYTE*)sd.lpSurface, sd.lPitch, sd.dwWidth, sd.dwHeight);
     IDirectDrawSurface7_Unlock(target, NULL);
 
+    if (g.cur.pattern == PAT_BLITS)
+        blits_draw_and_check(target);
+
+    const char* what = "Blt";
+
     switch (g.cur.present)
     {
     case PRESENT_FLIP:
+        what = "Flip";
         hr = IDirectDrawSurface7_Flip(g.primary, NULL, DDFLIP_WAIT);
         break;
 
     case PRESENT_BLT:
         hr = IDirectDrawSurface7_Blt(g.primary, NULL, g.offscreen, NULL, DDBLT_WAIT, NULL);
+        break;
+
+    case PRESENT_VBLANK:
+        what = "WaitForVerticalBlank";
+        hr = IDirectDraw7_WaitForVerticalBlank(g.dd, DDWAITVB_BLOCKBEGIN, NULL);
+        if (SUCCEEDED(hr))
+        {
+            what = "Blt";
+            hr = IDirectDrawSurface7_Blt(g.primary, NULL, g.offscreen, NULL, DDBLT_WAIT, NULL);
+        }
         break;
 
     case PRESENT_WINDOWED:
@@ -949,7 +1458,7 @@ static void render_frame(void)
     {
         restore_surfaces();
     }
-    else if (hr != DDERR_WASSTILLDRAWING && !dd_ok(hr, g.cur.present == PRESENT_FLIP ? "Flip" : "Blt"))
+    else if (hr != DDERR_WASSTILLDRAWING && !dd_ok(hr, what))
     {
         if (g.cur.present == PRESENT_WINDOWED && g.primary_bpp != (int)g.pf.dwRGBBitCount)
             append_error(". This DirectDraw can't Blt from a %d-bit surface to the %d-bit desktop; "
@@ -1007,8 +1516,30 @@ static void settings_load(Settings* s)
     s->bpp = GetPrivateProfileIntA(sec, "bpp", s->bpp, g.ini_path);
     s->refresh = GetPrivateProfileIntA(sec, "refresh", s->refresh, g.ini_path);
     s->fps = GetPrivateProfileIntA(sec, "fps", s->fps, g.ini_path);
-    s->present = GetPrivateProfileIntA(sec, "present", s->present, g.ini_path);
-    s->pattern = GetPrivateProfileIntA(sec, "pattern", s->pattern, g.ini_path);
+    s->ddraw = GetPrivateProfileIntA(sec, "ddraw", s->ddraw, g.ini_path);
+
+    /* The presentation and the pattern are saved by name. Older files have
+       their numbers from before vblank, fade and blits were added. */
+    static const int OLD_PRESENT[] = { PRESENT_FLIP, PRESENT_BLT, PRESENT_LOCK, PRESENT_WINDOWED };
+    static const int OLD_PATTERN[] = {
+        PAT_COLOR_BARS, PAT_RAMPS, PAT_GRID, PAT_PIXELS, PAT_GEOMETRY, PAT_DITHER, PAT_TEXT, PAT_MOTION,
+        PAT_INTERLACED, PAT_PALETTE, PAT_WHITE, PAT_TEST_IMAGE, PAT_IMAGE,
+    };
+    char buf[32];
+
+    GetPrivateProfileStringA(sec, "present", "", buf, sizeof(buf), g.ini_path);
+    for (int i = 0; i < PRESENT_COUNT; i++)
+        if (_stricmp(buf, PRESENT_SHORT[i]) == 0)
+            s->present = i;
+    if (buf[0] >= '0' && buf[0] <= '9' && atoi(buf) < (int)(sizeof(OLD_PRESENT) / sizeof(OLD_PRESENT[0])))
+        s->present = OLD_PRESENT[atoi(buf)];
+
+    GetPrivateProfileStringA(sec, "pattern", "", buf, sizeof(buf), g.ini_path);
+    if (pattern_from_short_name(buf) >= 0)
+        s->pattern = pattern_from_short_name(buf);
+    if (buf[0] >= '0' && buf[0] <= '9' && atoi(buf) < (int)(sizeof(OLD_PATTERN) / sizeof(OLD_PATTERN[0])))
+        s->pattern = OLD_PATTERN[atoi(buf)];
+
     s->info = GetPrivateProfileIntA(sec, "info", s->info, g.ini_path) != 0;
     s->mouse = GetPrivateProfileIntA(sec, "mouse", s->mouse, g.ini_path) != 0;
     GetPrivateProfileStringA(sec, "image", "", s->image_path, sizeof(s->image_path), g.ini_path);
@@ -1032,8 +1563,9 @@ static void settings_save(const Settings* s)
     write_int("bpp", s->bpp);
     write_int("refresh", s->refresh);
     write_int("fps", s->fps);
-    write_int("present", s->present);
-    write_int("pattern", s->pattern);
+    write_int("ddraw", s->ddraw);
+    WritePrivateProfileStringA("ddtest", "present", PRESENT_SHORT[s->present], g.ini_path);
+    WritePrivateProfileStringA("ddtest", "pattern", pattern_short_name(s->pattern), g.ini_path);
     write_int("info", s->info);
     write_int("mouse", s->mouse);
     WritePrivateProfileStringA("ddtest", "image", s->image_path, g.ini_path);
@@ -1045,10 +1577,11 @@ static const char* USAGE =
     "  --bpp 8|16|24|32\n"
     "  --refresh HZ        (0 = default)\n"
     "  --fps N             frame rate limit (0 = none)\n"
-    "  --present flip|blt|lock|windowed\n"
+    "  --ddraw 1|2|4|7     the IDirectDraw interface version (7)\n"
+    "  --present flip|blt|vblank|lock|windowed\n"
     "  --pattern NAME|NUMBER\n"
-    "      bars, ramps, grid, pixels, geometry, dither, text,\n"
-    "      motion, interlaced, palette, white, testimage, image\n"
+    "      bars, ramps, grid, pixels, geometry, dither, text, motion,\n"
+    "      interlaced, palette, fade, blits, white, testimage, image\n"
     "  --image FILE        image file for the image pattern (shown 1:1)\n"
     "  --info 0|1          the info text in the picture (I)\n"
     "  --mouse 0|1         the mouse crosshair (M)\n"
@@ -1056,6 +1589,7 @@ static const char* USAGE =
     "  --dump DIR          save the patterns as PNG files and exit\n"
     "  --frame N           animation frame for --dump\n"
     "  --frames N          with --start: exit after N frames\n"
+    "                      (exit code 3: DirectDraw failed, 4: self-check failed)\n"
     "  --log FILE          with --frames: write the result to FILE\n";
 
 static BOOL parse_args(Settings* s, BOOL* start_now, char* dump_dir, uint32_t* frame, int* only_pattern)
@@ -1089,6 +1623,15 @@ static BOOL parse_args(Settings* s, BOOL* start_now, char* dump_dir, uint32_t* f
         else if (_stricmp(a, "--bpp") == 0) { s->bpp = atoi(v); }
         else if (_stricmp(a, "--refresh") == 0) { s->refresh = atoi(v); }
         else if (_stricmp(a, "--fps") == 0) { s->fps = atoi(v); }
+        else if (_stricmp(a, "--ddraw") == 0)
+        {
+            s->ddraw = atoi(v);
+            if (_stricmp(ddraw_name(s->ddraw), "?") == 0)
+            {
+                MessageBoxA(NULL, USAGE, "ddtest: --ddraw is 1, 2, 4 or 7", MB_OK | MB_ICONERROR);
+                return FALSE;
+            }
+        }
         else if (_stricmp(a, "--info") == 0) { s->info = atoi(v) != 0; }
         else if (_stricmp(a, "--mouse") == 0) { s->mouse = atoi(v) != 0; }
         else if (_stricmp(a, "--image") == 0) { strncpy(s->image_path, v, MAX_PATH - 1); s->image_path[MAX_PATH - 1] = '\0'; }
@@ -1219,6 +1762,14 @@ static int run_dump(const Settings* s, const char* dir, uint32_t frame, int only
             {
                 out[i] = px;
             }
+        }
+
+        /* In 8-bit modes the fade is in the palette */
+        if (p == PAT_FADE && s->bpp == 8)
+        {
+            int level = fade_level(frame);
+            for (int i = 0; i < c->w * c->h; i++)
+                out[i] = COL(COL_R(out[i]) * level / 256, COL_G(out[i]) * level / 256, COL_B(out[i]) * level / 256);
         }
 
         char path[MAX_PATH];
@@ -1367,7 +1918,11 @@ static void create_controls(void)
 
     g.lb_fps = add_label("Frame limit:");
     g.ed_fps = add_control("EDIT", "", number, ID_FPS);
-    g.lb_fps_unit = add_label("fps  (0 = none; page flipping also waits for vsync)");
+    g.lb_fps_unit = add_label("fps  (0 = none; page flipping and vblank also wait for vsync)");
+
+    g.lb_ddraw = add_label("Interface:");
+    for (int i = 0; i < DDRAW_COUNT; i++)
+        g.rb_ddraw[i] = add_control("BUTTON", DDRAW_NAMES[i], i == 0 ? first_radio : radio, ID_DDRAW0 + i);
 
     g.lb_present = add_label("Presentation:");
     for (int i = 0; i < PRESENT_COUNT; i++)
@@ -1449,7 +2004,7 @@ static SIZE layout_controls(void)
     int eh = line + S(7);
     int edy = (ch - eh) / 2;
 
-    const char* labels[] = { "Resolution:", "Bit depth:", "Refresh rate:", "Frame limit:", "Presentation:",
+    const char* labels[] = { "Resolution:", "Bit depth:", "Refresh rate:", "Frame limit:", "Interface:", "Presentation:",
                              "Pattern:", "Image file:", "DirectDraw modes:" };
     int label_w = 0;
     for (int i = 0; i < (int)(sizeof(labels) / sizeof(labels[0])); i++)
@@ -1473,6 +2028,11 @@ static SIZE layout_controls(void)
         field_w = imax(field_w, check_w + text_w(dc, PRESENT_NAMES[i]));
     for (int i = 0; i < PAT_COUNT; i++)
         field_w = imax(field_w, text_w(dc, pattern_name(i)) + arrow + S(12));
+
+    int ddraw_row_w = (DDRAW_COUNT - 1) * 2 * gap;
+    for (int i = 0; i < DDRAW_COUNT; i++)
+        ddraw_row_w += check_w + text_w(dc, DDRAW_NAMES[i]);
+    field_w = imax(field_w, ddraw_row_w);
 
     int full_w = fx + field_w - margin;
     int y = margin;
@@ -1509,6 +2069,16 @@ static SIZE layout_controls(void)
     place(g.lb_fps, margin, y + text_dy, label_w, line);
     place(g.ed_fps, fx, y + edy, num_w, eh);
     place(g.lb_fps_unit, fx + num_w + gap, y + text_dy, field_w - num_w - gap, line);
+    y += row;
+
+    place(g.lb_ddraw, margin, y + text_dy, label_w, line);
+    x = fx;
+    for (int i = 0; i < DDRAW_COUNT; i++)
+    {
+        int w = check_w + text_w(dc, DDRAW_NAMES[i]);
+        place(g.rb_ddraw[i], x, y + (ch - radio_h) / 2, w, radio_h);
+        x += w + 2 * gap;
+    }
     y += row;
 
     /* Presentation, with a note on what it means under a wrapper */
@@ -1660,6 +2230,8 @@ static void write_panel(const Settings* s)
     set_int_text(g.ed_refresh, s->refresh);
     set_int_text(g.ed_fps, s->fps);
 
+    for (int i = 0; i < DDRAW_COUNT; i++)
+        Button_SetCheck(g.rb_ddraw[i], DDRAW_VERSIONS[i] == s->ddraw ? BST_CHECKED : BST_UNCHECKED);
     for (int i = 0; i < PRESENT_COUNT; i++)
         Button_SetCheck(g.rb_present[i], i == s->present ? BST_CHECKED : BST_UNCHECKED);
     ComboBox_SetCurSel(g.cb_pattern, s->pattern);
@@ -1686,6 +2258,14 @@ static BOOL read_int(HWND edit, const char* name, int min, int max, int* out)
     return TRUE;
 }
 
+static int panel_ddraw_version(void)
+{
+    for (int i = 0; i < DDRAW_COUNT; i++)
+        if (Button_GetCheck(g.rb_ddraw[i]) == BST_CHECKED)
+            return DDRAW_VERSIONS[i];
+    return 7;
+}
+
 static BOOL read_panel(Settings* s)
 {
     if (!read_int(g.ed_width, "Width", 1, MAX_DIMENSION, &s->width)) return FALSE;
@@ -1698,6 +2278,8 @@ static BOOL read_panel(Settings* s)
     for (int i = 0; i < BPP_COUNT; i++)
         if (Button_GetCheck(g.rb_bpp[i]) == BST_CHECKED)
             s->bpp = BPP_VALUES[i];
+
+    s->ddraw = panel_ddraw_version();
 
     s->present = PRESENT_FLIP;
     for (int i = 0; i < PRESENT_COUNT; i++)
@@ -1724,21 +2306,32 @@ static void update_status(void)
     if (IsWindowEnabled(g.bt_stop) != g.running)
         EnableWindow(g.bt_stop, g.running);
 
-    char state[256];
+    char state[512];
     if (g.running)
-        _snprintf(state, sizeof(state) - 1, "Running: %d x %d, %d-bit, %s - %.1f fps",
-                  g.cur.width, g.cur.height, g.cur.bpp, PRESENT_DESC[g.cur.present], g.fps);
+    {
+        int n = _snprintf(state, sizeof(state) - 1, "Running: %d x %d, %d-bit, %s, %s - %.1f fps",
+                          g.cur.width, g.cur.height, g.cur.bpp, PRESENT_DESC[g.cur.present],
+                          ddraw_name(g.cur.ddraw), g.fps);
+        if (n > 0 && g.cur.pattern == PAT_BLITS && g.check_frames)
+        {
+            if (g.check_failed)
+                _snprintf(state + n, sizeof(state) - 1 - n, "\r\nSelf-check failed in %u of %u frames: %s",
+                          g.check_failed, g.check_frames, g.check_msg);
+            else
+                _snprintf(state + n, sizeof(state) - 1 - n, " - self-check passed");
+        }
+    }
     else
         _snprintf(state, sizeof(state) - 1, "Stopped");
     state[sizeof(state) - 1] = '\0';
 
-    char text[1200];
+    char text[1500];
     _snprintf(text, sizeof(text) - 1, "%s\r\nddraw.dll: %s\r\n%s%s", state,
               g.ddraw_path[0] ? g.ddraw_path : "(not loaded)",
               g.error[0] ? "Last error: " : "", g.error);
     text[sizeof(text) - 1] = '\0';
 
-    char old[1200];
+    char old[1500];
     GetWindowTextA(g.st_status, old, sizeof(old));
     if (strcmp(old, text) != 0)
         SetWindowTextA(g.st_status, text);
@@ -1788,8 +2381,9 @@ static void run(void)
    The pattern, overlays, frame limit and image just change. Fullscreen, a new
    resolution, bit depth or refresh rate, or another fullscreen presentation,
    is a mode change on the same DirectDraw object; windowed, so is a new bit
-   depth. Switching between windowed and fullscreen, or a new windowed size,
-   starts over as a fresh run. When stopped, the panel is only read on Run. */
+   depth. Switching between windowed and fullscreen, a new windowed size or
+   another interface version starts over as a fresh run. When stopped, the
+   panel is only read on Run. */
 static void apply_live(void)
 {
     if (!g.running)
@@ -1813,7 +2407,8 @@ static void apply_live(void)
     BOOL was_windowed = g.cur.present == PRESENT_WINDOWED;
     BOOL windowed = s.present == PRESENT_WINDOWED;
     BOOL mode_change = s.width != g.cur.width || s.height != g.cur.height || s.bpp != g.cur.bpp ||
-                       s.present != g.cur.present || (!windowed && s.refresh != g.cur.refresh);
+                       s.present != g.cur.present || s.ddraw != g.cur.ddraw ||
+                       (!windowed && s.refresh != g.cur.refresh);
 
     if (!mode_change)
     {
@@ -1833,7 +2428,7 @@ static void apply_live(void)
     if (!focus || !IsChild(g.panel, focus))
         focus = NULL;
 
-    if (windowed != was_windowed || new_window_size)
+    if (windowed != was_windowed || new_window_size || s.ddraw != g.cur.ddraw)
     {
         g.restart_focus = windowed ? focus : NULL;
         stop();
@@ -1957,10 +2552,10 @@ static void query_modes(void)
     LPDIRECTDRAW7 dd = g.dd;
     BOOL temporary = FALSE;
 
+    /* Through the interface the panel has: the modes may differ by version */
     if (!dd)
     {
-        HRESULT hr = g.DirectDrawCreateEx(NULL, (LPVOID*)&dd, &IID_IDirectDraw7, NULL);
-        if (!dd_ok(hr, "DirectDrawCreateEx"))
+        if (!dd_create(panel_ddraw_version(), &dd))
         {
             update_status();
             return;
@@ -2078,6 +2673,12 @@ static LRESULT CALLBACK panel_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         }
 
         if (id >= ID_PRESENT0 && id < ID_PRESENT0 + PRESENT_COUNT && code == BN_CLICKED)
+        {
+            apply_live();
+            return 0;
+        }
+
+        if (id >= ID_DDRAW0 && id < ID_DDRAW0 + DDRAW_COUNT && code == BN_CLICKED)
         {
             apply_live();
             return 0;
@@ -2266,6 +2867,9 @@ static void clamp_settings(Settings* s)
     if (s->bpp != 8 && s->bpp != 16 && s->bpp != 24 && s->bpp != 32) s->bpp = 8;
     if (s->refresh < 0) s->refresh = 0;
     if (s->fps < 0) s->fps = 0;
+    if (_stricmp(ddraw_name(s->ddraw), "?") == 0) s->ddraw = 7;
+    if (s->present < 0 || s->present >= PRESENT_COUNT) s->present = PRESENT_FLIP;
+    if (s->pattern < 0 || s->pattern >= PAT_COUNT) s->pattern = PAT_COLOR_BARS;
 }
 
 static void write_run_log(void)
@@ -2284,9 +2888,14 @@ static void write_run_log(void)
         LARGE_INTEGER now;
         QueryPerformanceCounter(&now);
         double secs = (double)(now.QuadPart - g.run_t0.QuadPart) / (double)g.qpf.QuadPart;
-        fprintf(f, "ok: %u frames, %d x %d, %d-bit, %s, %.1f fps\nddraw.dll: %s\n", g.frame,
-                g.cur.width, g.cur.height, g.cur.bpp, PRESENT_SHORT[g.cur.present],
+        fprintf(f, "ok: %u frames, %d x %d, %d-bit, %s, ddraw %d, %.1f fps\nddraw.dll: %s\n", g.frame,
+                g.cur.width, g.cur.height, g.cur.bpp, PRESENT_SHORT[g.cur.present], g.cur.ddraw,
                 secs > 0 ? g.frame / secs : 0.0, g.ddraw_path);
+
+        if (g.check_failed)
+            fprintf(f, "check: failed in %u of %u frames; first: %s\n", g.check_failed, g.check_frames, g.check_msg);
+        else if (g.check_frames)
+            fprintf(f, "check: passed, %u frames\n", g.check_frames);
     }
     else
         fprintf(f, "error: %s\nddraw.dll: %s\n", g.error[0] ? g.error : "stopped", g.ddraw_path);
@@ -2450,7 +3059,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
 
         if (step == STEP_FRAMES_DONE)
         {
-            exit_code = g.running ? 0 : 3;
+            exit_code = !g.running ? 3 : g.check_failed ? 4 : 0;
             write_run_log();
             break;
         }

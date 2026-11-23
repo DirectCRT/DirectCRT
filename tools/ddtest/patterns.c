@@ -21,6 +21,8 @@ static const char* PATTERN_NAMES[PAT_COUNT] = {
     "Motion",
     "Interlaced (alternate black lines)",
     "Palette cycling",
+    "Palette fade",
+    "DirectDraw blits and GDI text (self-check)",
     "White field",
     "Test image (built-in, 1:1)",
     "Image file (1:1)",
@@ -28,7 +30,7 @@ static const char* PATTERN_NAMES[PAT_COUNT] = {
 
 static const char* PATTERN_SHORT_NAMES[PAT_COUNT] = {
     "bars", "ramps", "grid", "pixels", "geometry", "dither",
-    "text", "motion", "interlaced", "palette", "white", "testimage", "image",
+    "text", "motion", "interlaced", "palette", "fade", "blits", "white", "testimage", "image",
 };
 
 const char* pattern_name(int id)
@@ -826,6 +828,194 @@ static void pat_palette(Canvas* c, const PatternContext* ctx)
              "Palette cycling (drawn; not an 8-bit mode)");
 }
 
+/* Three seconds at 60 fps: one at full brightness, one fading to black, one
+   fading back */
+int fade_level(uint32_t frame)
+{
+    uint32_t t = frame % 180;
+
+    if (t < 60)
+        return 256;
+    if (t < 120)
+        return (int)((119 - t) * 256 / 59);
+    return (int)((t - 120) * 256 / 59);
+}
+
+static void pat_fade(Canvas* c, const PatternContext* ctx)
+{
+    pat_color_bars(c);
+    cv_label(c, 4, 3, small_text(c), WHITE, BLACK, ctx->hw_palette ?
+             "Palette fade: SetEntries on all 256 entries every frame" :
+             "Palette fade (drawn; not an 8-bit mode)");
+
+    /* In 8-bit modes the app fades the palette */
+    if (ctx->hw_palette)
+        return;
+
+    int level = fade_level(ctx->frame);
+    for (int i = 0; i < c->w * c->h; i++)
+    {
+        uint32_t p = c->px[i];
+        c->px[i] = COL(COL_R(p) * level / 256, COL_G(p) * level / 256, COL_B(p) * level / 256);
+    }
+}
+
+/* Four panels below a band for the info text: colour fills, a sprite
+   blitted with Blt and a source colour key, the same with BltFast, and GDI
+   text. Every colour is in the 8-bit palette. */
+void blits_layout(int w, int h, uint32_t frame, BlitsLayout* l)
+{
+    static const uint32_t fills[4] = { COL(255, 0, 0), COL(0, 255, 0), COL(0, 0, 255), WHITE };
+
+    ZeroMemory(l, sizeof(*l));
+
+    Canvas size_only = { 0 };
+    size_only.w = w;
+    size_only.h = h;
+    int title = small_text(&size_only) + 6;
+
+    int top = h / 5;
+    int pw = w / 2, ph = (h - top) / 2;
+    int m = w / 80 > 2 ? w / 80 : 2;
+
+    RECT content[4];
+    for (int i = 0; i < 4; i++)
+    {
+        int x0 = (i % 2) * pw, y0 = top + (i / 2) * ph;
+        content[i].left = x0 + m;
+        content[i].top = y0 + title;
+        content[i].right = x0 + pw - m;
+        content[i].bottom = y0 + ph - m;
+        if (content[i].bottom < content[i].top + 1)
+            content[i].bottom = content[i].top + 1;
+        if (content[i].right < content[i].left + 1)
+            content[i].right = content[i].left + 1;
+    }
+
+    /* Colour fills: four stripes with a gap between them */
+    RECT* r = &content[0];
+    int cw = r->right - r->left;
+    for (int i = 0; i < 4; i++)
+    {
+        l->fill[i].left = r->left + cw * i / 4;
+        l->fill[i].right = r->left + cw * (i + 1) / 4 - (cw >= 16 ? 2 : 0);
+        l->fill[i].top = r->top;
+        l->fill[i].bottom = r->bottom;
+        l->fill_color[i] = fills[i];
+    }
+
+    /* The sprite moves back and forth, the two copies out of step */
+    int ch = content[1].bottom - content[1].top;
+    cw = content[1].right - content[1].left;
+    int size = ch < cw / 2 ? ch : cw / 2;
+    l->sprite_size = size < 4 ? 4 : size;
+
+    for (int i = 0; i < 2; i++)
+    {
+        RECT* a = &content[1 + i];
+        l->key_area[i] = *a;
+
+        int range = (a->right - a->left) - l->sprite_size;
+        int speed = (a->right - a->left) / 120 > 1 ? (a->right - a->left) / 120 : 1;
+        int t = (int)(frame * (uint32_t)speed) + (i ? range : 0);
+
+        l->sprite_pos[i].x = a->left + (range > 0 ? triangle(t, range) : 0);
+        l->sprite_pos[i].y = a->top + ((a->bottom - a->top) - l->sprite_size) / 2;
+    }
+
+    l->gdi_area = content[3];
+    ch = content[3].bottom - content[3].top;
+    cw = content[3].right - content[3].left;
+    l->text_height = ch / 4 < cw / 8 ? ch / 4 : cw / 8;
+    if (l->text_height < 8)
+        l->text_height = 8;
+}
+
+/* A yellow disc with a blue square in it, on the key colour */
+uint32_t blits_sprite_pixel(int x, int y, int size)
+{
+    double r = size / 2.0;
+    double dx = x + 0.5 - r, dy = y + 0.5 - r;
+
+    if (x >= size / 3 && x < size - size / 3 && y >= size / 3 && y < size - size / 3)
+        return COL(0, 0, 255);
+    if (dx * dx + dy * dy <= r * r)
+        return COL(255, 255, 0);
+    return BLITS_KEY;
+}
+
+void blits_text(int line, uint32_t frame, char* buf, int len)
+{
+    if (line == 0)
+        _snprintf(buf, len - 1, "GDI TextOut");
+    else
+        _snprintf(buf, len - 1, "frame %u", frame);
+    buf[len - 1] = '\0';
+}
+
+static void pat_blits(Canvas* c, const PatternContext* ctx)
+{
+    static const char* titles[4] = {
+        "Blt colour fill", "Blt, source colour key", "BltFast, source colour key", "GDI text (GetDC)",
+    };
+
+    int w = c->w, h = c->h;
+    int ts = small_text(c);
+    BlitsLayout l;
+    blits_layout(w, h, ctx->frame, &l);
+
+    cv_fill(c, COL(0, 0, 51));
+    cv_text(c, 4, h / 5 - ts - 4, ts, COL(153, 153, 153), ctx->app_blits ?
+            "Drawn with DirectDraw and GDI, then read back and checked" :
+            "What DirectDraw and GDI should draw");
+
+    int top = h / 5, pw = w / 2, ph = (h - top) / 2;
+    cv_hline(c, 0, w - 1, top, COL(102, 102, 102));
+    cv_hline(c, 0, w - 1, top + ph, COL(102, 102, 102));
+    cv_vline(c, pw, top, h - 1, COL(102, 102, 102));
+
+    for (int i = 0; i < 4; i++)
+        cv_text(c, (i % 2) * pw + 4, top + (i / 2) * ph + 3, ts, WHITE, titles[i]);
+
+    /* Under the fills: black, so a missing fill shows */
+    for (int i = 0; i < 4; i++)
+        cv_rect(c, l.fill[i].left, l.fill[i].top, l.fill[i].right, l.fill[i].bottom, BLACK);
+
+    /* Under the sprites: a checkerboard, which the key lets through */
+    int cell = l.sprite_size / 4 > 2 ? l.sprite_size / 4 : 2;
+    for (int i = 0; i < 2; i++)
+    {
+        RECT* a = &l.key_area[i];
+        for (int y = a->top; y < a->bottom; y++)
+            for (int x = a->left; x < a->right; x++)
+                cv_put(c, x, y, (((x - a->left) / cell + (y - a->top) / cell) & 1) ? COL(153, 153, 153) : COL(102, 102, 102));
+    }
+
+    cv_rect(c, l.gdi_area.left, l.gdi_area.top, l.gdi_area.right, l.gdi_area.bottom, COL(0, 51, 102));
+
+    if (ctx->app_blits)
+        return;
+
+    for (int i = 0; i < 4; i++)
+        cv_rect(c, l.fill[i].left, l.fill[i].top, l.fill[i].right, l.fill[i].bottom, l.fill_color[i]);
+
+    for (int i = 0; i < 2; i++)
+        for (int y = 0; y < l.sprite_size; y++)
+            for (int x = 0; x < l.sprite_size; x++)
+            {
+                uint32_t p = blits_sprite_pixel(x, y, l.sprite_size);
+                if (p != BLITS_KEY)
+                    cv_put(c, l.sprite_pos[i].x + x, l.sprite_pos[i].y + y, p);
+            }
+
+    for (int i = 0; i < BLITS_LINES; i++)
+    {
+        char text[64];
+        blits_text(i, ctx->frame, text, sizeof(text));
+        cv_label(c, l.gdi_area.left + 4, l.gdi_area.top + 4 + i * (l.text_height + 4), l.text_height, WHITE, BLACK, text);
+    }
+}
+
 /* 1:1, centred: a bigger image is cropped, a smaller one has a border */
 static void pan_range(int iw, int w, int* pan)
 {
@@ -914,6 +1104,8 @@ void pattern_draw(int id, Canvas* c, const PatternContext* ctx)
     case PAT_MOTION: pat_motion(c, ctx->frame); break;
     case PAT_INTERLACED: pat_interlaced(c); break;
     case PAT_PALETTE: pat_palette(c, ctx); break;
+    case PAT_FADE: pat_fade(c, ctx); break;
+    case PAT_BLITS: pat_blits(c, ctx); break;
     case PAT_WHITE:
         cv_fill(c, WHITE);
         cv_text(c, 4, c->h - small_text(c) - 4, small_text(c), COL(128, 128, 128), "100% white");

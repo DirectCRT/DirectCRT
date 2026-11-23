@@ -35,6 +35,8 @@ enum
     PAT_MOTION,
     PAT_INTERLACED,
     PAT_PALETTE,
+    PAT_FADE,
+    PAT_BLITS,
     PAT_WHITE,
     PAT_TEST_IMAGE,
     PAT_IMAGE,
@@ -49,6 +51,8 @@ typedef struct PatternContext
     const uint32_t* image;    /* loaded image file (0x00RRGGBB), may be NULL */
     int image_w, image_h;
     int pan_x, pan_y;         /* image patterns: how far the picture is moved from centred */
+    BOOL app_blits;           /* blits pattern: the app does the blits and the GDI text on the
+                                 surface; otherwise (--dump) the pattern draws what they should give */
 } PatternContext;
 
 /* patterns.c */
@@ -56,6 +60,27 @@ const char* pattern_name(int id);
 const char* pattern_short_name(int id);
 int pattern_from_short_name(const char* name);
 void pattern_draw(int id, Canvas* c, const PatternContext* ctx);
+
+/* Palette fade: the brightness for a frame, 0 (black) to 256 (full) */
+int fade_level(uint32_t frame);
+
+/* The blits pattern: where each DirectDraw operation goes in a w x h mode */
+typedef struct BlitsLayout
+{
+    RECT fill[4];          /* Blt with DDBLT_COLORFILL, in fill_color */
+    uint32_t fill_color[4];
+    RECT key_area[2];      /* the sprite is blitted with a source colour key: [0] Blt, [1] BltFast */
+    POINT sprite_pos[2];   /* where it goes this frame */
+    int sprite_size;
+    RECT gdi_area;         /* GDI text, TextOut through the surface's GetDC */
+    int text_height;
+} BlitsLayout;
+
+#define BLITS_KEY COL(255, 0, 255)  /* the sprite's transparent colour */
+#define BLITS_LINES 2               /* lines of GDI text */
+void blits_layout(int w, int h, uint32_t frame, BlitsLayout* l);
+uint32_t blits_sprite_pixel(int x, int y, int size); /* BLITS_KEY where it's transparent */
+void blits_text(int line, uint32_t frame, char* buf, int len);
 
 /* 8-bit palette: a 6x6x6 colour cube (indices 0-215) plus 40 greys (216-255) */
 #define PAL_CYCLE_COUNT 216

@@ -90,7 +90,10 @@ Everything goes to `bin\<configuration>\`. There are four configurations:
 - **Debug**: unoptimised.
 
 The solution also builds [ddtest](tools/ddtest/README.md), a DirectDraw test
-pattern program for checking scaling, colour depth and presentation.
+pattern program for checking scaling, colour depth and presentation. Its
+regression test, `tools\ddtest\regress.ps1`, checks DirectDraw's blits and
+GDI text with every interface version, presentation method and bit depth; it
+takes over the screen for about two minutes.
 
 Unit tests: `tests\run_tests.cmd` from a Developer Command Prompt.
 
