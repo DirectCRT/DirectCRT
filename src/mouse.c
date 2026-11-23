@@ -8,8 +8,6 @@
 
 
 BOOL g_mouse_locked;
-HHOOK g_mouse_hook;
-HOOKPROC g_mouse_proc;
 
 void mouse_lock()
 {
@@ -81,17 +79,4 @@ void mouse_unlock()
 
         while (real_ShowCursor(TRUE) < 0);
     }
-}
-
-LRESULT CALLBACK mouse_hook_proc(int Code, WPARAM wParam, LPARAM lParam)
-{
-    if (!g_ddraw.ref)
-        return g_mouse_proc(Code, wParam, lParam);
-
-    if (Code < 0 || (!g_config.devmode && !g_mouse_locked))
-        return CallNextHookEx(g_mouse_hook, Code, wParam, lParam);
-
-    fake_GetCursorPos(&((MOUSEHOOKSTRUCT*)lParam)->pt);
-
-    return g_mouse_proc(Code, wParam, lParam);
 }

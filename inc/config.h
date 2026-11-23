@@ -36,7 +36,6 @@ typedef struct CNCDDRAWCONFIG
     char renderer[256];
     BOOL devmode;
     int anti_aliased_fonts_min_size;
-    int min_font_size;
     char screenshot_dir[MAX_PATH];
 
     /* Set at runtime from 'display' and Alt+Enter: windowed=1 fullscreen=0 is
@@ -93,19 +92,6 @@ typedef struct CNCDDRAWCONFIG
         BOOL unlock_cursor_middleclick;
         int screenshot;
     } hotkeys;
-
-    /* Game specific settings */
-
-    BOOL armadahack;
-    BOOL tshack;
-    BOOL infantryhack;
-    BOOL stronghold_hack;
-    BOOL mgs_hack;
-    BOOL tlc_hack;
-    BOOL carma95_hack;
-    BOOL sirtech_hack;
-    BOOL flightsim98_hack;
-    BOOL darkcolony_hack;
 
 } CNCDDRAWCONFIG;
 

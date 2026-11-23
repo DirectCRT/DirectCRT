@@ -38,6 +38,11 @@ Changes from cnc-ddraw so far:
   `resizable` and `savesettings`. Old keys are still read.
 - Settings are in `directcrt.ini`, global section `[directcrt]`. The file is
   created next to `ddraw.dll` the first time a game starts.
+- cnc-ddraw's 280 built-in game profiles and the game-specific hacks they
+  turned on (`tshack`, `armadahack`, ...) are gone, and so are
+  `min_font_size` and the C++Builder config tool. To change a setting for one
+  game, add a section named after its executable, without `.exe`: `[game]`
+  for `game.exe`.
 - The mouse is released when the game releases DirectDraw.
   `unlockcursor_middleclick=true` adds a middle click as a way to release it.
 - Logs and crash dumps are named `directcrt-*.log` and `directcrt-*.dmp`.
@@ -55,8 +60,10 @@ or start the game with `WINEDLLOVERRIDES="ddraw=n,b"`.
 DirectCRT only handles DirectDraw: Direct3D games aren't supported. A game
 with several renderers needs its DirectDraw or "software" renderer selected.
 
-[docs/supported-games.md](docs/supported-games.md) lists the games known to
-work.
+Games that need a compatibility setting have one in a section of their own;
+the end of `directcrt.ini` explains how. cnc-ddraw's
+[wiki](https://github.com/FunkyFr3sh/cnc-ddraw/wiki) lists the settings many
+games need (the global section is `[directcrt]` here, not `[ddraw]`).
 
 ### Hotkeys
 
@@ -86,6 +93,11 @@ The solution also builds [ddtest](tools/ddtest/README.md), a DirectDraw test
 pattern program for checking scaling, colour depth and presentation.
 
 Unit tests: `tests\run_tests.cmd` from a Developer Command Prompt.
+
+A fresh default `directcrt.ini`, after a change to the settings:
+`powershell -NoProfile -ExecutionPolicy Bypass -File tools\default-ini.ps1`
+replaces the one in `bin\Release\` (`-Dll` and `-Out` pick another DLL or
+file). It loads the DLL without running a game.
 
 GitHub Actions builds all four configurations and runs the unit tests on every
 push to `master` and on pull requests.

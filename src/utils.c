@@ -732,8 +732,8 @@ void util_toggle_maximize()
 /* Alt+Enter: from a window to the fullscreen that 'display' gives, and back */
 void util_toggle_fullscreen()
 {
-    /* Disable ALT+ENTER on battle.net and Infantry Online Zone List Window */
-    if (g_ddraw.bnet_active || !g_ddraw.width || (g_config.infantryhack && GetMenu(g_ddraw.hwnd)))
+    /* Disable ALT+ENTER on battle.net */
+    if (g_ddraw.bnet_active || !g_ddraw.width)
         return;
 
     /* Do not allow ALT+ENTER while macOS maximize is active */

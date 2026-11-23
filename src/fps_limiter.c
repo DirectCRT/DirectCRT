@@ -149,17 +149,8 @@ void fpsl_frame_end()
     if (g_config.maxfps < 0 || 
         (g_config.vsync && (!g_config.maxfps || g_config.maxfps >= g_ddraw.mode.dmDisplayFrequency)))
     {
-        /* Workaround for DwmFlush() freeze (e.g. slow alt+tab) issue on windows 7 SP1 */
-        if (g_ddraw.renderer == ogl_render_main && !IsWine() && !IsWindows8OrGreater())
-        {
-            if (fpsl_wait_for_vblank())
-                return;
-        }
-        else
-        {
-            if (fpsl_dwm_flush() || fpsl_wait_for_vblank())
-                return;
-        }
+        if (fpsl_dwm_flush() || fpsl_wait_for_vblank())
+            return;
     }
 
     if (g_fpsl.tick_length > 0)

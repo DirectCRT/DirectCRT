@@ -112,9 +112,9 @@ What we take:
 | Area | Verdict |
 |---|---|
 | DirectDraw and Direct3D stub objects, IAMMediaStream, WinAPI/GDI/WinG hooks, DirectInput hook | Keep |
-| About 280 per-game profiles in `src/config.c` | Keep; show them as per-game defaults in the OSD |
+| About 280 per-game profiles in `src/config.c` | Removed in phase 3: they filled `directcrt.ini` with sections nobody reads. A section named after a game's executable still overrides any setting for that game |
 | Compatibility settings (`nonexclusive`, `singlecpu`, `fixchilds`, `guard_lines`, `fake_mode`, `win_version`, `hook`, ...) | Keep, on an advanced page |
-| Game-specific hacks (`armadahack`, `tshack`, ...) | Keep, set by the profiles |
+| Game-specific hacks (`armadahack`, `tshack`, ...) | Removed in phase 3 with the profiles, which were the only thing that set them. The fixes cnc-ddraw applies by itself (Battle.net dialogs, StarCraft's and Red Alert's cursor, Age of Empires II's text boxes, Claw) stay |
 | Window modes, Alt+Enter, saved window position, `toggle_borderless`, `toggle_upscaled` | Done in phase 3: replaced with `display` and the `window_*` settings (see [Display settings](#display-settings)). Windowed games keep the desktop's bit depth (32-bit) from phase 1; `windowed_bpp=16` brings the old 16-bit back |
 | Display modes: 8, 16 and 32-bit; `SetDisplayMode` rejects 24-bit | Add 24-bit in the presenter (convert to 32-bit on upload); some games use it |
 | Plain "Fullscreen", which switches the monitor to the game's own resolution | Keep as `display=original`, opt-in, with help text saying the monitor gets the game's resolution and there's no CRT shading |
@@ -125,8 +125,9 @@ What we take:
 | `shader`, `d3d9_filter`, libretro shader loading | Done: `shader` has DOSBox's values `crt-auto`, `sharp`, `nearest` and `bilinear`, all through crt-auto's pipeline; the rest is removed |
 | `width`, `height`, `maintas`, `aspect_ratio`, `boxing` | Done: replaced with `window_size`, `viewport`, `aspect` and `integer_scaling`, for every shader |
 | `inject_resolution`, `vhack` | Done: removed (they make games render at high resolutions) |
-| XP build configurations, MinGW i486 build, old-Windows code paths | Remove. Done: the build configurations (DebugLogXP and DebugLogMiniXP are now DebugLog and DebugLogMini on the current toolset) and the i486 build scripts. The old-Windows code paths are left for phase 3 |
-| C++Builder config tool (`config/`) | Remove in phase 3; the overlay replaces it. Until then it's out of date: it still edits `ddraw.ini` |
+| XP build configurations, MinGW i486 build, old-Windows code paths | Done: removed. DebugLogXP and DebugLogMiniXP are now DebugLog and DebugLogMini on the current toolset; the last old-Windows path, a Windows 7 workaround in the frame limiter, went in phase 3 |
+| C++Builder config tool (`config/`) | Done: removed in phase 3; the overlay replaces it |
+| `min_font_size` | Done: removed in phase 3. It made text readable at the high resolutions `inject_resolution` gave games |
 
 The `adjmouse-viewport` branch adds an `adjmouse_viewport` setting, a manual way
 to map the mouse to a picture a shader draws smaller than the window. The
@@ -215,7 +216,7 @@ black borders in the window, as in DOSBox.
   `WxH` is in logical units and `WxHpx` in pixels. `default` is `medium`: on a
   3840x2160 screen about 2131x1598, which gives 640x480 3.3 pixels per line
   and `vga-1440p`. One value is new: **`unscaled`**, the game's own resolution
-  at 1:1, for game profiles of games that misbehave when scaled.
+  at 1:1, for games that misbehave when scaled.
 - **Games in their own window** are scaled too. cnc-ddraw's hooks
   (`GetClientRect`, `GetWindowRect`, `ClientToScreen`, `ScreenToClient`,
   `SetWindowPos`, `MoveWindow` and the cursor functions) keep telling the game
@@ -262,8 +263,7 @@ table.)
 ### Old settings
 
 An old key is read when its new one isn't set, with a line in the log. The
-generated `directcrt.ini` only has the new keys, and the game profiles in
-`src/config.c` are rewritten to them.
+generated `directcrt.ini` only has the new keys.
 
 | Old | New |
 |---|---|
@@ -415,6 +415,12 @@ otherwise keep the no-shading trap. `original` has to be chosen.
      (`display=fullscreen`; `display=window` with `window_size=1920x1080px`)
      all eight cases are the same as DOSBox on both renderers, now with no
      offset between the pictures.
+   - Done: the sweep of features that don't serve DirectCRT's goal. The
+     built-in game profiles, the game-specific hacks they set,
+     `min_font_size`, the Windows 7 workaround, the C++Builder config tool
+     and the list of games with profiles are gone. A game's own section is
+     only `[game]` now (cnc-ddraw also read `[game/wine]`, `[game/2]` to
+     `[game/9]` and `checkfile`, which only the profiles used).
    - Not done yet: when a game resizes its own window, the new size should
      become its new resolution. For now it doesn't.
 4. **Overlay**, in this order: the status OSD; the full OSD with input

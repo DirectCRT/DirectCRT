@@ -533,7 +533,7 @@ BOOL WINAPI fake_ShowWindow(HWND hWnd, int nCmdShow)
         if (nCmdShow == SW_MAXIMIZE)
             nCmdShow = SW_NORMAL;
 
-        if (nCmdShow == SW_MINIMIZE && g_config.hook != 2 && !g_config.tlc_hack)
+        if (nCmdShow == SW_MINIMIZE && g_config.hook != 2)
             return TRUE;
     }
 
@@ -585,12 +585,6 @@ HHOOK WINAPI fake_SetWindowsHookExA(int idHook, HOOKPROC lpfn, HINSTANCE hmod, D
     if (idHook == WH_KEYBOARD_LL && hmod && GetModuleHandle("AcGenral") == hmod)
     {
         return NULL;
-    }
-
-    if (idHook == WH_MOUSE && lpfn && !hmod && !g_mouse_hook && g_config.sirtech_hack)
-    {
-        g_mouse_proc = lpfn;
-        return g_mouse_hook = real_SetWindowsHookExA(idHook, mouse_hook_proc, hmod, dwThreadId);
     }
 
     HHOOK result = real_SetWindowsHookExA(idHook, lpfn, hmod, dwThreadId);
@@ -744,14 +738,6 @@ BOOL WINAPI fake_GetMessageA(LPMSG lpMsg, HWND hWnd, UINT wMsgFilterMin, UINT wM
 
 BOOL WINAPI fake_PeekMessageA(LPMSG lpMsg, HWND hWnd, UINT wMsgFilterMin, UINT wMsgFilterMax, UINT wRemoveMsg)
 {
-    if (g_config.darkcolony_hack && !hWnd)
-    {
-        hWnd = g_ddraw.hwnd;
-
-        MSG msg;
-        real_PeekMessageA(&msg, 0, 0, 0, PM_NOREMOVE);
-    }
-
     if (g_config.limiter_type == LIMIT_PEEKMESSAGE && 
         g_ddraw.ticks_limiter.tick_length > 0 &&
         InterlockedExchange(&g_ddraw.render.screen_updated, FALSE))
@@ -1455,13 +1441,6 @@ HFONT WINAPI fake_CreateFontIndirectA(CONST LOGFONTA* lplf)
     LOGFONTA lf;
     memcpy(&lf, lplf, sizeof(lf));
 
-    if (lf.lfHeight < 0) {
-        lf.lfHeight = min(-g_config.min_font_size, lf.lfHeight);
-    }
-    else {
-        lf.lfHeight = max(g_config.min_font_size, lf.lfHeight);
-    }
-
     if (g_config.anti_aliased_fonts_min_size > abs(lf.lfHeight))
         lf.lfQuality = NONANTIALIASED_QUALITY;
 
@@ -1484,13 +1463,6 @@ HFONT WINAPI fake_CreateFontA(
     DWORD fdwPitchAndFamily,
     LPCTSTR lpszFace)
 {
-    if (nHeight < 0) {
-        nHeight = min(-g_config.min_font_size, nHeight);
-    }
-    else {
-        nHeight = max(g_config.min_font_size, nHeight);
-    }
-
     if (g_config.anti_aliased_fonts_min_size > abs(nHeight))
         fdwQuality = NONANTIALIASED_QUALITY;
 

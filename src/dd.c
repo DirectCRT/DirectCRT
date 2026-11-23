@@ -108,11 +108,6 @@ HRESULT dd_EnumDisplayModes(
         TRACE("     max_w=%u, max_h=%u\n", reg_m.dmPelsWidth, reg_m.dmPelsHeight);
     }
 
-    if (g_config.stronghold_hack && max_w && (max_w % 8))
-    {
-        while (--max_w % 8);
-    }
-
     BOOL rlf = g_config.resolutions == RESLIST_FULL;
     BOOL rlm = g_config.resolutions == RESLIST_MINI;
 
@@ -219,11 +214,6 @@ HRESULT dd_EnumDisplayModes(
                 flags == m.dmDisplayFlags &&
                 fixed_output == m.dmDisplayFixedOutput)
             {
-                if (g_config.stronghold_hack && m.dmPelsWidth && (m.dmPelsWidth % 8))
-                {
-                    while (--m.dmPelsWidth % 8);
-                }
-
                 TRACE(
                     "     %u: %ux%u@%u %u bpp\n",
                     i,
@@ -799,8 +789,6 @@ HRESULT dd_SetDisplayMode(DWORD dwWidth, DWORD dwHeight, DWORD dwBPP, DWORD dwFl
 
     if (dwBPP != 8 && dwBPP != 16 && dwBPP != 32)
         return DDERR_INVALIDMODE;
-
-    if (g_config.mgs_hack && dwHeight == 480) dwHeight -= 32; /* Remove black bar in Metal Gear Solid */
 
     if (g_ddraw.render.thread)
     {
@@ -1493,7 +1481,7 @@ HRESULT dd_SetDisplayMode(DWORD dwWidth, DWORD dwHeight, DWORD dwBPP, DWORD dwFl
     /* Live reload of the settings (dd_poll_settings) */
     SetTimer(g_ddraw.hwnd, IDT_TIMER_RELOAD_SETTINGS, 500, (TIMERPROC)NULL);
 
-    if ((dwFlags & SDM_MODE_SET_BY_GAME) && !g_config.infantryhack)
+    if (dwFlags & SDM_MODE_SET_BY_GAME)
     {
         real_SendMessageA(g_ddraw.hwnd, WM_SIZE_DDRAW, 0, MAKELPARAM(g_ddraw.width, g_ddraw.height));
         real_SendMessageA(g_ddraw.hwnd, WM_DISPLAYCHANGE_DDRAW, g_ddraw.bpp, MAKELPARAM(g_ddraw.width, g_ddraw.height));
@@ -1628,55 +1616,6 @@ HRESULT dd_SetCooperativeLevel(HWND hwnd, DWORD dwFlags)
             memcmp((char*)GetModuleHandleA(NULL) + 0x00010000, "\x17\x81\xC2\x00\x80\x00\x00\x89", 8) != 0)
         {
             g_ddraw.isworms2 = FALSE;
-        }
-    }
-
-    /* Infantry Online Zone List Window */
-    if (g_config.infantryhack)
-    {
-        static BOOL windowed, fullscreen, devmode;
-
-        if (dwFlags & DDSCL_FULLSCREEN)
-        {
-            g_config.windowed = windowed;
-            g_config.fullscreen = fullscreen;
-            g_config.devmode = devmode;
-        }
-        else if (dwFlags & DDSCL_NOWINDOWCHANGES)
-        {
-            windowed = g_config.windowed;
-            fullscreen = g_config.fullscreen;
-            devmode = g_config.devmode;
-
-            if (GetMenu(g_ddraw.hwnd) != NULL)
-            {
-                g_config.windowed = TRUE;
-                g_config.fullscreen = FALSE;
-                g_config.devmode = TRUE;
-
-                /*
-                if (!g_config.window_rect.right && g_config.window_rect.left == -32000)
-                {
-                    if (real_GetSystemMetrics(SM_CYSCREEN) >= 2160)
-                    {
-                        g_config.window_rect.right = 640 * 3;
-                        g_config.window_rect.bottom = 480 * 3;
-                    }
-                    else if (real_GetSystemMetrics(SM_CYSCREEN) >= 1440)
-                    {
-                        g_config.window_rect.right = 640 * 2;
-                        g_config.window_rect.bottom = 480 * 2;
-                    }
-                    else if (real_GetSystemMetrics(SM_CYSCREEN) >= 1080)
-                    {
-                        g_config.window_rect.right = (LONG)(640 * 1.5f);
-                        g_config.window_rect.bottom = (LONG)(480 * 1.5f);
-                    }
-                }
-                */
-            }
-
-            dd_SetDisplayMode(640, 480, 16, SDM_MODE_SET_BY_GAME);
         }
     }
 
@@ -1933,7 +1872,7 @@ HRESULT dd_TestCooperativeLevel()
         util_limit_game_ticks();
     }
 
-    return g_config.tlc_hack ? DDERR_NOEXCLUSIVEMODE : DD_OK;
+    return DD_OK;
 }
 
 HRESULT dd_GetDeviceIdentifier(LPDDDEVICEIDENTIFIER pDDDI, DWORD dwFlags, REFIID riid)

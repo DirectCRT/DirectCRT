@@ -36,7 +36,7 @@ BOOL WINAPI DllMain(HANDLE hDll, DWORD dwReason, LPVOID lpReserved)
 
         delay_imports_init();
 
-        if (GetEnvironmentVariable("cnc_ddraw_config_init", NULL, 0))
+        if (GetEnvironmentVariable("DIRECTCRT_CONFIG_INIT", NULL, 0))
         {
             cfg_load();
             return TRUE;
@@ -147,7 +147,7 @@ BOOL WINAPI DllMain(HANDLE hDll, DWORD dwReason, LPVOID lpReserved)
     }
     case DLL_PROCESS_DETACH:
     {
-        if (GetEnvironmentVariable("cnc_ddraw_config_init", NULL, 0))
+        if (GetEnvironmentVariable("DIRECTCRT_CONFIG_INIT", NULL, 0))
             return TRUE;
 
         TRACE("DirectCRT DLL_PROCESS_DETACH\n");
@@ -217,7 +217,7 @@ HRESULT WINAPI DirectDrawCreate(GUID FAR* lpGUID, LPDIRECTDRAW FAR* lplpDD, IUnk
 
     HRESULT ret;
 
-    if (util_caller_is_ddraw_wrapper(_ReturnAddress()) || g_config.flightsim98_hack)
+    if (util_caller_is_ddraw_wrapper(_ReturnAddress()))
     {
         if (lplpDD)
             *lplpDD = NULL;
@@ -262,7 +262,7 @@ HRESULT WINAPI DirectDrawCreateEx(GUID* lpGuid, LPVOID* lplpDD, REFIID iid, IUnk
 
     HRESULT ret;
 
-    if (util_caller_is_ddraw_wrapper(_ReturnAddress()) || g_config.flightsim98_hack)
+    if (util_caller_is_ddraw_wrapper(_ReturnAddress()))
     {
         if (lplpDD)
             *lplpDD = NULL;
