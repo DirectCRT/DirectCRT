@@ -104,7 +104,7 @@ All patterns are generated for the current size.
 | DirectDraw blits and GDI text | ddtest draws on the surface with DirectDraw and GDI, then reads it back and checks it: `Blt` colour fills, a sprite blitted with a source colour key by `Blt` and by `BltFast` (its own off-screen surface, drawn with `Lock` every frame), and text drawn with `TextOut` through the surface's `GetDC`. The fills and sprites must be exact, the colour key letting the background through, and the text white on its black background. The info text and the status line show the result; see [Regression test](#regression-test) |
 | White field | full white, for mask strength and brightness |
 | Test image | a built-in 4500 x 3000 landscape photo (`testimage.png`, embedded in `ddtest.exe`), 1:1, centred and cropped; Ctrl+arrows move it. Fine natural detail, and a large smooth sky (Ctrl+Up to see it) that's smooth at 24 and 32-bit and bands at 16-bit |
-| Image file | a PNG/BMP/JPEG/GIF/TIFF of your own, 1:1, centred and cropped; Ctrl+arrows move it |
+| Custom image | a PNG/BMP/JPEG/GIF/TIFF of your own, 1:1, centred and cropped; Ctrl+arrows move it |
 
 In 8-bit modes the patterns use a fixed palette (a 6x6x6 colour cube plus 40 greys),
 so gradients show 8-bit banding on purpose.

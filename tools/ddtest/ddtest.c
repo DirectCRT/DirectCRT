@@ -152,7 +152,7 @@ static struct
     HWND ed_image, cb_modes, st_status;
     HWND bt_browse, bt_imgsize, bt_query, bt_run, bt_stop;
     HWND lb_size, lb_x, lb_bpp, lb_refresh, lb_hz, lb_fps, lb_fps_unit;
-    HWND lb_ddraw, lb_present, st_present_note, lb_pattern, lb_image, st_image_note, lb_modes, st_help;
+    HWND lb_ddraw, lb_present, lb_pattern, lb_image, st_image_note, lb_modes;
     int dpi;
 
     char exe_dir[MAX_PATH];
@@ -1794,16 +1794,6 @@ static int run_dump(const Settings* s, const char* dir, uint32_t frame, int only
    DPI-aware when it loads; Windows' own ddraw.dll doesn't, and then Windows
    scales the whole panel.) */
 
-static const char* HELP_TEXT =
-    "During a run, changes apply straight away; typed values when you press Enter or leave the box. "
-    "In the test window: Esc or closing it stops, Left/Right change the pattern, Ctrl+arrows move "
-    "an image (with Shift, a pixel at a time), I and M toggle the overlays, left click marks a point, "
-    "right click clears the marks.";
-
-static const char* PRESENT_NOTE =
-    "This is what the program asks DirectDraw for. DirectCRT follows it with display=auto "
-    "(the default); display=window or fullscreen in directcrt.ini force a window or fullscreen.";
-
 static const char* IMAGE_NOTE = "Shown 1:1, centred and cropped";
 
 static int window_dpi(HWND hwnd)
@@ -1927,7 +1917,6 @@ static void create_controls(void)
     g.lb_present = add_label("Presentation:");
     for (int i = 0; i < PRESENT_COUNT; i++)
         g.rb_present[i] = add_control("BUTTON", PRESENT_NAMES[i], i == 0 ? first_radio : radio, ID_PRESENT0 + i);
-    g.st_present_note = add_label(PRESENT_NOTE);
 
     g.lb_pattern = add_label("Pattern:");
     g.cb_pattern = add_control("COMBOBOX", "", combo, ID_PATTERN);
@@ -1936,7 +1925,7 @@ static void create_controls(void)
     g.chk_info = add_control("BUTTON", "Info text", check, ID_INFO);
     g.chk_mouse = add_control("BUTTON", "Crosshair", check, ID_MOUSE);
 
-    g.lb_image = add_label("Image file:");
+    g.lb_image = add_label("Custom image:");
     g.ed_image = add_control("EDIT", "", edit, ID_IMAGE);
     g.bt_browse = add_control("BUTTON", "Browse...", button, ID_BROWSE);
     g.bt_imgsize = add_control("BUTTON", "Use image size", button, ID_IMGSIZE);
@@ -1950,7 +1939,6 @@ static void create_controls(void)
     g.bt_run = add_control("BUTTON", "Run", WS_TABSTOP | BS_DEFPUSHBUTTON, ID_RUN);
     g.bt_stop = add_control("BUTTON", "Stop", button, ID_STOP);
 
-    g.st_help = add_label(HELP_TEXT);
     g.st_status = add_control("STATIC", "", SS_LEFT | SS_NOPREFIX | SS_SUNKEN, ID_STATUS);
 }
 
@@ -1959,13 +1947,6 @@ static int text_w(HDC dc, const char* s)
     SIZE sz;
     GetTextExtentPoint32A(dc, s, (int)strlen(s), &sz);
     return sz.cx;
-}
-
-static int text_h(HDC dc, const char* s, int width)
-{
-    RECT r = { 0, 0, width, 0 };
-    DrawTextA(dc, s, -1, &r, DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX);
-    return r.bottom;
 }
 
 static int imax(int a, int b)
@@ -2005,7 +1986,7 @@ static SIZE layout_controls(void)
     int edy = (ch - eh) / 2;
 
     const char* labels[] = { "Resolution:", "Bit depth:", "Refresh rate:", "Frame limit:", "Interface:", "Presentation:",
-                             "Pattern:", "Image file:", "DirectDraw modes:" };
+                             "Pattern:", "Custom image:", "DirectDraw modes:" };
     int label_w = 0;
     for (int i = 0; i < (int)(sizeof(labels) / sizeof(labels[0])); i++)
         label_w = imax(label_w, text_w(dc, labels[i]));
@@ -2081,17 +2062,13 @@ static SIZE layout_controls(void)
     }
     y += row;
 
-    /* Presentation, with a note on what it means under a wrapper */
     place(g.lb_present, margin, y + (radio_h - line) / 2, label_w, line);
     for (int i = 0; i < PRESENT_COUNT; i++)
     {
         place(g.rb_present[i], fx, y, field_w, radio_h);
         y += radio_h;
     }
-    y += small_gap;
-    int note_h = text_h(dc, PRESENT_NOTE, field_w);
-    place(g.st_present_note, fx, y, field_w, note_h);
-    y += note_h + S(10);
+    y += S(10);
 
     place(g.lb_pattern, margin, y + text_dy, label_w, line);
     place(g.cb_pattern, fx, y, field_w, ch + line * (PAT_COUNT + 1));
@@ -2121,10 +2098,6 @@ static SIZE layout_controls(void)
     place(g.bt_run, fx, y, big_w, big_h);
     place(g.bt_stop, fx + big_w + gap, y, big_w, big_h);
     y += big_h + S(14);
-
-    int help_h = text_h(dc, HELP_TEXT, full_w);
-    place(g.st_help, margin, y, full_w, help_h);
-    y += help_h + gap;
 
     /* State, the ddraw.dll path and the last error; the last two may wrap */
     int status_h = line * 5 + S(6);

@@ -25,7 +25,7 @@ static const char* PATTERN_NAMES[PAT_COUNT] = {
     "DirectDraw blits and GDI text (self-check)",
     "White field",
     "Test image (built-in, 1:1)",
-    "Image file (1:1)",
+    "Custom image (1:1)",
 };
 
 static const char* PATTERN_SHORT_NAMES[PAT_COUNT] = {
@@ -1081,7 +1081,7 @@ static void pat_image(Canvas* c, const PatternContext* ctx)
     if (!ctx->image || ctx->image_w <= 0 || ctx->image_h <= 0)
     {
         cv_fill(c, COL(40, 40, 40));
-        cv_label(c, 4, 4, cv_text_size(c), WHITE, BLACK, "No image file loaded - choose one in the panel");
+        cv_label(c, 4, 4, cv_text_size(c), WHITE, BLACK, "No custom image loaded - choose one in the panel");
         return;
     }
 
