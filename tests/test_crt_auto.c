@@ -1,7 +1,6 @@
 /* Unit tests for src/crt_auto.c
  *
  * Build and run: tests\run_tests.cmd (from a Visual Studio developer prompt)
- *            or: make test
  *
  * The expected values follow DOSBox Staging's crt-auto, with its default
  * settings ('viewport = fit', 'integer_scaling = auto', 'aspect = auto')

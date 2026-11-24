@@ -24,6 +24,13 @@ PVOID FakePrimarySurface;
 
 
 HMODULE g_ddraw_module;
+
+/* Windows' own, once DirectCRT has stepped aside (dd_step_aside) */
+typedef HRESULT(WINAPI* DIRECTDRAWCREATECLIPPERPROC)(DWORD, LPDIRECTDRAWCLIPPER FAR*, IUnknown FAR*);
+typedef HRESULT(WINAPI* DIRECTDRAWENUMERATEAPROC)(LPDDENUMCALLBACKA, LPVOID);
+typedef HRESULT(WINAPI* DIRECTDRAWENUMERATEWPROC)(LPDDENUMCALLBACKW, LPVOID);
+typedef HRESULT(WINAPI* DIRECTDRAWENUMERATEEXAPROC)(LPDDENUMCALLBACKEXA, LPVOID, DWORD);
+typedef HRESULT(WINAPI* DIRECTDRAWENUMERATEEXWPROC)(LPDDENUMCALLBACKEXW, LPVOID, DWORD);
 static BOOL g_screensaver_disabled;
 
 BOOL WINAPI DllMain(HANDLE hDll, DWORD dwReason, LPVOID lpReserved)
@@ -243,7 +250,17 @@ HRESULT WINAPI DirectDrawCreateClipper(DWORD dwFlags, LPDIRECTDRAWCLIPPER FAR* l
         pUnkOuter, 
         _ReturnAddress());
 
-    HRESULT ret = dd_CreateClipper(dwFlags, (IDirectDrawClipperImpl**)lplpDDClipper, pUnkOuter);
+    HRESULT ret;
+
+    if (dd_stepped_aside())
+    {
+        DIRECTDRAWCREATECLIPPERPROC create = (DIRECTDRAWCREATECLIPPERPROC)dd_system_proc("DirectDrawCreateClipper");
+        ret = create ? create(dwFlags, lplpDDClipper, pUnkOuter) : DDERR_NODIRECTDRAWSUPPORT;
+    }
+    else
+    {
+        ret = dd_CreateClipper(dwFlags, (IDirectDrawClipperImpl**)lplpDDClipper, pUnkOuter);
+    }
 
     TRACE("<- %s\n", __FUNCTION__);
     return ret;
@@ -282,6 +299,12 @@ HRESULT WINAPI DirectDrawEnumerateA(LPDDENUMCALLBACK lpCallback, LPVOID lpContex
 {
     TRACE("-> %s(lpCallback=%p, lpContext=%p) [%p]\n", __FUNCTION__, lpCallback, lpContext, _ReturnAddress());
 
+    if (dd_stepped_aside())
+    {
+        DIRECTDRAWENUMERATEAPROC enumerate = (DIRECTDRAWENUMERATEAPROC)dd_system_proc("DirectDrawEnumerateA");
+        return enumerate ? enumerate(lpCallback, lpContext) : DDERR_NODIRECTDRAWSUPPORT;
+    }
+
     if (lpCallback)
         lpCallback(NULL, "Primary Display Driver", "display", lpContext);
 
@@ -299,6 +322,12 @@ HRESULT WINAPI DirectDrawEnumerateExA(LPDDENUMCALLBACKEXA lpCallback, LPVOID lpC
         dwFlags, 
         _ReturnAddress());
 
+    if (dd_stepped_aside())
+    {
+        DIRECTDRAWENUMERATEEXAPROC enumerate = (DIRECTDRAWENUMERATEEXAPROC)dd_system_proc("DirectDrawEnumerateExA");
+        return enumerate ? enumerate(lpCallback, lpContext, dwFlags) : DDERR_NODIRECTDRAWSUPPORT;
+    }
+
     if (lpCallback)
         lpCallback(NULL, "Primary Display Driver", "display", lpContext, NULL);
 
@@ -315,6 +344,12 @@ HRESULT WINAPI DirectDrawEnumerateExW(LPDDENUMCALLBACKEXW lpCallback, LPVOID lpC
         dwFlags, 
         _ReturnAddress());
 
+    if (dd_stepped_aside())
+    {
+        DIRECTDRAWENUMERATEEXWPROC enumerate = (DIRECTDRAWENUMERATEEXWPROC)dd_system_proc("DirectDrawEnumerateExW");
+        return enumerate ? enumerate(lpCallback, lpContext, dwFlags) : DDERR_NODIRECTDRAWSUPPORT;
+    }
+
     if (lpCallback)
         lpCallback(NULL, L"Primary Display Driver", L"display", lpContext, NULL);
 
@@ -325,6 +360,12 @@ HRESULT WINAPI DirectDrawEnumerateExW(LPDDENUMCALLBACKEXW lpCallback, LPVOID lpC
 HRESULT WINAPI DirectDrawEnumerateW(LPDDENUMCALLBACKW lpCallback, LPVOID lpContext)
 {
     TRACE("-> %s(lpCallback=%p, lpContext=%p) [%p]\n", __FUNCTION__, lpCallback, lpContext, _ReturnAddress());
+
+    if (dd_stepped_aside())
+    {
+        DIRECTDRAWENUMERATEWPROC enumerate = (DIRECTDRAWENUMERATEWPROC)dd_system_proc("DirectDrawEnumerateW");
+        return enumerate ? enumerate(lpCallback, lpContext) : DDERR_NODIRECTDRAWSUPPORT;
+    }
 
     if (lpCallback)
         lpCallback(NULL, L"Primary Display Driver", L"display", lpContext);

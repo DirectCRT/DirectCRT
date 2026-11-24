@@ -3,7 +3,7 @@
 
 Each shader goes GLSL -> SPIR-V (glslang) -> HLSL (SPIRV-Cross) -> SM 4.0
 bytecode (fxc).  The output is committed to src/d3d11_shaders/ so that
-neither MSBuild nor MinGW builds need any shader tools.  Run this script
+the build needs no shader tools.  Run this script
 again after changing a shader or bumping a tool version.
 
     python tools/shaders/gen_d3d11_shaders.py fetch     # download/build tools

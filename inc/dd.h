@@ -6,11 +6,6 @@
 #include "ddraw.h"
 #include "crt_auto.h"
 
-#ifdef __GNUC__
-#define __try
-#define __except(x) if (0)
-#endif
-
 typedef HRESULT(WINAPI* DIRECTDRAWCREATEPROC)(GUID FAR*, LPDIRECTDRAW FAR*, IUnknown FAR*);
 
 ULONG dd_AddRef();
@@ -29,6 +24,18 @@ HRESULT dd_GetAvailableVidMem(LPDDSCAPS lpDDCaps, LPDWORD lpdwTotal, LPDWORD lpd
 HRESULT dd_TestCooperativeLevel();
 HRESULT dd_GetDeviceIdentifier(LPDDDEVICEIDENTIFIER pDDDI, DWORD dwFlags, REFIID riid);
 HRESULT dd_CreateEx(GUID* lpGuid, LPVOID* lplpDD, REFIID iid, IUnknown* pUnkOuter);
+
+/* The renderer: dd_renderer_create gets it ready for the window (game
+ * thread); dd_renderer_failed, from a render thread that couldn't start,
+ * switches to the next and runs it */
+void dd_renderer_create(void);
+DWORD dd_renderer_failed(void);
+
+/* Neither Direct3D 11 nor OpenGL works: DirectCRT steps aside, its hooks
+ * undone, and DirectDraw is Windows' own (decided at the first create) */
+BOOL dd_step_aside(void);
+BOOL dd_stepped_aside(void);
+FARPROC dd_system_proc(const char* name);
 
 #define FIX_CHILDS_DISABLED 0
 #define FIX_CHILDS_DETECT 1
@@ -168,7 +175,6 @@ typedef struct CNCDDRAW
     SPEEDLIMITER flip_limiter;
     DWORD minfps_tick_len;
     DWORD gui_thread_id;
-    BOOL show_driver_warning;
     BOOL windowed_hack;
     BOOL saw_fullscreen; /* display: what the game has asked for so far (dd_SetCooperativeLevel) */
     BOOL saw_normal;

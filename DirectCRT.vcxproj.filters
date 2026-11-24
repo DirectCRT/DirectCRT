@@ -22,6 +22,9 @@
     <Filter Include="Source Files\IDirect3D">
       <UniqueIdentifier>{e6c62066-0a71-4531-ad9a-eb428abc6f44}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Source Files\imgui">
+      <UniqueIdentifier>{5d3c1f7a-2b8e-4c61-9a4f-0e7b6d2c8a13}</UniqueIdentifier>
+    </Filter>
     <Filter Include="Source Files\IAMMediaStream">
       <UniqueIdentifier>{b6d5d0fc-844e-4068-8a1e-1b0386f359fc}</UniqueIdentifier>
     </Filter>
@@ -35,6 +38,30 @@
     </ClCompile>
     <ClCompile Include="src\screenshot.c">
       <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\overlay.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\overlay_status.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="third_party\imgui\imgui.cpp">
+      <Filter>Source Files\imgui</Filter>
+    </ClCompile>
+    <ClCompile Include="third_party\imgui\imgui_draw.cpp">
+      <Filter>Source Files\imgui</Filter>
+    </ClCompile>
+    <ClCompile Include="third_party\imgui\imgui_tables.cpp">
+      <Filter>Source Files\imgui</Filter>
+    </ClCompile>
+    <ClCompile Include="third_party\imgui\imgui_widgets.cpp">
+      <Filter>Source Files\imgui</Filter>
+    </ClCompile>
+    <ClCompile Include="third_party\imgui\backends\imgui_impl_dx11.cpp">
+      <Filter>Source Files\imgui</Filter>
+    </ClCompile>
+    <ClCompile Include="third_party\imgui\backends\imgui_impl_opengl3.cpp">
+      <Filter>Source Files\imgui</Filter>
     </ClCompile>
     <ClCompile Include="src\render_d3d11.c">
       <Filter>Source Files</Filter>
@@ -120,7 +147,7 @@
     <ClCompile Include="src\directinput.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="src\render_gdi.c">
+    <ClCompile Include="src\render_blank.c">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="src\config.c">
@@ -218,6 +245,9 @@
     <ClInclude Include="inc\screenshot.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="inc\overlay.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="inc\render_ogl.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -251,7 +281,7 @@
     <ClInclude Include="inc\utils.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="inc\render_gdi.h">
+    <ClInclude Include="inc\render_blank.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="inc\config.h">

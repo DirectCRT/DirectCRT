@@ -37,6 +37,9 @@ typedef struct CNCDDRAWCONFIG
     BOOL devmode;
     int anti_aliased_fonts_min_size;
     char screenshot_dir[MAX_PATH];
+    int status_osd_size;      /* 0 small, 1 medium, 2 large */
+    BOOL status_osd_full;     /* status_osd_detail=full */
+    int status_osd_position;  /* OVERLAY_CORNER */
 
     /* Set at runtime from 'display' and Alt+Enter: windowed=1 fullscreen=0 is
        a window, 0/1 fullscreen at the desktop resolution, 0/0 a mode switch
@@ -91,6 +94,7 @@ typedef struct CNCDDRAWCONFIG
         int unlock_cursor2;
         BOOL unlock_cursor_middleclick;
         int screenshot;
+        int status_osd;
     } hotkeys;
 
 } CNCDDRAWCONFIG;

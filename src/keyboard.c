@@ -7,6 +7,7 @@
 #include "keyboard.h"
 #include "mouse.h"
 #include "screenshot.h"
+#include "overlay.h"
 
 
 HHOOK g_keyboard_hook;
@@ -74,6 +75,14 @@ LRESULT CALLBACK keyboard_hook_proc(int code, WPARAM wParam, LPARAM lParam)
     {
         if (key_triggered)
             util_toggle_maximize();
+
+        return 1;
+    }
+
+    if (wParam == g_config.hotkeys.status_osd && alt_down && key_down)
+    {
+        if (key_triggered)
+            overlay_toggle_status();
 
         return 1;
     }

@@ -57,6 +57,7 @@ typedef struct OGLRENDERER
 } OGLRENDERER;
 
 DWORD WINAPI ogl_render_main(void);
+BOOL ogl_probe(); /* whether an OpenGL 3 context can be created */
 BOOL ogl_create();
 BOOL ogl_release();
 

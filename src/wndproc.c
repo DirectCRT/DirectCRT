@@ -768,14 +768,6 @@ LRESULT CALLBACK fake_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam
         }
         break;
     }
-    case WM_AUTORENDERER:
-    {
-        mouse_unlock();
-        real_SetWindowPos(g_ddraw.hwnd, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
-        real_SetWindowPos(g_ddraw.hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
-        mouse_lock();
-        return 0;
-    }
     case WM_TOGGLE_FULLSCREEN:
     {
         /* Check if we are fullscreen/borderless already */

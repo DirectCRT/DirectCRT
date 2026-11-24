@@ -14,6 +14,8 @@
  * are created by the render thread. */
 
 BOOL d3d11_is_available();
+BOOL d3d11_probe(); /* whether a device can be created: hardware, else WARP */
+BOOL d3d11_is_warp();
 BOOL d3d11_create();
 DWORD WINAPI d3d11_render_main(void);
 BOOL d3d11_release();

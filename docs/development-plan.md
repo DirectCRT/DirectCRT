@@ -25,7 +25,7 @@ Not goals:
 | Behaviour | DOSBox Staging's `crt-auto`, VGA path only. The dosbox-staging repository is the source of truth, not the 86Box port. | One well-researched look instead of a shader catalogue. |
 | Licence | GPL-2.0-or-later. cnc-ddraw's MIT code keeps its notice. | We port DOSBox Staging's GPL C++ logic and its GPL `sharp` shader. |
 | Host systems | Windows 10 and 11, Wine, Proton. | The shaders need a modern GPU; machines that run XP natively already have CRTs. |
-| Renderer | Direct3D 11. DOSBox's GLSL shaders are translated to HLSL and compiled at build time. GDI stays as an unshaded fallback. The prototype's OpenGL renderer stays too, for crt-auto only. | Best supported API on Windows (low-latency presentation, VRR, HDR later); runs well under Wine and Proton through DXVK. Precompiled shaders avoid Wine's `d3dcompiler` replacement. OpenGL runs DOSBox's GLSL unmodified, so it's the reference for the translated shaders, and a shaded fallback where Direct3D 11 runs badly (Wine without DXVK, broken drivers). It gets the overlay, but not the features that depend on Direct3D 11 (HDR, low-latency presentation). |
+| Renderer | Direct3D 11. DOSBox's GLSL shaders are translated to HLSL and compiled at build time. No GDI renderer: where neither Direct3D 11 nor OpenGL works, DirectCRT steps aside for Windows' own DirectDraw. The prototype's OpenGL renderer stays too, for crt-auto only. | Best supported API on Windows (low-latency presentation, VRR, HDR later); runs well under Wine and Proton through DXVK. Precompiled shaders avoid Wine's `d3dcompiler` replacement. OpenGL runs DOSBox's GLSL unmodified, so it's the reference for the translated shaders, and a shaded fallback where Direct3D 11 runs badly (Wine without DXVK, broken drivers). It gets the overlay, but not the features that depend on Direct3D 11 (HDR, low-latency presentation). |
 | Settings | DOSBox Staging's setting names and meanings (`viewport`, `aspect`, `integer_scaling`, `crt_color_profile`, `color_temperature`, `black_level`, ...). One central settings file plus per-game overrides; a `directcrt.ini` in the game folder takes priority. | DOSBox users already know them; their help texts can be adapted. |
 | User interface | No desktop app. All settings are in an on-screen overlay drawn by Dear ImGui inside the DLL. Installing is copying `ddraw.dll` into the game folder (a zip and a README; a small installer later if needed, not Qt). | CRT settings are judged by eye, so they're best changed live on the real game picture. Works wherever the DLL works, including Wine, Proton and a Steam Deck in Game Mode. Saves a second program, Qt and its deployment. Dear ImGui is MIT licensed; DuckStation uses it the same way (DuckStation is CC BY-NC-ND 4.0: take ideas only, no code, icons or text). |
 
@@ -103,9 +103,8 @@ What we take:
    - Drawn after the CRT shader, at screen resolution, with an embedded
      TrueType font scaled for the DPI. Screenshots with or without it.
    - Hotkeys configurable; defaults that old games rarely use.
-   - Direct3D 11 and OpenGL through ImGui's own backends; GDI through a
-     software ImGui renderer, or failing that a message pointing to
-     `directcrt.ini`.
+   - Direct3D 11 and OpenGL through ImGui's own backends. There's no GDI
+     renderer: where neither works, DirectCRT steps aside (see phase 4).
 
 ## cnc-ddraw features
 
@@ -121,11 +120,11 @@ What we take:
 | Frame limiter and VSync (`maxfps`, `limiter_type`, `maxgameticks`, `minfps`, `vsync`) | Keep |
 | Mouse (`adjmouse`, cursor-unlock hotkeys, cursor fixes) | Keep, driven by the new scaling code |
 | Screenshots, debug logs, crash dumps | Keep. Done: the screenshot key saves both the raw and the shaded picture |
-| `renderer` (gdi, opengl, openglcore, direct3d9, direct3d9on12, auto) | Done: Direct3D 11, OpenGL (crt-auto's pipeline only, in a 3.3 core context, without the libretro shader loading and GL 1.x/2.x paths) and GDI. Direct3D 9 is removed; `openglcore`, `direct3d9` and `direct3d9on12` read as `auto` |
+| `renderer` (gdi, opengl, openglcore, direct3d9, direct3d9on12, auto) | Done: Direct3D 11, OpenGL (crt-auto's pipeline only, in a 3.3 core context, without the libretro shader loading and GL 1.x/2.x paths). Direct3D 9 and GDI are removed; `openglcore`, `direct3d9`, `direct3d9on12`, `gdi` and `software` read as `auto` |
 | `shader`, `d3d9_filter`, libretro shader loading | Done: `shader` has DOSBox's values `crt-auto`, `sharp`, `nearest` and `bilinear`, all through crt-auto's pipeline; the rest is removed |
 | `width`, `height`, `maintas`, `aspect_ratio`, `boxing` | Done: replaced with `window_size`, `viewport`, `aspect` and `integer_scaling`, for every shader |
 | `inject_resolution`, `vhack` | Done: removed (they make games render at high resolutions) |
-| XP build configurations, MinGW i486 build, old-Windows code paths | Done: removed. DebugLogXP and DebugLogMiniXP are now DebugLog and DebugLogMini on the current toolset; the last old-Windows path, a Windows 7 workaround in the frame limiter, went in phase 3 |
+| XP build configurations, MinGW i486 build, old-Windows code paths | Done: removed. DebugLogXP and DebugLogMiniXP are now DebugLog and DebugLogMini on the current toolset; the last old-Windows path, a Windows 7 workaround in the frame limiter, went in phase 3. The MinGW Makefile and the code only it compiled (the `__GNUC__` branches) went in phase 4: MSBuild is the only build |
 | C++Builder config tool (`config/`) | Done: removed in phase 3; the overlay replaces it |
 | `min_font_size` | Done: removed in phase 3. It made text readable at the high resolutions `inject_resolution` gave games |
 
@@ -168,7 +167,7 @@ aspect=auto
 integer_scaling=auto
 viewport=fit
 image_adjustments=on    ; and the other colour settings, unchanged
-renderer=auto           ; auto (Direct3D 11, then OpenGL), direct3d11, opengl, gdi
+renderer=auto           ; auto (Direct3D 11, then OpenGL), direct3d11, opengl
 ```
 
 ### `display`
@@ -247,8 +246,7 @@ black borders in the window, as in DOSBox.
   `viewport`, `aspect` and `integer_scaling`, which is why the old scaling
   settings can go. As in DOSBox, `integer_scaling=auto` only snaps with
   crt-auto, and the colour adjustments apply with every shader.
-- **`renderer=gdi`** uses the same layout, nearest neighbour, without shading
-  or colour adjustments.
+- **No `renderer=gdi`**: it read as `auto` (see phase 4).
 - **Live reload:** `shader` joins the settings reloaded while the game runs.
   `display`, the `window_*` settings and `renderer` apply at the next start.
 
@@ -449,8 +447,7 @@ otherwise keep the no-shading trap. `original` has to be chosen.
      a 4K PNG doesn't stall the game. The key wakes the render thread, so it
      works while the game isn't drawing. The shaded shots from Direct3D 11
      and OpenGL are the same to within 1 in 99.99% of pixels; the rest is
-     ddtest's frame counter. Once the overlay exists, the shaded shot is
-     taken without it.
+     ddtest's frame counter. The shaded shot is taken without the overlay.
    - Not planned: when a game resizes its own window, making the new size
      its new resolution. Only games in their own window can do it, mostly
      windowed-only games with a zoom option, and none we know of needs it.
@@ -465,6 +462,46 @@ otherwise keep the no-shading trap. `original` has to be chosen.
      PC emulator running Windows 98 gives that experience.
 4. **Overlay**, in this order: the status OSD; the full OSD with input
    capture; safe mode; the first-start toast and the tour.
+   - Done: Dear ImGui 1.93.0 in `third_party/imgui`, unmodified, with its
+     Direct3D 11 and OpenGL 3 backends and no platform backend. The overlay
+     is drawn after the screenshot is read back and before Present, at the
+     window's or screen's size. `src/overlay_status.c` (C) keeps the state
+     and the timings and writes the rows; `src/overlay.cpp` (C++) draws them.
+     The ImGui backend is set up on first use and shut down with the
+     renderer's resources, so Alt+Enter and device loss rebuild it.
+     `d3dcompiler_47.dll`, which ImGui's Direct3D 11 backend needs, is
+     delay-loaded and checked first; without it there's no OSD, not a crash.
+   - Done: the status OSD, on Alt+F11 (`keystatusosd`). Basic: three lines,
+     the game's mode and the picture's size and scale, the shader and
+     renderer, the frame rate and frame time. Full: a table (game, screen,
+     picture, scale with double scanning and pixel doubling, shader and its
+     pixels per line, renderer and vsync, frame rate of the game's pictures
+     and of presents, average and slowest frame time, the crt-auto passes'
+     GPU time) and a graph of the last 240 frame times. The numbers cover
+     half a second each; the frame times are between the game's new
+     pictures, not presents. `status_osd_size` (13, 16 or 20 px, times the
+     display scale, at most a 22nd of the picture's height),
+     `status_osd_detail` and `status_osd_position`. While it's shown the
+     render thread wakes at least 4 times a second, so it updates while the
+     game is waiting; GPU timing queries run only while it's shown (always
+     in debug builds).
+   - Done: no GDI renderer. GDI can't draw the shaders or the overlay, and
+     a picture without them isn't what DirectCRT is for. At the first
+     `DirectDrawCreate` DirectCRT probes the renderers in order (Direct3D
+     11 then OpenGL, or OpenGL first with `renderer=opengl`): a Direct3D 11
+     device on the graphics card, else on WARP (the OSD then says
+     "Direct3D 11 (WARP)"), and an OpenGL 3 context on a hidden window.
+     About 75 ms when Direct3D 11 works. When neither does, DirectCRT steps
+     aside: its hooks are undone, a message box says so once, and
+     `DirectDrawCreate(Ex)`, `CoCreateInstance`, `DirectDrawCreateClipper`
+     and `DirectDrawEnumerate*` all go to Windows' own `ddraw.dll` from the
+     system folder. The DPI awareness and timer resolution set at load
+     stay. A renderer that fails later, on the render thread, switches to
+     the other one for the rest of the run; if both fail, the window is
+     black with a message saying why. Tested by faking `d3d11.dll` and
+     `opengl32.dll` away in the game's folder, and with forced setup
+     failures. (Windows' own DirectDraw draws black with those fakes too,
+     since it uses Direct3D itself.)
 5. **Later.** HDR output first; deinterlacing and dedithering after it, at a
    lower priority.
    - HDR output, Direct3D 11 only: the extra peak brightness makes up for the

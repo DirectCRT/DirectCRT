@@ -612,7 +612,8 @@ const char* ds_legacy_renderer(const char* renderer)
     if (!copy_lower(s, renderer))
         return NULL;
 
-    if (!strcmp(s, "openglcore") || !strcmp(s, "direct3d9") || !strcmp(s, "direct3d9on12"))
+    if (!strcmp(s, "openglcore") || !strcmp(s, "direct3d9") || !strcmp(s, "direct3d9on12") ||
+        !strcmp(s, "gdi") || !strcmp(s, "software"))
         return "auto";
 
     return NULL;

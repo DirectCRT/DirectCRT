@@ -1845,7 +1845,6 @@ char* dbg_mes_to_str(int id)
     case WM_SIZE_DDRAW: return "WM_SIZE_DDRAW";
     case WM_MOVE_DDRAW: return "WM_MOVE_DDRAW";
     case WM_WINEFULLSCREEN: return "WM_WINEFULLSCREEN";
-    case WM_AUTORENDERER: return "WM_AUTORENDERER";
     case WM_TOGGLE_FULLSCREEN: return "WM_TOGGLE_FULLSCREEN";
     case WM_TOGGLE_MAXIMIZE: return "WM_TOGGLE_MAXIMIZE";
     }

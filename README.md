@@ -24,8 +24,10 @@ Changes from cnc-ddraw so far:
   pixel. `sharp`, `nearest` and `bilinear` are the other shaders. `aspect`,
   `integer_scaling`, `viewport` and the colour settings work as in DOSBox,
   with every shader, and changes to them apply while the game runs.
-- Renderers: Direct3D 11 (the default), OpenGL 3.3 and GDI (no shading).
-  Direct3D 9 and the libretro shader files are gone.
+- Renderers: Direct3D 11 (the default, on WARP if the graphics card can't)
+  and OpenGL 3.3, each the other's fallback. Where neither works DirectCRT
+  steps aside for Windows' own DirectDraw and says so. Direct3D 9, GDI and
+  the libretro shader files are gone.
 - `display` decides fullscreen or a window: `auto` (the default) follows the
   game, `window` and `fullscreen` force one, and `original` switches the
   monitor to the game's resolution as Windows' own DirectDraw did. Fullscreen

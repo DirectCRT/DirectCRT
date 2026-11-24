@@ -37,14 +37,7 @@ extern DWORD g_dbg_frame_count;
 extern LPTOP_LEVEL_EXCEPTION_FILTER g_dbg_exception_filter;
 extern PVOID g_dbg_exception_handle;
 
-#if defined(__GNUC__) /* wrap msvc intrinsics onto gcc builtins */
-#undef  _ReturnAddress
-#undef  _AddressOfReturnAddress
-#define _ReturnAddress()		__builtin_return_address(0)
-#define _AddressOfReturnAddress()	__builtin_frame_address (0)
-#else
 #pragma intrinsic(_ReturnAddress)
-#endif /* __GNUC__ */
 
 //#define _DEBUG 1
 

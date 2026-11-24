@@ -12,7 +12,6 @@
 #include "mouse.h"
 #include "keyboard.h"
 #include "wndproc.h"
-#include "render_gdi.h"
 #include "render_ogl.h"
 #include "render_d3d11.h"
 #include "directinput.h"
@@ -159,7 +158,7 @@ BOOL WINAPI fake_GetWindowRect(HWND hWnd, LPRECT lpRect)
         g_ddraw.ref &&
         g_ddraw.hwnd &&
         g_ddraw.width &&
-        (g_config.hook != 2 || g_ddraw.renderer == gdi_render_main))
+        g_config.hook != 2)
     {
         if (hWnd == g_ddraw.hwnd || hWnd == GetDesktopWindow())
         {
@@ -192,7 +191,7 @@ BOOL WINAPI fake_GetClientRect(HWND hWnd, LPRECT lpRect)
         g_ddraw.ref &&
         g_ddraw.width &&
         (g_ddraw.hwnd == hWnd || hWnd == GetDesktopWindow()) &&
-        (g_config.hook != 2 || g_ddraw.renderer == gdi_render_main))
+        g_config.hook != 2)
     {
         lpRect->bottom = g_ddraw.height;
         lpRect->left = 0;
@@ -766,7 +765,7 @@ BOOL WINAPI fake_GetWindowPlacement(HWND hWnd, WINDOWPLACEMENT* lpwndpl)
         g_ddraw.ref &&
         g_ddraw.hwnd &&
         g_ddraw.width &&
-        (g_config.hook != 2 || g_ddraw.renderer == gdi_render_main))
+        g_config.hook != 2)
     {
         if (hWnd == g_ddraw.hwnd || hWnd == GetDesktopWindow())
         {
@@ -1699,19 +1698,6 @@ FARPROC WINAPI fake_GetProcAddress(HMODULE hModule, LPCSTR lpProcName)
 
     BOOL hook = g_config.hook == 3;
 
-#if defined(__GNUC__)
-    if (g_config.hook == 4 && hModule && HIWORD(lpProcName))
-    {
-        if (strcmp(lpProcName, "DirectInputCreateA") == 0 ||
-            strcmp(lpProcName, "DirectInputCreateEx") == 0 ||
-            strcmp(lpProcName, "DirectInput8Create") == 0)
-        {
-            hook = TRUE;
-            g_dinput_hook_active = TRUE;
-        }
-    }
-#endif
-
     FARPROC proc = real_GetProcAddress(hModule, lpProcName);
 
     if (!hook || !hModule || !HIWORD(lpProcName))
@@ -2204,7 +2190,8 @@ HRESULT WINAPI fake_CoCreateInstance(REFCLSID rclsid, LPUNKNOWN pUnkOuter, DWORD
             ((GUID*)riid)->Data1, 
             _ReturnAddress());
 
-        if (IsEqualGUID(&CLSID_DirectDraw, rclsid) || IsEqualGUID(&CLSID_DirectDraw7, rclsid))
+        if ((IsEqualGUID(&CLSID_DirectDraw, rclsid) || IsEqualGUID(&CLSID_DirectDraw7, rclsid)) &&
+            !dd_step_aside())
         {
             TRACE("     GUID = %08X (CLSID_DirectDrawX)\n", ((GUID*)rclsid)->Data1);
 
@@ -2220,7 +2207,7 @@ HRESULT WINAPI fake_CoCreateInstance(REFCLSID rclsid, LPUNKNOWN pUnkOuter, DWORD
             }
         }    
 
-        if (IsEqualGUID(&CLSID_DirectDrawClipper, rclsid))
+        if (IsEqualGUID(&CLSID_DirectDrawClipper, rclsid) && !dd_stepped_aside())
         {
             TRACE("     GUID = %08X (CLSID_DirectDrawClipper)\n", ((GUID*)rclsid)->Data1);
 

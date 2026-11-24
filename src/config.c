@@ -3,7 +3,6 @@
 #include "fps_limiter.h"
 #include "config.h"
 #include "dd.h"
-#include "render_gdi.h"
 #include "render_ogl.h"
 #include "hook.h"
 #include "debug.h"
@@ -20,6 +19,7 @@ static DWORD cfg_get_game_section(LPSTR buf, DWORD size);
 static void cfg_load_crt_auto_settings(CRT_AUTO_SETTINGS* settings);
 static void cfg_load_display_settings();
 static void cfg_ini_stat(WIN32_FILE_ATTRIBUTE_DATA* data);
+static int cfg_get_choice(LPCSTR key, const char* const* names, int count, int default_index);
 
 #define GET_INT(a,b,c) a = cfg_get_int(b, c); TRACE("%s=%d\n", b, a)
 #define GET_BOOL(a,b,c) a = cfg_get_bool(b, c); TRACE("%s=%s\n", b, a ? "true" : "false")
@@ -55,6 +55,13 @@ void cfg_load()
     GET_BOOL(g_config.devmode, "devmode", FALSE);
     GET_INT(g_config.anti_aliased_fonts_min_size, "anti_aliased_fonts_min_size", 13);
     GET_STRING("screenshotdir", ".\\Screenshots\\", g_config.screenshot_dir, sizeof(g_config.screenshot_dir));
+
+    static const char* const osd_sizes[] = { "small", "medium", "large" };
+    static const char* const osd_details[] = { "basic", "full" };
+    static const char* const osd_positions[] = { "top-left", "top-right", "bottom-left", "bottom-right" };
+    g_config.status_osd_size = cfg_get_choice("status_osd_size", osd_sizes, 3, 1);
+    g_config.status_osd_full = cfg_get_choice("status_osd_detail", osd_details, 2, 0) == 1;
+    g_config.status_osd_position = cfg_get_choice("status_osd_position", osd_positions, 4, 0);
 
     /* Compatibility settings */
 
@@ -101,6 +108,7 @@ void cfg_load()
     GET_INT(g_config.hotkeys.unlock_cursor2, "keyunlockcursor2", VK_RCONTROL);
     GET_BOOL(g_config.hotkeys.unlock_cursor_middleclick, "unlockcursor_middleclick", FALSE);
     GET_INT(g_config.hotkeys.screenshot, "keyscreenshot", VK_SNAPSHOT);
+    GET_INT(g_config.hotkeys.status_osd, "keystatusosd", VK_F11);
 
     
     /* ddtest, our test program, stops its test when the window is closed
@@ -244,7 +252,7 @@ static void cfg_create_ini()
             "; Note: Does not have an impact on the game speed, to limit your game speed use 'maxgameticks='\n"
             "maxfps=-1\n"
             "\n"
-            "; Vertical synchronization, enable if you get tearing (not with 'renderer=gdi')\n"
+            "; Vertical synchronization, enable if you get tearing\n"
             "; Note: vsync=true can fix tearing but it will cause input lag\n"
             "vsync=false\n"
             "\n"
@@ -323,9 +331,9 @@ static void cfg_create_ini()
             "blue_gain=100\n"
             "\n"
             "; Renderer\n"
-            "; auto = Direct3D 11, or OpenGL if Direct3D 11 isn't available\n"
-            "; direct3d11, opengl\n"
-            "; gdi = without shading or colour adjustments, for when neither works\n"
+            "; auto = Direct3D 11, or OpenGL if Direct3D 11 doesn't work\n"
+            "; direct3d11, opengl = this one first, the other if it doesn't work\n"
+            "; Note: When neither works, DirectCRT steps aside for Windows' own DirectDraw\n"
             "renderer=auto\n"
             "\n"
             "; Developer mode (don't lock the cursor)\n"
@@ -336,6 +344,17 @@ static void cfg_create_ini()
             "\n"
             "; Where should screenshots be saved\n"
             "screenshotdir=.\\Screenshots\\\n"
+            "\n"
+            "; The status OSD, shown and hidden with Alt+F11 (see 'keystatusosd'): the game's resolution, the size\n"
+            "; and scaling of the picture, the shader, the frame rate and the frame times. Screenshots are without it\n"
+            "; small, medium, large\n"
+            "status_osd_size=medium\n"
+            "\n"
+            "; basic = three lines; full = everything, with a graph of the frame times\n"
+            "status_osd_detail=basic\n"
+            "\n"
+            "; top-left, top-right, bottom-left, bottom-right\n"
+            "status_osd_position=top-left\n"
             "\n"
             "\n"
             "\n"
@@ -435,6 +454,9 @@ static void cfg_create_ini()
             "\n"
             "; Screenshot: saves the game's own picture (_raw.png) and what's on screen (_crt.png)\n"
             "keyscreenshot=0x2C\n"
+            "\n"
+            "; Show or hide the status OSD = [Alt] + ???\n"
+            "keystatusosd=0x7A\n"
             "\n"
             "\n"
             "\n"
@@ -772,6 +794,25 @@ static void cfg_load_crt_auto_settings(CRT_AUTO_SETTINGS* settings)
             TRACE("%s=%s is invalid, using %s\n", name, value, default_value);
         }
     }
+}
+
+/* One of a list of words; an invalid value gets the default */
+static int cfg_get_choice(LPCSTR key, const char* const* names, int count, int default_index)
+{
+    char value[64];
+    cfg_get_string(key, names[default_index], value, sizeof(value));
+
+    for (int i = 0; i < count; i++)
+    {
+        if (_stricmp(value, names[i]) == 0)
+        {
+            TRACE("%s=%s\n", key, names[i]);
+            return i;
+        }
+    }
+
+    TRACE("%s=%s is invalid, using %s\n", key, value, names[default_index]);
+    return default_index;
 }
 
 static BOOL cfg_get_bool(LPCSTR key, BOOL default_value)

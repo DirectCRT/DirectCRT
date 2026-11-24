@@ -7,7 +7,6 @@
 #include "dd.h"
 #include "ddsurface.h"
 #include "render_d3d11.h"
-#include "render_gdi.h"
 #include "crt_auto.h"
 #include "utils.h"
 #include "blt.h"
@@ -16,6 +15,7 @@
 #include "config.h"
 #include "screenshot.h"
 #include "dllmain.h"
+#include "overlay.h"
 #include "d3d11_shaders/d3d11_shaders.h"
 
 /* The passes, with crt-auto (as the OpenGL renderer does them):
@@ -95,6 +95,7 @@ typedef struct D3D11RENDERER
     ID3D11DeviceContext* ctx;
     IDXGISwapChain1* swap_chain;
     BOOL tearing;
+    BOOL warp;
     UINT swap_chain_flags;
 
     /* Back buffer, the swap chain's size */
@@ -124,20 +125,20 @@ typedef struct D3D11RENDERER
     D3D11_PASS crt_pass;
     CRT_AUTO_PARAMS crt_params;
 
-#ifdef _DEBUG
+    /* GPU time of the crt-auto passes, for the status OSD (and the log) */
     ID3D11Query* gpu_disjoint;
     ID3D11Query* gpu_start;
     ID3D11Query* gpu_end;
     BOOL gpu_time_pending;
     double gpu_time_ms;
     int gpu_time_frames;
-#endif
 } D3D11RENDERER;
 
 static D3D11RENDERER g_d3d11;
 
 static BOOL d3d11_create_device();
 static BOOL d3d11_create_resources();
+static void d3d11_free();
 static void d3d11_release_resources();
 static BOOL d3d11_update_back_buffer();
 static void d3d11_render();
@@ -148,6 +149,69 @@ BOOL d3d11_is_available()
         g_d3d11.hmodule = real_LoadLibraryA("d3d11.dll");
 
     return g_d3d11.hmodule && real_GetProcAddress(g_d3d11.hmodule, "D3D11CreateDevice");
+}
+
+/* On the graphics card, else on WARP (Windows' software rasterizer: slow,
+ * but the same picture). device NULL: only whether one could be created */
+static HRESULT d3d11_create_any_device(
+    ID3D11Device** device, ID3D11DeviceContext** ctx, D3D_FEATURE_LEVEL* level, BOOL* warp)
+{
+    D3D11CREATEDEVICEPROC create_device =
+        (D3D11CREATEDEVICEPROC)real_GetProcAddress(g_d3d11.hmodule, "D3D11CreateDevice");
+
+    if (!create_device)
+        return E_FAIL;
+
+    static const D3D_FEATURE_LEVEL levels[] = {
+        D3D_FEATURE_LEVEL_11_1,
+        D3D_FEATURE_LEVEL_11_0,
+        D3D_FEATURE_LEVEL_10_1,
+        D3D_FEATURE_LEVEL_10_0,
+    };
+
+    static const D3D_DRIVER_TYPE types[] = { D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TYPE_WARP };
+
+    const UINT count = sizeof(levels) / sizeof(levels[0]);
+    HRESULT hr = E_FAIL;
+
+    for (int i = 0; i < 2 && FAILED(hr); i++)
+    {
+        *warp = types[i] == D3D_DRIVER_TYPE_WARP;
+
+#ifdef _DEBUG
+        /* Needs the Graphics Tools optional feature */
+        if (device)
+        {
+            hr = create_device(
+                NULL, types[i], NULL, D3D11_CREATE_DEVICE_DEBUG, levels, count, D3D11_SDK_VERSION, device, level, ctx);
+        }
+#endif
+
+        if (FAILED(hr))
+            hr = create_device(NULL, types[i], NULL, 0, levels, count, D3D11_SDK_VERSION, device, level, ctx);
+
+        /* No 11.1 runtime */
+        if (FAILED(hr))
+            hr = create_device(NULL, types[i], NULL, 0, levels + 1, count - 1, D3D11_SDK_VERSION, device, level, ctx);
+    }
+
+    return hr;
+}
+
+BOOL d3d11_probe()
+{
+    D3D_FEATURE_LEVEL level = 0;
+    BOOL warp = FALSE;
+    HRESULT hr = d3d11_is_available() ? d3d11_create_any_device(NULL, NULL, &level, &warp) : E_FAIL;
+
+    TRACE("     Direct3D11: %s\n", FAILED(hr) ? "not available" : warp ? "WARP only" : "available");
+
+    return SUCCEEDED(hr);
+}
+
+BOOL d3d11_is_warp()
+{
+    return g_d3d11.warp;
 }
 
 BOOL d3d11_create()
@@ -165,40 +229,8 @@ static BOOL d3d11_create_device()
     if (!d3d11_is_available())
         return FALSE;
 
-    D3D11CREATEDEVICEPROC create_device =
-        (D3D11CREATEDEVICEPROC)real_GetProcAddress(g_d3d11.hmodule, "D3D11CreateDevice");
-
-    static const D3D_FEATURE_LEVEL levels[] = {
-        D3D_FEATURE_LEVEL_11_1,
-        D3D_FEATURE_LEVEL_11_0,
-        D3D_FEATURE_LEVEL_10_1,
-        D3D_FEATURE_LEVEL_10_0,
-    };
-
     D3D_FEATURE_LEVEL level = 0;
-    HRESULT hr = E_FAIL;
-
-#ifdef _DEBUG
-    /* Needs the Graphics Tools optional feature */
-    hr = create_device(
-        NULL, D3D_DRIVER_TYPE_HARDWARE, NULL, D3D11_CREATE_DEVICE_DEBUG, levels,
-        sizeof(levels) / sizeof(levels[0]), D3D11_SDK_VERSION, &g_d3d11.device, &level, &g_d3d11.ctx);
-#endif
-
-    if (FAILED(hr))
-    {
-        hr = create_device(
-            NULL, D3D_DRIVER_TYPE_HARDWARE, NULL, 0, levels,
-            sizeof(levels) / sizeof(levels[0]), D3D11_SDK_VERSION, &g_d3d11.device, &level, &g_d3d11.ctx);
-    }
-
-    if (FAILED(hr))
-    {
-        /* No 11.1 runtime */
-        hr = create_device(
-            NULL, D3D_DRIVER_TYPE_HARDWARE, NULL, 0, levels + 1,
-            sizeof(levels) / sizeof(levels[0]) - 1, D3D11_SDK_VERSION, &g_d3d11.device, &level, &g_d3d11.ctx);
-    }
+    HRESULT hr = d3d11_create_any_device(&g_d3d11.device, &g_d3d11.ctx, &level, &g_d3d11.warp);
 
     if (FAILED(hr))
     {
@@ -225,7 +257,7 @@ static BOOL d3d11_create_device()
             TRACE("| Adapter:             %ls\n", ad.Description);
             TRACE("| VendorId:            0x%x\n", ad.VendorId);
             TRACE("| DeviceId:            0x%x\n", ad.DeviceId);
-            TRACE("| FeatureLevel:        %x.%x\n", (level >> 12) & 0xF, (level >> 8) & 0xF);
+            TRACE("| FeatureLevel:        %x.%x%s\n", (level >> 12) & 0xF, (level >> 8) & 0xF, g_d3d11.warp ? " (WARP)" : "");
             TRACE("+------------------------------------------------\n");
         }
 
@@ -300,7 +332,7 @@ static BOOL d3d11_create_device()
     SAFE_RELEASE(dxgi_device);
 
     if (!ok)
-        d3d11_release();
+        d3d11_free();
 
     return ok;
 }
@@ -310,6 +342,14 @@ BOOL d3d11_release()
     if (g_ddraw.render.thread)
         return FALSE;
 
+    d3d11_free();
+
+    return TRUE;
+}
+
+/* Also from the render thread, when it can't start */
+static void d3d11_free()
+{
     d3d11_release_resources();
 
     SAFE_RELEASE(g_d3d11.back_rtv);
@@ -325,8 +365,7 @@ BOOL d3d11_release()
     SAFE_RELEASE(g_d3d11.ctx);
     SAFE_RELEASE(g_d3d11.device);
     g_d3d11.hwnd = NULL;
-
-    return TRUE;
+    g_d3d11.warp = FALSE;
 }
 
 /* --------------------------------------------------------------- resources */
@@ -742,7 +781,6 @@ static BOOL d3d11_create_resources()
             return FALSE;
     }
 
-#ifdef _DEBUG
     D3D11_QUERY_DESC qd = { D3D11_QUERY_TIMESTAMP_DISJOINT, 0 };
     ID3D11Device_CreateQuery(g_d3d11.device, &qd, &g_d3d11.gpu_disjoint);
     qd.Query = D3D11_QUERY_TIMESTAMP;
@@ -751,7 +789,6 @@ static BOOL d3d11_create_resources()
     g_d3d11.gpu_time_pending = FALSE;
     g_d3d11.gpu_time_ms = 0;
     g_d3d11.gpu_time_frames = 0;
-#endif
 
     InterlockedExchange(&g_ddraw.render.surface_updated, TRUE);
     InterlockedExchange(&g_ddraw.render.palette_updated, TRUE);
@@ -764,11 +801,11 @@ static void d3d11_release_resources()
     if (g_d3d11.ctx)
         ID3D11DeviceContext_ClearState(g_d3d11.ctx);
 
-#ifdef _DEBUG
+    overlay_d3d11_release();
+
     SAFE_RELEASE(g_d3d11.gpu_disjoint);
     SAFE_RELEASE(g_d3d11.gpu_start);
     SAFE_RELEASE(g_d3d11.gpu_end);
-#endif
 
     d3d11_release_pass(&g_d3d11.adj_pass);
     d3d11_release_pass(&g_d3d11.crt_pass);
@@ -873,8 +910,8 @@ static void d3d11_draw_pass(
     ID3D11DeviceContext_Draw(g_d3d11.ctx, 4, 0);
 }
 
-#ifdef _DEBUG
-/* GPU time of the crt-auto passes, logged as an average every 300 frames */
+/* GPU time of the crt-auto passes: for the status OSD, and in debug builds
+ * logged as an average every 300 frames */
 static BOOL d3d11_gpu_time_begin()
 {
     if (!g_d3d11.gpu_disjoint || !g_d3d11.gpu_start || !g_d3d11.gpu_end)
@@ -901,7 +938,12 @@ static BOOL d3d11_gpu_time_begin()
         if (dj.Disjoint || !dj.Frequency)
             return FALSE;
 
-        g_d3d11.gpu_time_ms += (double)(t1 - t0) * 1000.0 / (double)dj.Frequency;
+        double ms = (double)(t1 - t0) * 1000.0 / (double)dj.Frequency;
+
+        overlay_gpu_time(ms);
+
+#ifdef _DEBUG
+        g_d3d11.gpu_time_ms += ms;
 
         if (++g_d3d11.gpu_time_frames == 300)
         {
@@ -917,6 +959,7 @@ static BOOL d3d11_gpu_time_begin()
             g_d3d11.gpu_time_ms = 0;
             g_d3d11.gpu_time_frames = 0;
         }
+#endif
     }
 
     ID3D11DeviceContext_Begin(g_d3d11.ctx, (ID3D11Asynchronous*)g_d3d11.gpu_disjoint);
@@ -930,7 +973,6 @@ static void d3d11_gpu_time_end()
     ID3D11DeviceContext_End(g_d3d11.ctx, (ID3D11Asynchronous*)g_d3d11.gpu_disjoint);
     g_d3d11.gpu_time_pending = TRUE;
 }
-#endif
 
 static void d3d11_draw_frame()
 {
@@ -944,6 +986,8 @@ static void d3d11_draw_frame()
 
 #ifdef _DEBUG
     BOOL gpu_timing = g_d3d11.crt_auto && d3d11_gpu_time_begin();
+#else
+    BOOL gpu_timing = g_d3d11.crt_auto && overlay_status_visible() && d3d11_gpu_time_begin();
 #endif
 
     /* game surface -> conv */
@@ -1004,10 +1048,8 @@ static void d3d11_draw_frame()
             g_ddraw.render.crt.shader == CRT_SHADER_NEAREST ? g_d3d11.point : g_d3d11.linear);
     }
 
-#ifdef _DEBUG
     if (gpu_timing)
         d3d11_gpu_time_end();
-#endif
 
     if (g_ddraw.bnet_active)
         ID3D11DeviceContext_ClearRenderTargetView(g_d3d11.ctx, g_d3d11.back_rtv, black);
@@ -1016,11 +1058,13 @@ static void d3d11_draw_frame()
     ID3D11DeviceContext_PSSetShaderResources(g_d3d11.ctx, 0, 2, none);
 }
 
-static void d3d11_upload()
+/* TRUE = the game's picture had changed */
+static BOOL d3d11_upload()
 {
     D3D11_MAPPED_SUBRESOURCE map;
+    BOOL updated = InterlockedExchange(&g_ddraw.render.surface_updated, FALSE);
 
-    if (InterlockedExchange(&g_ddraw.render.surface_updated, FALSE) || g_config.minfps == -2)
+    if (updated || g_config.minfps == -2)
     {
         if (SUCCEEDED(ID3D11DeviceContext_Map(
             g_d3d11.ctx, (ID3D11Resource*)g_d3d11.surface_tex, 0, D3D11_MAP_WRITE_DISCARD, 0, &map)))
@@ -1067,8 +1111,11 @@ static void d3d11_upload()
         {
             memcpy(map.pData, g_ddraw.primary->palette->data_bgr, 256 * sizeof(int));
             ID3D11DeviceContext_Unmap(g_d3d11.ctx, (ID3D11Resource*)g_d3d11.palette_tex, 0);
+            updated = TRUE;
         }
     }
+
+    return updated;
 }
 
 /* The finished frame, for the screenshot key: read back before Present */
@@ -1137,7 +1184,8 @@ static void d3d11_render()
     DWORD timeout = g_config.minfps > 0 ? g_ddraw.minfps_tick_len : INFINITE;
 
     while (g_ddraw.render.run &&
-        (g_config.minfps < 0 || WaitForSingleObject(g_ddraw.render.sem, timeout) != WAIT_FAILED) &&
+        (g_config.minfps < 0 ||
+            WaitForSingleObject(g_ddraw.render.sem, overlay_wait_timeout(timeout)) != WAIT_FAILED) &&
         g_ddraw.render.run)
     {
 #if _DEBUG
@@ -1148,6 +1196,7 @@ static void d3d11_render()
 
         BOOL can_draw = d3d11_update_back_buffer();
         BOOL screenshot = can_draw && ss_begin();
+        BOOL new_frame = FALSE;
 
         EnterCriticalSection(&g_ddraw.cs);
 
@@ -1160,7 +1209,7 @@ static void d3d11_render()
             if (g_config.lock_surfaces)
                 EnterCriticalSection(&g_ddraw.primary->cs);
 
-            d3d11_upload();
+            new_frame = d3d11_upload();
 
             if (screenshot)
                 ss_save_raw(g_ddraw.primary);
@@ -1184,10 +1233,16 @@ static void d3d11_render()
             if (screenshot)
                 d3d11_screenshot();
 
+            /* After the screenshot: the shaded one is without the OSD */
+            overlay_d3d11_draw(
+                g_d3d11.device, g_d3d11.ctx, g_d3d11.back_rtv, g_d3d11.back_width, g_d3d11.back_height);
+
             UINT sync = g_config.vsync ? 1 : 0;
             UINT flags = !sync && g_d3d11.tearing ? DXGI_PRESENT_ALLOW_TEARING : 0;
 
             HRESULT hr = IDXGISwapChain1_Present(g_d3d11.swap_chain, sync, flags);
+
+            overlay_frame_presented(new_frame);
 
             if (hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET)
             {
@@ -1234,10 +1289,9 @@ DWORD WINAPI d3d11_render_main(void)
 
     if (!ok)
     {
-        TRACE("Direct3D11: setup failed, using GDI\n");
-        g_ddraw.show_driver_warning = TRUE;
-        g_ddraw.renderer = gdi_render_main;
-        gdi_render_main();
+        TRACE("Direct3D11: setup failed\n");
+        d3d11_free();
+        dd_renderer_failed();
     }
 
     return 0;

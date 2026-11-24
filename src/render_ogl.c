@@ -6,13 +6,13 @@
 #include "dd.h"
 #include "ddsurface.h"
 #include "openglshader.h"
-#include "render_gdi.h"
 #include "render_ogl.h"
 #include "utils.h"
 #include "debug.h"
 #include "dllmain.h"
 #include "hook.h"
 #include "screenshot.h"
+#include "overlay.h"
 
 
 static HGLRC ogl_create_core_context(HDC hdc);
@@ -28,8 +28,71 @@ static BOOL ogl_release_resources();
 static BOOL ogl_texture_upload_test();
 static BOOL ogl_shader_test();
 static void ogl_check_error(const char* stmt);
+static void ogl_free();
 
 static OGLRENDERER g_ogl;
+
+/* A window's pixel format can be set only once */
+static void ogl_set_pixel_format(HDC hdc, BYTE bits)
+{
+    if (!hdc || GetPixelFormat(hdc))
+        return;
+
+    PIXELFORMATDESCRIPTOR pfd;
+    memset(&pfd, 0, sizeof(PIXELFORMATDESCRIPTOR));
+    pfd.nSize = sizeof(PIXELFORMATDESCRIPTOR);
+
+    pfd.nVersion = 1;
+    pfd.dwFlags = PFD_DRAW_TO_WINDOW | PFD_DOUBLEBUFFER | PFD_SUPPORT_OPENGL;
+    pfd.iPixelType = PFD_TYPE_RGBA;
+    pfd.cColorBits = bits;
+    pfd.iLayerType = PFD_MAIN_PLANE;
+
+    SetPixelFormat(hdc, ChoosePixelFormat(hdc, &pfd), &pfd);
+}
+
+/* Whether OpenGL 3 works here: a context on a hidden window of its own */
+BOOL ogl_probe()
+{
+    if (!oglu_load_dll())
+    {
+        TRACE("     OpenGL: not available\n");
+        return FALSE;
+    }
+
+    BOOL ok = FALSE;
+    HWND hwnd = real_CreateWindowExA(0, "STATIC", "", WS_POPUP, 0, 0, 1, 1, NULL, NULL, GetModuleHandleA(NULL), NULL);
+    HDC hdc = hwnd ? GetDC(hwnd) : NULL;
+
+    if (hdc)
+    {
+        ogl_set_pixel_format(hdc, 32);
+
+        HGLRC context = xwglCreateContext(hdc);
+
+        if (context)
+        {
+            if (xwglMakeCurrent(hdc, context))
+            {
+                oglu_init();
+                ok = g_oglu_got_version3;
+
+                xwglMakeCurrent(NULL, NULL);
+            }
+
+            xwglDeleteContext(context);
+        }
+
+        ReleaseDC(hwnd, hdc);
+    }
+
+    if (hwnd)
+        real_DestroyWindow(hwnd);
+
+    TRACE("     OpenGL: %s (%s)\n", ok ? "available" : "not usable", g_oglu_version);
+
+    return ok;
+}
 
 BOOL ogl_create()
 {
@@ -39,6 +102,11 @@ BOOL ogl_create()
     }
 
     ogl_release();
+
+    if (!oglu_load_dll())
+        return FALSE;
+
+    ogl_set_pixel_format(g_ddraw.render.hdc, (BYTE)g_ddraw.mode.dmBitsPerPel);
 
     g_ogl.context = xwglCreateContext(g_ddraw.render.hdc);
     if (g_ogl.context)
@@ -137,7 +205,7 @@ DWORD WINAPI ogl_render_main(void)
         GL_CHECK(g_ogl.got_error = g_ogl.got_error || !ogl_shader_test());
         g_ogl.got_error = g_ogl.got_error || (err = glGetError()) != GL_NO_ERROR;
 
-        /* The shader pipeline or nothing: GDI then */
+        /* The shader pipeline or nothing: Direct3D 11 then */
         g_ogl.use_opengl = g_ogl.crt_auto && !g_ogl.got_error;
 
         GL_CHECK(ogl_render());
@@ -162,9 +230,9 @@ DWORD WINAPI ogl_render_main(void)
 
     if (!g_ogl.use_opengl)
     {
-        g_ddraw.show_driver_warning = TRUE;
-        g_ddraw.renderer = gdi_render_main;
-        gdi_render_main();
+        TRACE("OpenGL: setup failed\n");
+        ogl_free();
+        dd_renderer_failed();
     }
 
     return 0;
@@ -815,8 +883,8 @@ static void ogl_init_crt_auto_uniforms()
     TRACE("     crt-auto: using %s\n", crt_auto_shader_name(crt->shader));
 }
 
-#ifdef _DEBUG
-/* GPU time of the crt-auto passes, logged as an average every 300 frames */
+/* GPU time of the crt-auto passes: for the status OSD, and in debug builds
+ * logged as an average every 300 frames */
 static BOOL ogl_gpu_time_begin()
 {
     if (!glGenQueries || !glBeginQuery || !glEndQuery || !glGetQueryObjectiv || !glGetQueryObjectui64v)
@@ -837,6 +905,10 @@ static BOOL ogl_gpu_time_begin()
         glGetQueryObjectui64v(g_ogl.gpu_time_query, GL_QUERY_RESULT, &ns);
 
         g_ogl.gpu_time_pending = FALSE;
+
+        overlay_gpu_time(ns / 1000000.0);
+
+#ifdef _DEBUG
         g_ogl.gpu_time_ms += ns / 1000000.0;
 
         if (++g_ogl.gpu_time_frames == 300)
@@ -853,6 +925,7 @@ static BOOL ogl_gpu_time_begin()
             g_ogl.gpu_time_ms = 0;
             g_ogl.gpu_time_frames = 0;
         }
+#endif
     }
 
     glBeginQuery(GL_TIME_ELAPSED, g_ogl.gpu_time_query);
@@ -864,7 +937,6 @@ static void ogl_gpu_time_end()
     glEndQuery(GL_TIME_ELAPSED);
     g_ogl.gpu_time_pending = TRUE;
 }
-#endif
 
 /* The finished frame, for the screenshot key: read back before SwapBuffers */
 static void ogl_screenshot()
@@ -902,8 +974,12 @@ static void ogl_render()
 
     DWORD timeout = g_config.minfps > 0 ? g_ddraw.minfps_tick_len : INFINITE;
 
+    /* As oglu_build_program */
+    const char* glsl_version = wglCreateContextAttribsARB ? "#version 150" : "#version 130";
+
     while (g_ogl.use_opengl && g_ddraw.render.run &&
-        (g_config.minfps < 0 || WaitForSingleObject(g_ddraw.render.sem, timeout) != WAIT_FAILED) &&
+        (g_config.minfps < 0 ||
+            WaitForSingleObject(g_ddraw.render.sem, overlay_wait_timeout(timeout)) != WAIT_FAILED) &&
         g_ddraw.render.run)
     {
 #if _DEBUG
@@ -918,6 +994,7 @@ static void ogl_render()
         fpsl_frame_start();
 
         BOOL screenshot = ss_begin();
+        BOOL new_frame = FALSE;
 
         EnterCriticalSection(&g_ddraw.cs);
 
@@ -937,6 +1014,7 @@ static void ogl_render()
                     pal_index = 0;
 
                 glBindTexture(GL_TEXTURE_2D, g_ogl.palette_tex_ids[pal_index]);
+                new_frame = TRUE;
 
                 glTexSubImage2D(
                     GL_TEXTURE_2D,
@@ -950,7 +1028,10 @@ static void ogl_render()
                     g_ddraw.primary->palette->data_bgr);
             }
 
-            if (InterlockedExchange(&g_ddraw.render.surface_updated, FALSE) || g_config.minfps == -2)
+            BOOL surface_updated = InterlockedExchange(&g_ddraw.render.surface_updated, FALSE);
+            new_frame = new_frame || surface_updated;
+
+            if (surface_updated || g_config.minfps == -2)
             {
                 if (++tex_index >= TEXTURE_COUNT)
                     tex_index = 0;
@@ -1036,6 +1117,8 @@ static void ogl_render()
         {
 #ifdef _DEBUG
             BOOL gpu_timing = ogl_gpu_time_begin();
+#else
+            BOOL gpu_timing = overlay_status_visible() && ogl_gpu_time_begin();
 #endif
 
             /* draw surface into framebuffer */
@@ -1095,10 +1178,8 @@ static void ogl_render()
             glActiveTexture(GL_TEXTURE1);
             glBindTexture(GL_TEXTURE_2D, 0);
 
-#ifdef _DEBUG
             if (gpu_timing)
                 ogl_gpu_time_end();
-#endif
         }
 
         if (g_ddraw.bnet_active)
@@ -1107,7 +1188,20 @@ static void ogl_render()
         if (screenshot)
             ogl_screenshot();
 
+        /* After the screenshot: the shaded one is without the OSD */
+        {
+            RECT rc;
+
+            if (overlay_status_visible() && real_GetClientRect(g_ddraw.hwnd, &rc) &&
+                rc.right > 0 && rc.bottom - g_ddraw.render.opengl_y_align > 0)
+            {
+                overlay_ogl_draw(rc.right, rc.bottom, rc.bottom - g_ddraw.render.opengl_y_align, glsl_version);
+            }
+        }
+
         SwapBuffers(g_ogl.hdc);
+
+        overlay_frame_presented(new_frame);
 
         /* Force redraw for GDI games (ClueFinders) */
         if (!g_ddraw.primary)
@@ -1128,6 +1222,8 @@ static void ogl_render()
 
 static BOOL ogl_release_resources()
 {
+    overlay_ogl_release();
+
     glDeleteTextures(TEXTURE_COUNT, g_ogl.surface_tex_ids);
 
     if (g_ogl.gpu_time_query && glDeleteQueries)
@@ -1196,14 +1292,20 @@ BOOL ogl_release()
     if (g_ddraw.render.thread)
         return FALSE;
 
+    ogl_free();
+
+    return TRUE;
+}
+
+/* Also from the render thread, when it can't start */
+static void ogl_free()
+{
     if (g_ogl.context)
     {
         xwglMakeCurrent(NULL, NULL);
         xwglDeleteContext(g_ogl.context);
         g_ogl.context = NULL;
     }
-
-    return TRUE;
 }
 
 static BOOL ogl_texture_upload_test()

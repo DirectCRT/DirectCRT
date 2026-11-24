@@ -1,2 +1,3 @@
 third_party/dosbox-staging/resources/** -text
 *.sh text eol=lf
+third_party/imgui/** -text

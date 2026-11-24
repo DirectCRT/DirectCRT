@@ -9,13 +9,16 @@
 #include "keyboard.h"
 #include "wndproc.h"
 #include "render_d3d11.h"
-#include "render_gdi.h"
+#include "render_blank.h"
 #include "render_ogl.h"
 #include "fps_limiter.h"
 #include "debug.h"
 #include "utils.h"
 #include "blt.h"
 #include "versionhelpers.h"
+#include "dllmain.h"
+#include "directinput.h"
+#include "opengl_utils.h"
 
 
 CNCDDRAW g_ddraw;
@@ -1216,24 +1219,7 @@ HRESULT dd_SetDisplayMode(DWORD dwWidth, DWORD dwHeight, DWORD dwBPP, DWORD dwFl
             SWP_SHOWWINDOW | SWP_FRAMECHANGED);
 
 
-        if (g_ddraw.renderer == ogl_render_main)
-        {
-            if (!ogl_create())
-            {
-                ogl_release();
-                g_ddraw.show_driver_warning = TRUE;
-                g_ddraw.renderer = gdi_render_main;
-            }
-        }
-        else if (g_ddraw.renderer == d3d11_render_main)
-        {
-            if (!d3d11_create())
-            {
-                d3d11_release();
-                g_ddraw.show_driver_warning = TRUE;
-                g_ddraw.renderer = gdi_render_main;
-            }
-        }
+        dd_renderer_create();
 
         if (lock_mouse || (g_config.fullscreen && real_GetForegroundWindow() == g_ddraw.hwnd))
             mouse_lock();
@@ -1284,24 +1270,7 @@ HRESULT dd_SetDisplayMode(DWORD dwWidth, DWORD dwHeight, DWORD dwBPP, DWORD dwFl
             real_SetWindowLongA(g_ddraw.hwnd, GWL_EXSTYLE, exstyle & ~(WS_EX_CLIENTEDGE));
         }
 
-        if (g_ddraw.renderer == ogl_render_main)
-        {
-            if (!ogl_create())
-            {
-                ogl_release();
-                g_ddraw.show_driver_warning = TRUE;
-                g_ddraw.renderer = gdi_render_main;
-            }
-        }
-        else if (g_ddraw.renderer == d3d11_render_main)
-        {
-            if (!d3d11_create())
-            {
-                d3d11_release();
-                g_ddraw.show_driver_warning = TRUE;
-                g_ddraw.renderer = gdi_render_main;
-            }
-        }
+        dd_renderer_create();
 
         {
             if (!zooming && ChangeDisplaySettings(&g_ddraw.render.mode, CDS_FULLSCREEN) != DISP_CHANGE_SUCCESSFUL)
@@ -1484,21 +1453,6 @@ HRESULT dd_SetCooperativeLevel(HWND hwnd, DWORD dwFlags)
         if (!g_ddraw.render.hdc)
         {
             g_ddraw.render.hdc = GetDC(g_ddraw.hwnd);
-
-            if (g_ddraw.renderer == ogl_render_main)
-            {
-                PIXELFORMATDESCRIPTOR pfd;
-                memset(&pfd, 0, sizeof(PIXELFORMATDESCRIPTOR));
-                pfd.nSize = sizeof(PIXELFORMATDESCRIPTOR);
-
-                pfd.nVersion = 1;
-                pfd.dwFlags = PFD_DRAW_TO_WINDOW | PFD_DOUBLEBUFFER | PFD_SUPPORT_OPENGL;
-                pfd.iPixelType = PFD_TYPE_RGBA;
-                pfd.cColorBits = g_ddraw.mode.dmBitsPerPel;
-                pfd.iLayerType = PFD_MAIN_PLANE;
-
-                SetPixelFormat(g_ddraw.render.hdc, ChoosePixelFormat(g_ddraw.render.hdc, &pfd), &pfd);
-            }
         }
 
         if (!g_config.devmode)
@@ -1810,8 +1764,194 @@ HRESULT dd_GetDeviceIdentifier(LPDDDEVICEIDENTIFIER pDDDI, DWORD dwFlags, REFIID
     return DD_OK;
 }
 
+/* ------------------------------------------------------------- renderers */
+
+/* Direct3D 11 then OpenGL, or OpenGL first with renderer=opengl. One that
+ * fails isn't tried again in this run; when both have, the black window */
+static BOOL g_dd_d3d11_failed;
+static BOOL g_dd_ogl_failed;
+
+typedef DWORD(WINAPI* DD_RENDERER)(void);
+
+static DD_RENDERER dd_next_renderer(void)
+{
+    if (_strcmpi(g_config.renderer, "opengl") == 0 && !g_dd_ogl_failed)
+        return ogl_render_main;
+
+    if (!g_dd_d3d11_failed)
+        return d3d11_render_main;
+
+    if (!g_dd_ogl_failed)
+        return ogl_render_main;
+
+    return blank_render_main;
+}
+
+static const char* dd_renderer_name(DD_RENDERER renderer)
+{
+    return
+        renderer == d3d11_render_main ? "Direct3D 11" :
+        renderer == ogl_render_main ? "OpenGL" : "none";
+}
+
+static void dd_renderer_mark_failed(void)
+{
+    if (g_ddraw.renderer == d3d11_render_main)
+        g_dd_d3d11_failed = TRUE;
+    else if (g_ddraw.renderer == ogl_render_main)
+        g_dd_ogl_failed = TRUE;
+
+    DD_RENDERER next = dd_next_renderer();
+
+    TRACE("     %s failed, %s next\n", dd_renderer_name(g_ddraw.renderer), dd_renderer_name(next));
+
+    g_ddraw.renderer = next;
+}
+
+/* Gets the renderer ready for the window; one that can't be is swapped for
+ * the next */
+void dd_renderer_create(void)
+{
+    for (;;)
+    {
+        if (g_ddraw.renderer == d3d11_render_main)
+        {
+            if (d3d11_create())
+                return;
+
+            d3d11_release();
+        }
+        else if (g_ddraw.renderer == ogl_render_main)
+        {
+            if (ogl_create())
+                return;
+
+            ogl_release();
+        }
+        else
+        {
+            return;
+        }
+
+        dd_renderer_mark_failed();
+    }
+}
+
+DWORD dd_renderer_failed(void)
+{
+    dd_renderer_mark_failed();
+    dd_renderer_create();
+
+    return g_ddraw.renderer();
+}
+
+/* -------------------------------------------------------------- stepping aside */
+
+/* 0: not decided yet, 1: DirectCRT, 2: Windows' ddraw.dll */
+static LONG g_dd_aside;
+static HMODULE g_dd_system_dll;
+
+BOOL dd_stepped_aside(void)
+{
+    return g_dd_aside == 2;
+}
+
+FARPROC dd_system_proc(const char* name)
+{
+    if (!g_dd_system_dll)
+    {
+        char path[MAX_PATH];
+        UINT len = GetSystemDirectoryA(path, sizeof(path));
+
+        if (len && len < sizeof(path) - sizeof("\\ddraw.dll"))
+        {
+            strcat(path, "\\ddraw.dll");
+            g_dd_system_dll = real_LoadLibraryA(path);
+
+            if (g_dd_system_dll == g_ddraw_module)
+                g_dd_system_dll = NULL;
+        }
+    }
+
+    return g_dd_system_dll ? real_GetProcAddress(g_dd_system_dll, name) : NULL;
+}
+
+BOOL dd_step_aside(void)
+{
+    if (g_dd_aside)
+        return g_dd_aside == 2;
+
+    DD_RENDERER renderer;
+
+    while ((renderer = dd_next_renderer()) != blank_render_main)
+    {
+        if (renderer == d3d11_render_main ? d3d11_probe() : ogl_probe())
+        {
+            g_dd_aside = 1;
+            return FALSE;
+        }
+
+        g_ddraw.renderer = renderer;
+        dd_renderer_mark_failed();
+    }
+
+    g_ddraw.renderer = NULL;
+    g_dd_aside = 2;
+
+    TRACE("     Neither Direct3D 11 nor OpenGL works: Windows' ddraw.dll instead\n");
+
+    keyboard_hook_exit();
+    dinput_hook_exit();
+    hook_exit();
+
+    MessageBoxA(
+        NULL,
+        "DirectCRT could not start Direct3D 11 or OpenGL on this computer, so this game "
+        "runs with Windows' own DirectDraw, without DirectCRT.\n\n"
+        "Updating the graphics driver may help.",
+        "DirectCRT",
+        MB_OK | MB_ICONWARNING | MB_SETFOREGROUND | MB_TOPMOST);
+
+    return TRUE;
+}
+
+static HRESULT dd_system_create(GUID* lpGuid, LPVOID* lplpDD, REFIID iid, IUnknown* pUnkOuter)
+{
+    typedef HRESULT(WINAPI* DIRECTDRAWCREATEEXPROC)(GUID*, LPVOID*, REFIID, IUnknown*);
+
+    if (lplpDD)
+        *lplpDD = NULL;
+
+    if (IsEqualGUID(&IID_IDirectDraw7, iid))
+    {
+        DIRECTDRAWCREATEEXPROC create_ex = (DIRECTDRAWCREATEEXPROC)dd_system_proc("DirectDrawCreateEx");
+
+        return create_ex ? create_ex(lpGuid, lplpDD, iid, pUnkOuter) : DDERR_NODIRECTDRAWSUPPORT;
+    }
+
+    DIRECTDRAWCREATEPROC create = (DIRECTDRAWCREATEPROC)dd_system_proc("DirectDrawCreate");
+    LPDIRECTDRAW dd = NULL;
+
+    HRESULT hr = create ? create(lpGuid, &dd, pUnkOuter) : DDERR_NODIRECTDRAWSUPPORT;
+
+    if (SUCCEEDED(hr) && !IsEqualGUID(&IID_IDirectDraw, iid))
+    {
+        hr = IDirectDraw_QueryInterface(dd, iid, lplpDD);
+        IDirectDraw_Release(dd);
+    }
+    else if (SUCCEEDED(hr))
+    {
+        *lplpDD = dd;
+    }
+
+    return hr;
+}
+
 HRESULT dd_CreateEx(GUID* lpGuid, LPVOID* lplpDD, REFIID iid, IUnknown* pUnkOuter)
 {
+    if (dd_step_aside())
+        return dd_system_create(lpGuid, lplpDD, iid, pUnkOuter);
+
     if (InterlockedExchangeAdd((LONG*)&g_ddraw.ref, 0) == 0)
     {
         InterlockedIncrement(&g_ddraw.ref);
@@ -1898,52 +2038,8 @@ HRESULT dd_CreateEx(GUID* lpGuid, LPVOID* lplpDD, REFIID iid, IUnknown* pUnkOute
         }
 
         
-        /* renderer: auto = Direct3D 11, then OpenGL (a 3.3 core context), then
-         * GDI. config.c has already mapped the old renderers to auto */
-        if (tolower(g_config.renderer[0]) == 's' || tolower(g_config.renderer[0]) == 'g') /* gdi */
-        {
-            g_ddraw.renderer = gdi_render_main;
-        }
-        else if (_strcmpi(g_config.renderer, "direct3d11") == 0)
-        {
-            if (d3d11_is_available())
-            {
-                g_ddraw.renderer = d3d11_render_main;
-            }
-            else
-            {
-                g_ddraw.show_driver_warning = TRUE;
-                g_ddraw.renderer = gdi_render_main;
-            }
-        }
-        else if (_strcmpi(g_config.renderer, "opengl") == 0)
-        {
-            if (oglu_load_dll())
-            {
-                g_ddraw.renderer = ogl_render_main;
-            }
-            else
-            {
-                g_ddraw.show_driver_warning = TRUE;
-                g_ddraw.renderer = gdi_render_main;
-            }
-        }
-        else /* auto */
-        {
-            if (d3d11_is_available())
-            {
-                g_ddraw.renderer = d3d11_render_main;
-            }
-            else if (oglu_load_dll())
-            {
-                g_ddraw.renderer = ogl_render_main;
-            }
-            else
-            {
-                g_ddraw.show_driver_warning = TRUE;
-                g_ddraw.renderer = gdi_render_main;
-            }
-        }
+        /* The one dd_step_aside found working */
+        g_ddraw.renderer = dd_next_renderer();
 
         LONG ref = InterlockedDecrement(&g_ddraw.ref);
 

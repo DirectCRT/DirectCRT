@@ -1,7 +1,6 @@
 /* Unit tests for src/display_settings.c
  *
  * Build and run: tests\run_tests.cmd (from a Visual Studio developer prompt)
- *            or: make test
  *
  * The window_size and window_position values follow DOSBox Staging's
  * tests/window_geometry_tests.cpp where it has the same case.
@@ -323,7 +322,8 @@ static void test_legacy(void)
     CHECK_STR(ds_legacy_renderer("Direct3D9on12"), "auto");
     CHECK_STR(ds_legacy_renderer("opengl"), NULL);
     CHECK_STR(ds_legacy_renderer("direct3d11"), NULL);
-    CHECK_STR(ds_legacy_renderer("gdi"), NULL);
+    CHECK_STR(ds_legacy_renderer("gdi"), "auto");
+    CHECK_STR(ds_legacy_renderer("Software"), "auto");
 }
 
 int main(void)

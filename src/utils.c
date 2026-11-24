@@ -238,11 +238,6 @@ FARPROC util_get_iat_proc(HMODULE mod, char* module_name, char* function_name)
 
                     if ((o_first_thunk->u1.Ordinal & IMAGE_ORDINAL_FLAG) == 0)
                     {
-#if defined(__GNUC__)
-                        if (util_is_bad_read_ptr((void*)import->Name))
-                            continue;
-#endif
-
                         if (strcmp((const char*)import->Name, function_name) == 0 && first_thunk->u1.Function)
                         {
                             return (FARPROC)first_thunk->u1.Function;
@@ -384,30 +379,6 @@ BOOL util_caller_is_ddraw_wrapper(void* return_address)
     }
 
     return FALSE;
-}
-
-BOOL util_is_bad_read_ptr(void* p)
-{
-    MEMORY_BASIC_INFORMATION mbi = { 0 };
-    if (VirtualQuery(p, &mbi, sizeof(mbi)))
-    {
-        DWORD mask = (
-            PAGE_READONLY |
-            PAGE_READWRITE |
-            PAGE_WRITECOPY |
-            PAGE_EXECUTE_READ |
-            PAGE_EXECUTE_READWRITE |
-            PAGE_EXECUTE_WRITECOPY);
-
-        BOOL b = !(mbi.Protect & mask);
-
-        if (mbi.Protect & (PAGE_GUARD | PAGE_NOACCESS))
-            b = TRUE;
-
-        return b;
-    }
-
-    return TRUE;
 }
 
 BOOL util_is_minimized(HWND hwnd)

@@ -206,9 +206,6 @@ HOOKLIST g_hook_hooklist[] =
             { "GetDiskFreeSpaceA", (PROC)fake_GetDiskFreeSpaceA, (PROC*)&real_GetDiskFreeSpaceA, 0 },
             { "GetVersion", (PROC)fake_GetVersion, (PROC*)&real_GetVersion, 0 },
             { "GetVersionExA", (PROC)fake_GetVersionExA, (PROC*)&real_GetVersionExA, 0 },
-#if defined(_DEBUG) && defined(__GNUC__)
-            { "SetUnhandledExceptionFilter", (PROC)fake_SetUnhandledExceptionFilter, (PROC*)&real_SetUnhandledExceptionFilter, 0 },
-#endif
             { "", NULL, NULL, 0 }
         }
     },
@@ -417,11 +414,6 @@ void hook_patch_iat_list(HMODULE hmod, BOOL unhook, HOOKLIST* hooks, BOOL is_loc
 
                                 if (is_local && (hooks[i].data[x].flags & HOOK_SYSTEM_ONLY))
                                     continue;
-
-#if defined(__GNUC__)
-                                if (util_is_bad_read_ptr((void*)import->Name))
-                                    continue;
-#endif
 
                                 if (strcmp((const char*)import->Name, hooks[i].data[x].function_name) == 0)
                                 {
