@@ -221,17 +221,12 @@ static RECTF restricted_viewport(const CRT_VIEWPORT* v, const CRT_AUTO_DISPLAY* 
     return vp;
 }
 
-static int is_crt_shader(CRT_SHADER shader)
-{
-    /* ShaderDescriptor::EnforceAutoIntegerScaling: the shaders under 'crt/'.
-     * sharp, nearest and bilinear are under 'interpolation/' */
-    return shader != CRT_SHADER_SHARP && shader != CRT_SHADER_NEAREST && shader != CRT_SHADER_BILINEAR;
-}
-
-/* RENDER_CalcDrawRectInPixels, before rounding */
+/* RENDER_CalcDrawRectInPixels, before rounding. Unlike DOSBox, whose 'auto'
+ * snaps only the shaders under 'crt/' (ShaderDescriptor::
+ * EnforceAutoIntegerScaling), 'auto' snaps every shader: sharp, nearest and
+ * bilinear too */
 static RECTF calc_draw_rect(
     CRT_INTEGER_SCALING integer_scaling,
-    int crt_shader,
     RECTF viewport,
     int canvas_w,
     int canvas_h,
@@ -272,11 +267,6 @@ static RECTF calc_draw_rect(
         if (integer_scaling == CRT_INTEGER_SCALING_VERTICAL)
         {
             factor = floorf(factor);
-        }
-        else if (!crt_shader)
-        {
-            /* 'auto' doesn't snap the other shaders (sharp) */
-            break;
         }
         else if (factor >= 5.0f)
         {
@@ -360,8 +350,8 @@ CRT_AUTO_LAYOUT crt_auto_calc_layout(
      *
      * DOSBox measures the draw rectangle it would get with the shader that's
      * active at the time. With 'integer_scaling = auto', whole and half steps
-     * don't change the whole part of the scale factor, so measuring without
-     * them, as for sharp, gives the same result */
+     * don't change the whole part of the scale factor, so measuring with them
+     * gives the same result as DOSBox measuring without them (sharp) */
     {
         int ds = layout.double_scanned ? 2 : 1;
         int rw = mode_width * ds;
@@ -369,7 +359,6 @@ CRT_AUTO_LAYOUT crt_auto_calc_layout(
 
         RECTF r = calc_draw_rect(
             s->integer_scaling,
-            0,
             viewport,
             canvas_width,
             canvas_height,
@@ -435,7 +424,6 @@ CRT_AUTO_LAYOUT crt_auto_calc_layout(
     {
         RECTF r = calc_draw_rect(
             s->integer_scaling,
-            is_crt_shader(layout.shader),
             viewport,
             canvas_width,
             canvas_height,

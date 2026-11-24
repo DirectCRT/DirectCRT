@@ -43,8 +43,9 @@ Source: dosbox-staging, mainly `src/gui/render/auto_shader_switcher.cpp`,
   stretch) and `integer_scaling` (auto, vertical, horizontal, off) give the image
   rectangle. "Pixels per scanline" is that rectangle's height divided by the
   game's line count.
-- **`integer_scaling = auto`** applies only with CRT shaders: whole steps below
-  3x, half steps (3.5x, 4.5x) from 3x to 5x, no snapping at 5x and above.
+- **`integer_scaling = auto`**: whole steps below 3x, half steps (3.5x, 4.5x)
+  from 3x to 5x, no snapping at 5x and above. Unlike DOSBox, which applies it
+  only with the CRT shaders, it applies with every shader (sharp too).
 - **The main shader is chosen per video mode and window size:**
 
   | Screen pixels per game line | Main shader |
@@ -243,11 +244,12 @@ black borders in the window, as in DOSBox.
 - **`shader`** takes DOSBox's values `crt-auto`, `sharp`, `nearest` and
   `bilinear`. They all use the layout code in `src/crt_auto.c`, with
   `viewport`, `aspect` and `integer_scaling`, which is why the old scaling
-  settings can go. As in DOSBox, `integer_scaling=auto` only snaps with
-  crt-auto, and the colour adjustments apply with every shader.
+  settings can go. `integer_scaling=auto` snaps with every shader (DOSBox's
+  only with the CRT shaders), and the colour adjustments apply with every
+  shader.
 - **No `renderer=gdi`**: it read as `auto` (see phase 4).
-- **Live reload:** `shader` joins the settings reloaded while the game runs.
-  `display`, the `window_*` settings and `renderer` apply at the next start.
+- **Live reload:** `shader` joins the settings reloaded while the game runs,
+  and so do `display`, the `window_*` settings and `renderer`.
 
 ### Removed
 
@@ -381,8 +383,15 @@ otherwise keep the no-shading trap. `original` has to be chosen.
      checks `directcrt.ini` every half second; once a change has settled, it
      reads those settings again and, if they differ, sets the picture up again
      (as Alt+Enter does), so the shader tier, picture size, mouse mapping and
-     colours follow. Other settings (`shader`, `renderer`, ...) still need a
-     restart; the overlay's full OSD will apply them live.
+     colours follow. The display, window, frame rate, mouse and renderer
+     settings apply live too (a new `display` switches as Alt+Enter, a new
+     `renderer` is set up in place of the old); only the compatibility
+     settings need a restart. One exception: from Direct3D 11 to OpenGL waits
+     for the next start, as a window that a flip model swap chain presented to
+     shows nothing else after, even once it's gone (DXGI_SWAP_EFFECT's docs).
+     Picture settings (`shader`, `viewport`, the colours, ...) apply without
+     stopping the render thread: it sets up its shader passes again between
+     two frames.
    - Done: a CI job (`shaders` in `build.yml`) checks that the committed
      shaders match a fresh translation (`gen_d3d11_shaders.py check`). The
      tool downloads are pinned by SHA-256, and fxc by Windows SDK version

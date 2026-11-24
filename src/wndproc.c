@@ -276,8 +276,9 @@ LRESULT CALLBACK fake_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam
         case IDT_TIMER_RELOAD_SETTINGS:
         {
             /* Not while the window is being resized: that sets up the picture
-               again when it ends */
-            if (!in_size_move)
+               again when it ends. Nor a change from the settings OSD: that's
+               applied when the OSD stands still */
+            if (!in_size_move && !overlay_menu_apply_pending())
                 dd_reload_settings(FALSE);
 
             return 0;

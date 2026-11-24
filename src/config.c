@@ -19,6 +19,7 @@ static int cfg_get_int(LPCSTR key, int default_value);
 static DWORD cfg_get_string(LPCSTR key, LPCSTR default_value, LPSTR out_string, DWORD out_size);
 static void cfg_load_crt_auto_settings(CRT_AUTO_SETTINGS* settings);
 static void cfg_load_display_settings();
+static void cfg_load_runtime_settings();
 static void cfg_load_live_settings();
 static void cfg_ini_stat(WIN32_FILE_ATTRIBUTE_DATA* data);
 static int cfg_get_choice(LPCSTR key, const char* const* names, int count, int default_index);
@@ -43,20 +44,14 @@ void cfg_load()
     /* Optional settings */
 
     cfg_load_display_settings();
-    GET_INT(g_config.maxfps, "maxfps", -1);
-    GET_BOOL(g_config.vsync, "vsync", FALSE);
-    GET_BOOL(g_config.adjmouse, "adjmouse", TRUE);
+
+    /* Until the game sets its cooperative level, as for a fullscreen game */
+    DISPLAY_KIND kind = ds_display_start(g_config.display, 1);
+    g_config.windowed = kind == DISPLAY_KIND_WINDOW;
+    g_config.fullscreen = kind == DISPLAY_KIND_DESKTOP;
+
+    cfg_load_runtime_settings();
     cfg_load_crt_auto_settings(&g_config.crt);
-    GET_STRING("renderer", "auto", g_config.renderer, sizeof(g_config.renderer));
-    const char* renderer = ds_legacy_renderer(g_config.renderer);
-    if (renderer)
-    {
-        TRACE("     renderer=%s is no longer available, using %s\n", g_config.renderer, renderer);
-        strncpy(g_config.renderer, renderer, sizeof(g_config.renderer) - 1);
-    }
-    GET_BOOL(g_config.devmode, "devmode", FALSE);
-    GET_INT(g_config.anti_aliased_fonts_min_size, "anti_aliased_fonts_min_size", 13);
-    GET_STRING("screenshotdir", ".\\Screenshots\\", g_config.screenshot_dir, sizeof(g_config.screenshot_dir));
 
     /* emulated_refresh, remember_window, the status OSD and the hotkeys */
     cfg_load_live_settings();
@@ -199,9 +194,14 @@ BOOL cfg_reload_settings(CRT_AUTO_SETTINGS* settings, BOOL now)
     TRACE("directcrt.ini changed, reading the settings that apply at once again\n");
 
     ini_create(&g_config.ini, g_config.ini_path);
+    cfg_load_display_settings();
+    cfg_load_runtime_settings();
     cfg_load_crt_auto_settings(settings);
     cfg_load_live_settings();
     ini_free(&g_config.ini);
+
+    if (g_config.lock_mouse_top_left)
+        g_config.adjmouse = FALSE;
 
     return TRUE;
 }
@@ -447,11 +447,25 @@ static void cfg_load_display_settings()
 
     cfg_get_new_or_old("window_resizable", "on", cfg_legacy_resizable, "resizable", value, sizeof(value));
     g_config.window_resizable = cfg_parse_on_off("window_resizable", value);
+}
 
-    /* Until the game sets its cooperative level, as for a fullscreen game */
-    DISPLAY_KIND kind = ds_display_start(g_config.display, 1);
-    g_config.windowed = kind == DISPLAY_KIND_WINDOW;
-    g_config.fullscreen = kind == DISPLAY_KIND_DESKTOP;
+/* maxfps to screenshotdir: they apply while the game runs too, the picture
+ * set up again where they need it (dd_reload_settings) */
+static void cfg_load_runtime_settings()
+{
+    GET_INT(g_config.maxfps, "maxfps", -1);
+    GET_BOOL(g_config.vsync, "vsync", FALSE);
+    GET_BOOL(g_config.adjmouse, "adjmouse", TRUE);
+    GET_STRING("renderer", "auto", g_config.renderer, sizeof(g_config.renderer));
+    const char* renderer = ds_legacy_renderer(g_config.renderer);
+    if (renderer)
+    {
+        TRACE("     renderer=%s is no longer available, using %s\n", g_config.renderer, renderer);
+        strncpy(g_config.renderer, renderer, sizeof(g_config.renderer) - 1);
+    }
+    GET_BOOL(g_config.devmode, "devmode", FALSE);
+    GET_INT(g_config.anti_aliased_fonts_min_size, "anti_aliased_fonts_min_size", 13);
+    GET_STRING("screenshotdir", ".\\Screenshots\\", g_config.screenshot_dir, sizeof(g_config.screenshot_dir));
 }
 
 /* The settings that apply while the game runs, apart from crt-auto's

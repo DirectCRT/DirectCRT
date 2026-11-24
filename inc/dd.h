@@ -130,6 +130,7 @@ typedef struct CNCDDRAW
 
         LONG palette_updated;
         LONG surface_updated;
+        LONG picture_changed; /* crt and viewport are new: the renderer sets its passes up again */
         LONG clear_screen;
         LONG screen_updated;
 

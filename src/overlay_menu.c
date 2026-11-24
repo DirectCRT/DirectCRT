@@ -44,6 +44,13 @@ typedef struct MENU_VALUE
 static MENU_VALUE* g_values;
 static volatile LONG g_values_stale = 1;
 
+/* A change is applied when the OSD stands still: applying stops the render
+ * thread a moment, a stutter that mustn't fall in the middle of a slide */
+static volatile LONG g_apply_pending;
+static volatile LONG g_apply_since;  /* GetTickCount when it was asked for */
+
+#define MENU_APPLY_WAIT 1000          /* ms: applied by then, moving or not */
+
 /* -------------------------------------------------------- the game's thread */
 
 static void menu_wake(void)
@@ -124,6 +131,10 @@ void overlay_close_menu(void)
 
     if (g_relock)
         mouse_lock();
+
+    /* Nothing of the OSD is left to move */
+    if (InterlockedExchange(&g_apply_pending, 0) && g_ddraw.hwnd)
+        PostMessageA(g_ddraw.hwnd, WM_OVERLAY_MENU, 1, 0);
 
     menu_wake();
 }
@@ -435,6 +446,10 @@ void overlay_menu_write(int setting, const char* value)
     if (!s || !s->key || !g_config.ini_path[0])
         return;
 
+    /* First, so the reload timer leaves the written ini to it */
+    if (!InterlockedExchange(&g_apply_pending, 1))
+        InterlockedExchange(&g_apply_since, (LONG)GetTickCount());
+
     WritePrivateProfileStringA("directcrt", s->key, value, g_config.ini_path);
 
     if (g_values)
@@ -446,7 +461,23 @@ void overlay_menu_write(int setting, const char* value)
         v->value[MENU_VALUE_SIZE - 1] = 0;
     }
 
-    /* The game's thread applies it */
-    if (g_ddraw.hwnd)
+    /* The game's thread applies it, once the OSD stands still
+       (overlay_menu_frame_drawn) */
+}
+
+void overlay_menu_frame_drawn(BOOL moving)
+{
+    if (!g_apply_pending)
+        return;
+
+    if (moving && GetTickCount() - (DWORD)g_apply_since < MENU_APPLY_WAIT)
+        return;
+
+    if (InterlockedExchange(&g_apply_pending, 0) && g_ddraw.hwnd)
         PostMessageA(g_ddraw.hwnd, WM_OVERLAY_MENU, 1, 0);
+}
+
+BOOL overlay_menu_apply_pending(void)
+{
+    return g_apply_pending != 0;
 }

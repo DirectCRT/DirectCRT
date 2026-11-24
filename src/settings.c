@@ -33,8 +33,8 @@ static const SETTING g_settings[] = {
         "; ### Optional settings ###\n"
         "; Use the following settings to adjust the look and feel to your liking\n"
         "; Where DOSBox Staging has the same setting, it has DOSBox's name and values\n"
-        "; Changes to the picture and colour settings (from 'shader' to 'black_level'), emulated_refresh, remember_window,\n"
-        "; the status OSD and the hotkeys apply while the game runs, when this file is saved; others need a restart.\n"
+        "; Changes apply while the game runs, when this file is saved, except for the compatibility settings,\n"
+        "; which need a restart.\n"
         "; The settings OSD (Alt+F12) changes them while the game runs\n"
         "\n"
         "\n"),
@@ -48,7 +48,7 @@ static const SETTING g_settings[] = {
         "  as with Windows' own DirectDraw; for real CRTs and external scalers. With one screen pixel per line there's\n"
         "  no CRT shading, but the colour adjustments still apply. Games in their own window get a window\n"
         "Fullscreen is at the desktop resolution, except with 'original'. Alt+Enter switches between a window and fullscreen",
-        T_DISPLAY, "Display", "auto|window|fullscreen|original" },
+        T_DISPLAY, "Display", "auto|window|fullscreen|original", 0, 0, SETTING_LIVE },
 
     { SETTING_STRING, "window_size", "default",
         "The size of the window's contents, without its title bar and borders\n"
@@ -58,7 +58,7 @@ static const SETTING g_settings[] = {
         "WxH = a size in logical units (e.g. 1280x960; with display scaling at 150%, 1920x1440 pixels)\n"
         "WxHpx = a size in pixels (e.g. 1920x1440px)\n"
         "Note: The settings for the picture (aspect, integer_scaling, viewport) place it in the window, as in fullscreen",
-        T_DISPLAY, "Window size", "default|small|medium|large|unscaled" },
+        T_DISPLAY, "Window size", "default|small|medium|large|unscaled", 0, 0, SETTING_LIVE },
 
     { SETTING_STRING, "window_position", "auto",
         "Where the window goes\n"
@@ -66,15 +66,15 @@ static const SETTING g_settings[] = {
         "X,Y = the top left corner in logical units\n"
         "X,Ypx = in pixels\n"
         "X,Y% = a percentage of the desktop (e.g. 10,5%)",
-        T_DISPLAY, "Window position", "auto" },
+        T_DISPLAY, "Window position", "auto", 0, 0, SETTING_LIVE },
 
     { SETTING_BOOL, "window_decorations", "on",
         "Show the window's title bar and borders",
-        T_DISPLAY, "Title bar and borders", BOOL_ONOFF },
+        T_DISPLAY, "Title bar and borders", BOOL_ONOFF, 0, 0, SETTING_LIVE },
 
     { SETTING_BOOL, "window_resizable", "on",
         "Let the user resize and maximize the window",
-        T_DISPLAY, "Resizable window", BOOL_ONOFF },
+        T_DISPLAY, "Resizable window", BOOL_ONOFF, 0, 0, SETTING_LIVE },
 
     { SETTING_BOOL, "remember_window", "off",
         "Save the window's size and position here when the game exits, for the next start\n"
@@ -87,12 +87,12 @@ static const SETTING g_settings[] = {
         "0 = unlimited\n"
         "1-1000 = at most this many frames a second\n"
         "Note: Does not have an impact on the game speed, to limit your game speed use 'maxgameticks='",
-        T_TIMING, "Rendering rate limit", "-1=screen rate|0=unlimited", 1, 1000 },
+        T_TIMING, "Rendering rate limit", "-1=screen rate|0=unlimited", 1, 1000, SETTING_LIVE },
 
     { SETTING_BOOL, "vsync", "false",
         "Vertical synchronization, enable if you get tearing\n"
         "Note: vsync=true can fix tearing but it will cause input lag",
-        T_TIMING, "Vsync", BOOL_TF },
+        T_TIMING, "Vsync", BOOL_TF, 0, 0, SETTING_LIVE },
 
     { SETTING_INT, "emulated_refresh", "auto",
         "The refresh rate of the emulated display, in Hz\n"
@@ -105,7 +105,7 @@ static const SETTING g_settings[] = {
     { SETTING_BOOL, "adjmouse", "true",
         "Automatic mouse sensitivity scaling\n"
         "Note: Sensitivity will be adjusted according to the size of the picture",
-        T_OTHER, "Scale the mouse", BOOL_TF },
+        T_OTHER, "Scale the mouse", BOOL_TF, 0, 0, SETTING_LIVE },
 
     { SETTING_CHOICE, "shader", "crt-auto",
         "The shader, as in DOSBox Staging\n"
@@ -131,7 +131,7 @@ static const SETTING g_settings[] = {
 
     { SETTING_CHOICE, "integer_scaling", "auto",
         "Keep the scaling factor a whole number, so the picture still fits in the viewport\n"
-        "auto = with crt-auto: vertical, with 3.5x and 4.5x also allowed, and none above 5x; other shaders: off\n"
+        "auto = vertical, with 3.5x and 4.5x also allowed, and none above 5x\n"
         "vertical = whole numbers vertically\n"
         "horizontal = whole numbers horizontally\n"
         "off = fill the viewport",
@@ -216,19 +216,19 @@ static const SETTING g_settings[] = {
         "auto = Direct3D 11, or OpenGL if Direct3D 11 doesn't work\n"
         "direct3d11, opengl = this one first, the other if it doesn't work\n"
         "Note: When neither works, DirectCRT steps aside for Windows' own DirectDraw",
-        T_DISPLAY, "Renderer", "auto|direct3d11|opengl" },
+        T_DISPLAY, "Renderer", "auto|direct3d11|opengl", 0, 0, SETTING_LIVE },
 
     { SETTING_BOOL, "devmode", "false",
         "Developer mode (don't lock the cursor)",
-        T_OTHER, "Developer mode", BOOL_TF },
+        T_OTHER, "Developer mode", BOOL_TF, 0, 0, SETTING_LIVE },
 
     { SETTING_INT, "anti_aliased_fonts_min_size", "13",
         "Disable font smoothing for fonts that are smaller than size X",
-        T_OTHER, "Smooth fonts from size", NULL, 0, 100 },
+        T_OTHER, "Smooth fonts from size", NULL, 0, 100, SETTING_LIVE },
 
     { SETTING_STRING, "screenshotdir", ".\\Screenshots\\",
         "Where should screenshots be saved",
-        T_OTHER, "Screenshot folder" },
+        T_OTHER, "Screenshot folder", NULL, 0, 0, SETTING_LIVE },
 
     { SETTING_BOOL, "status_osd", "off",
         "The status OSD: the game's resolution, the size and scaling of the picture, the shader, the frame rate\n"

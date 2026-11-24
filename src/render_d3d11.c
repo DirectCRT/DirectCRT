@@ -75,7 +75,17 @@ typedef struct D3D11_TARGET
     int height;
 } D3D11_TARGET;
 
-/* One translated DOSBox shader, with its uniforms */
+/* A shader made into the GPU's own code: kept for the renderer's life, as
+ * the driver takes a while (up to a few frames) to make one */
+typedef struct D3D11_SHADER_CODE
+{
+    const D3D11_SHADER* shader;
+    ID3D11VertexShader* vs;
+    ID3D11PixelShader* ps;
+} D3D11_SHADER_CODE;
+
+/* One translated DOSBox shader, with its uniforms; vs and ps are the
+ * shader_code's */
 typedef struct D3D11_PASS
 {
     const D3D11_SHADER* shader;
@@ -121,6 +131,7 @@ typedef struct D3D11RENDERER
     D3D11_TARGET adj;
 
     BOOL crt_auto;
+    D3D11_SHADER_CODE shader_code[8];
     D3D11_PASS adj_pass;
     D3D11_PASS crt_pass;
     CRT_AUTO_PARAMS crt_params;
@@ -135,6 +146,16 @@ typedef struct D3D11RENDERER
 } D3D11RENDERER;
 
 static D3D11RENDERER g_d3d11;
+
+/* The window a flip model swap chain presented to: the desktop composition
+ * takes nothing else from it after, not even once the swap chain is gone
+ * (DXGI_SWAP_EFFECT's docs), so OpenGL's frames would never show there */
+static HWND g_d3d11_flipped_hwnd;
+
+BOOL d3d11_flipped(HWND hwnd)
+{
+    return hwnd && hwnd == g_d3d11_flipped_hwnd;
+}
 
 static BOOL d3d11_create_device();
 static BOOL d3d11_create_resources();
@@ -308,6 +329,8 @@ static BOOL d3d11_create_device()
 
         if (SUCCEEDED(hr))
         {
+            g_d3d11_flipped_hwnd = g_ddraw.hwnd;
+
             /* Alt+Enter and window changes are ours, not DXGI's */
             IDXGIFactory2_MakeWindowAssociation(
                 factory, g_ddraw.hwnd, DXGI_MWA_NO_ALT_ENTER | DXGI_MWA_NO_WINDOW_CHANGES);
@@ -452,6 +475,48 @@ static ID3D11Buffer* d3d11_create_cbuffer(unsigned int size)
     return b;
 }
 
+static const D3D11_SHADER_CODE* d3d11_shader_code(const D3D11_SHADER* shader)
+{
+    int count = sizeof(g_d3d11.shader_code) / sizeof(g_d3d11.shader_code[0]);
+
+    for (int i = 0; i < count; i++)
+    {
+        D3D11_SHADER_CODE* c = &g_d3d11.shader_code[i];
+
+        if (c->shader == shader)
+            return c;
+
+        if (c->shader)
+            continue;
+
+        if (FAILEDX(ID3D11Device_CreateVertexShader(g_d3d11.device, shader->vs, shader->vs_size, NULL, &c->vs)) ||
+            FAILEDX(ID3D11Device_CreatePixelShader(g_d3d11.device, shader->ps, shader->ps_size, NULL, &c->ps)))
+        {
+            SAFE_RELEASE(c->vs);
+            SAFE_RELEASE(c->ps);
+            return NULL;
+        }
+
+        c->shader = shader;
+        return c;
+    }
+
+    TRACE("Direct3D11: no room for the shader's code\n");
+    return NULL;
+}
+
+static void d3d11_release_shader_code()
+{
+    int count = sizeof(g_d3d11.shader_code) / sizeof(g_d3d11.shader_code[0]);
+
+    for (int i = 0; i < count; i++)
+    {
+        SAFE_RELEASE(g_d3d11.shader_code[i].vs);
+        SAFE_RELEASE(g_d3d11.shader_code[i].ps);
+        g_d3d11.shader_code[i].shader = NULL;
+    }
+}
+
 static BOOL d3d11_create_pass(D3D11_PASS* p, const D3D11_SHADER* shader)
 {
     memset(p, 0, sizeof(*p));
@@ -460,9 +525,13 @@ static BOOL d3d11_create_pass(D3D11_PASS* p, const D3D11_SHADER* shader)
     if (shader->vs_cbuffer_size > sizeof(p->vs_data) || shader->ps_cbuffer_size > sizeof(p->ps_data))
         return FALSE;
 
-    if (FAILEDX(ID3D11Device_CreateVertexShader(g_d3d11.device, shader->vs, shader->vs_size, NULL, &p->vs)) ||
-        FAILEDX(ID3D11Device_CreatePixelShader(g_d3d11.device, shader->ps, shader->ps_size, NULL, &p->ps)))
+    const D3D11_SHADER_CODE* code = d3d11_shader_code(shader);
+
+    if (!code)
         return FALSE;
+
+    p->vs = code->vs;
+    p->ps = code->ps;
 
     p->vs_cb = d3d11_create_cbuffer(shader->vs_cbuffer_size);
     p->ps_cb = d3d11_create_cbuffer(shader->ps_cbuffer_size);
@@ -472,8 +541,8 @@ static BOOL d3d11_create_pass(D3D11_PASS* p, const D3D11_SHADER* shader)
 
 static void d3d11_release_pass(D3D11_PASS* p)
 {
-    SAFE_RELEASE(p->vs);
-    SAFE_RELEASE(p->ps);
+    p->vs = NULL;
+    p->ps = NULL;
     SAFE_RELEASE(p->vs_cb);
     SAFE_RELEASE(p->ps_cb);
     p->shader = NULL;
@@ -680,6 +749,37 @@ static BOOL d3d11_create_crt_auto()
     return TRUE;
 }
 
+/* The passes that make the picture (crt_auto_calc_layout's): set up again
+ * when only the picture's settings change, the rest kept */
+static BOOL d3d11_create_picture()
+{
+    g_d3d11.crt_auto = d3d11_create_crt_auto();
+
+    if (!g_d3d11.crt_auto)
+        return FALSE;
+
+    if (g_d3d11.crt_pass.shader->window_pass)
+    {
+        g_d3d11.window_cb = d3d11_create_cbuffer(sizeof(g_d3d11.window_cb_data));
+        memset(g_d3d11.window_cb_data, 0, sizeof(g_d3d11.window_cb_data));
+
+        if (!g_d3d11.window_cb)
+            return FALSE;
+    }
+
+    return TRUE;
+}
+
+static void d3d11_release_picture()
+{
+    d3d11_release_pass(&g_d3d11.adj_pass);
+    d3d11_release_pass(&g_d3d11.crt_pass);
+    d3d11_release_target(&g_d3d11.adj);
+    SAFE_RELEASE(g_d3d11.window_cb);
+
+    g_d3d11.crt_auto = FALSE;
+}
+
 static BOOL d3d11_create_resources()
 {
     d3d11_release_resources();
@@ -767,19 +867,10 @@ static BOOL d3d11_create_resources()
     if (!d3d11_create_target(&g_d3d11.conv, g_ddraw.width, g_ddraw.height))
         return FALSE;
 
-    g_d3d11.crt_auto = d3d11_create_crt_auto();
+    InterlockedExchange(&g_ddraw.render.picture_changed, FALSE);
 
-    if (!g_d3d11.crt_auto)
+    if (!d3d11_create_picture())
         return FALSE;
-
-    if (g_d3d11.crt_pass.shader->window_pass)
-    {
-        g_d3d11.window_cb = d3d11_create_cbuffer(sizeof(g_d3d11.window_cb_data));
-        memset(g_d3d11.window_cb_data, 0, sizeof(g_d3d11.window_cb_data));
-
-        if (!g_d3d11.window_cb)
-            return FALSE;
-    }
 
     D3D11_QUERY_DESC qd = { D3D11_QUERY_TIMESTAMP_DISJOINT, 0 };
     ID3D11Device_CreateQuery(g_d3d11.device, &qd, &g_d3d11.gpu_disjoint);
@@ -807,11 +898,9 @@ static void d3d11_release_resources()
     SAFE_RELEASE(g_d3d11.gpu_start);
     SAFE_RELEASE(g_d3d11.gpu_end);
 
-    d3d11_release_pass(&g_d3d11.adj_pass);
-    d3d11_release_pass(&g_d3d11.crt_pass);
+    d3d11_release_picture();
+    d3d11_release_shader_code();
     d3d11_release_target(&g_d3d11.conv);
-    d3d11_release_target(&g_d3d11.adj);
-    SAFE_RELEASE(g_d3d11.window_cb);
 
     SAFE_RELEASE(g_d3d11.palette_srv);
     SAFE_RELEASE(g_d3d11.palette_tex);
@@ -825,7 +914,6 @@ static void d3d11_release_resources()
     SAFE_RELEASE(g_d3d11.layout);
     SAFE_RELEASE(g_d3d11.quad_vb);
 
-    g_d3d11.crt_auto = FALSE;
 }
 
 /* Keeps the swap chain the size of the client area. FALSE while
@@ -1199,6 +1287,16 @@ static void d3d11_render()
         BOOL new_frame = FALSE;
 
         EnterCriticalSection(&g_ddraw.cs);
+
+        /* New picture settings (dd_reload_settings): its passes again */
+        if (InterlockedExchange(&g_ddraw.render.picture_changed, FALSE))
+        {
+            ID3D11DeviceContext_ClearState(g_d3d11.ctx);
+            d3d11_release_picture();
+
+            if (!d3d11_create_picture())
+                TRACE("Direct3D11: setting up the new picture failed\n");
+        }
 
         if (g_ddraw.primary &&
             g_ddraw.primary->bpp == g_ddraw.bpp &&

@@ -121,6 +121,9 @@ float overlay_menu_font_size(int canvas_height);
 const char* overlay_menu_value(int setting, BOOL* set);
 void overlay_menu_write(int setting, const char* value); /* NULL = remove the key */
 void overlay_menu_values_changed(void); /* any thread: directcrt.ini was written elsewhere */
+void overlay_menu_frame_drawn(BOOL moving); /* render thread: a frame of the OSD, something in it moving */
+BOOL overlay_menu_apply_pending(void); /* a change waits for the OSD to stand still */
+BOOL dd_opengl_waits(void); /* dd.c */
 
 /* overlay.cpp: draw the OSD if it's shown. FALSE = it couldn't be drawn */
 

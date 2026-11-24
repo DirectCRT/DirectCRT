@@ -25,6 +25,8 @@ static void ogl_build_crt_auto_programs(BOOL core_profile);
 static void ogl_init_crt_auto_uniforms();
 static void ogl_render();
 static BOOL ogl_release_resources();
+static void ogl_release_picture();
+static BOOL ogl_create_picture();
 static BOOL ogl_texture_upload_test();
 static BOOL ogl_shader_test();
 static void ogl_check_error(const char* stmt);
@@ -193,6 +195,7 @@ DWORD WINAPI ogl_render_main(void)
             wglSwapIntervalEXT(g_config.vsync ? 1 : 0);
 
         fpsl_init();
+        InterlockedExchange(&g_ddraw.render.picture_changed, FALSE);
         GL_CHECK(ogl_build_programs());
         GL_CHECK(ogl_create_textures(g_ddraw.width, g_ddraw.height));
         GL_CHECK(ogl_init_main_program());
@@ -998,6 +1001,22 @@ static void ogl_render()
 
         EnterCriticalSection(&g_ddraw.cs);
 
+        /* New picture settings (dd_reload_settings): its programs again */
+        if (InterlockedExchange(&g_ddraw.render.picture_changed, FALSE))
+        {
+            while (glGetError() != GL_NO_ERROR);
+
+            ogl_release_picture();
+
+            if (!ogl_create_picture())
+            {
+                TRACE("OpenGL: setting up the new picture failed\n");
+                g_ogl.use_opengl = FALSE;
+                LeaveCriticalSection(&g_ddraw.cs);
+                break;
+            }
+        }
+
         if (g_ddraw.primary &&
             g_ddraw.primary->bpp == g_ddraw.bpp &&
             g_ddraw.primary->width == g_ddraw.width &&
@@ -1221,23 +1240,10 @@ static void ogl_render()
     }
 }
 
-static BOOL ogl_release_resources()
+/* The programs and frame buffers that make the picture (shader1, shader2):
+ * set up again when only the picture's settings change, the rest kept */
+static void ogl_release_picture()
 {
-    overlay_ogl_release();
-
-    glDeleteTextures(TEXTURE_COUNT, g_ogl.surface_tex_ids);
-
-    if (g_ogl.gpu_time_query && glDeleteQueries)
-        glDeleteQueries(1, &g_ogl.gpu_time_query);
-
-    g_ogl.gpu_time_query = 0;
-    g_ogl.gpu_time_pending = FALSE;
-    g_ogl.gpu_time_ms = 0;
-    g_ogl.gpu_time_frames = 0;
-
-    if (g_ddraw.bpp == 8)
-        glDeleteTextures(TEXTURE_COUNT, g_ogl.palette_tex_ids);
-
     if (glUseProgram)
         glUseProgram(0);
 
@@ -1266,15 +1272,53 @@ static BOOL ogl_release_resources()
 
     if (glDeleteProgram)
     {
-        if (g_ogl.main_program)
-            glDeleteProgram(g_ogl.main_program);
-
         if (g_ogl.shader1_program)
             glDeleteProgram(g_ogl.shader1_program);
 
         if (g_ogl.shader2_program)
             glDeleteProgram(g_ogl.shader2_program);
     }
+
+    g_ogl.shader1_program = g_ogl.shader2_program = 0;
+    g_ogl.crt_auto = FALSE;
+}
+
+static BOOL ogl_create_picture()
+{
+    if (g_ogl.main_program)
+        ogl_build_crt_auto_programs(wglCreateContextAttribsARB != NULL);
+
+    ogl_init_shader1_program();
+    ogl_init_shader2_program();
+    ogl_init_crt_auto_uniforms();
+
+    return g_ogl.crt_auto && glGetError() == GL_NO_ERROR;
+}
+
+static BOOL ogl_release_resources()
+{
+    overlay_ogl_release();
+
+    glDeleteTextures(TEXTURE_COUNT, g_ogl.surface_tex_ids);
+
+    if (g_ogl.gpu_time_query && glDeleteQueries)
+        glDeleteQueries(1, &g_ogl.gpu_time_query);
+
+    g_ogl.gpu_time_query = 0;
+    g_ogl.gpu_time_pending = FALSE;
+    g_ogl.gpu_time_ms = 0;
+    g_ogl.gpu_time_frames = 0;
+
+    if (g_ddraw.bpp == 8)
+        glDeleteTextures(TEXTURE_COUNT, g_ogl.palette_tex_ids);
+
+    if (glUseProgram)
+        glUseProgram(0);
+
+    ogl_release_picture();
+
+    if (glDeleteProgram && g_ogl.main_program)
+        glDeleteProgram(g_ogl.main_program);
 
     if (g_ogl.main_program)
     {

@@ -588,15 +588,185 @@ static CRT_AUTO_DISPLAY dd_crt_auto_display()
     return display;
 }
 
+/* Stops the render thread, for a renderer to be set up again */
+static void dd_stop_render_thread(void)
+{
+    if (!g_ddraw.render.thread)
+        return;
+
+    EnterCriticalSection(&g_ddraw.cs);
+    g_ddraw.render.run = FALSE;
+    ReleaseSemaphore(g_ddraw.render.sem, 1, NULL);
+    LeaveCriticalSection(&g_ddraw.cs);
+
+    WaitForSingleObject(g_ddraw.render.thread, INFINITE);
+    g_ddraw.render.thread = NULL;
+}
+
+static DISPLAY_KIND dd_display_kind(void)
+{
+    return g_config.windowed ? DISPLAY_KIND_WINDOW :
+        g_config.fullscreen ? DISPLAY_KIND_DESKTOP : DISPLAY_KIND_MODE_SWITCH;
+}
+
+typedef DWORD(WINAPI* DD_RENDERER)(void);
+
+static DD_RENDERER dd_next_renderer(void);
+
+/* Whether renderer=opengl waits for the game to start again: Direct3D 11
+ * keeps going in the window it has shown its frames in (dd_next_renderer) */
+BOOL dd_opengl_waits(void)
+{
+    return _strcmpi(g_config.renderer, "opengl") == 0 && g_ddraw.renderer == d3d11_render_main &&
+        d3d11_flipped(g_ddraw.hwnd);
+}
+
+/* To the renderer the settings give now, the render thread stopped */
+static void dd_switch_renderer(void)
+{
+    DD_RENDERER next = dd_next_renderer();
+
+    if (!g_ddraw.renderer || next == g_ddraw.renderer)
+        return;
+
+    if (g_ddraw.renderer == ogl_render_main)
+    {
+        ogl_release();
+    }
+    else if (g_ddraw.renderer == d3d11_render_main)
+    {
+        d3d11_release();
+    }
+
+    g_ddraw.renderer = next;
+}
+
+/* Where the picture goes in the canvas_width x canvas_height window or
+ * screen, and its shader (crt_auto_calc_layout), from the settings; and the
+ * mouse's scale to it */
+static void dd_set_picture(int canvas_width, int canvas_height)
+{
+    g_ddraw.render.viewport.width = canvas_width;
+    g_ddraw.render.viewport.height = canvas_height;
+    g_ddraw.render.viewport.x = 0;
+    g_ddraw.render.viewport.y = 0;
+
+    {
+        /* As in DOSBox Staging: the picture's size from the aspect, viewport
+         * and integer_scaling settings, and with shader=crt-auto the shader
+         * from the screen pixels per game line */
+        CRT_AUTO_DISPLAY display = dd_crt_auto_display();
+
+        g_ddraw.render.crt =
+            crt_auto_calc_layout(
+                &g_config.crt,
+                &display,
+                g_ddraw.width,
+                g_ddraw.height,
+                canvas_width,
+                canvas_height);
+
+        if (g_ddraw.render.crt.viewport_rejected)
+        {
+            TRACE(
+                "     the viewport is larger than the %dx%d desktop (scale %.2f), using fit\n",
+                display.desktop_width,
+                display.desktop_height,
+                display.scale);
+        }
+
+        g_ddraw.render.viewport.x = g_ddraw.render.crt.x;
+        g_ddraw.render.viewport.y = g_ddraw.render.crt.y;
+        g_ddraw.render.viewport.width = g_ddraw.render.crt.width;
+        g_ddraw.render.viewport.height = g_ddraw.render.crt.height;
+
+        TRACE(
+            "     picture: %ux%u in %dx%d: %s, %d px/line, render %dx%d, picture %d,%d %dx%d\n",
+            g_ddraw.width,
+            g_ddraw.height,
+            canvas_width,
+            canvas_height,
+            crt_auto_shader_name(g_ddraw.render.crt.shader),
+            g_ddraw.render.crt.pixels_per_scanline,
+            g_ddraw.render.crt.render_width,
+            g_ddraw.render.crt.render_height,
+            g_ddraw.render.crt.x,
+            g_ddraw.render.crt.y,
+            g_ddraw.render.crt.width,
+            g_ddraw.render.crt.height);
+    }
+
+    g_ddraw.render.scale_w = ((float)g_ddraw.render.viewport.width / g_ddraw.width);
+    g_ddraw.render.scale_h = ((float)g_ddraw.render.viewport.height / g_ddraw.height);
+    g_ddraw.render.unscale_w = ((float)g_ddraw.width / g_ddraw.render.viewport.width);
+    g_ddraw.render.unscale_h = ((float)g_ddraw.height / g_ddraw.render.viewport.height);
+
+    /* Hack for games that require the cursor to be in the exact center of the screen (Worms 2 / Atlantis) */
+    if (g_config.center_cursor_fix)
+    {
+        g_ddraw.mouse.scale_x = ((float)(g_ddraw.render.viewport.width) / (g_ddraw.width));
+        g_ddraw.mouse.scale_y = ((float)(g_ddraw.render.viewport.height) / (g_ddraw.height));
+        g_ddraw.mouse.unscale_x = ((float)(g_ddraw.width) / (g_ddraw.render.viewport.width));
+        g_ddraw.mouse.unscale_y = ((float)(g_ddraw.height) / (g_ddraw.render.viewport.height));
+    }
+    else
+    {
+        g_ddraw.mouse.scale_x = ((float)(g_ddraw.render.viewport.width - 1) / (g_ddraw.width - 1));
+        g_ddraw.mouse.scale_y = ((float)(g_ddraw.render.viewport.height - 1) / (g_ddraw.height - 1));
+        g_ddraw.mouse.unscale_x = ((float)(g_ddraw.width - 1) / (g_ddraw.render.viewport.width - 1));
+        g_ddraw.mouse.unscale_y = ((float)(g_ddraw.height - 1) / (g_ddraw.render.viewport.height - 1));
+    }
+
+    g_ddraw.mouse.x_adjust = g_ddraw.render.viewport.x;
+    g_ddraw.mouse.y_adjust = g_ddraw.render.viewport.y;
+
+    if (g_config.lock_mouse_top_left)
+    {
+        g_ddraw.mouse.x_adjust = 0;
+        g_ddraw.mouse.y_adjust = 0;
+    }
+
+    g_ddraw.mouse.rc.left = g_ddraw.mouse.x_adjust;
+    g_ddraw.mouse.rc.top = g_ddraw.mouse.y_adjust;
+    g_ddraw.mouse.rc.right = g_ddraw.width + g_ddraw.mouse.x_adjust;
+    g_ddraw.mouse.rc.bottom = g_ddraw.height + g_ddraw.mouse.y_adjust;
+
+    if (g_config.adjmouse)
+    {
+        g_ddraw.mouse.rc.right = g_ddraw.render.viewport.width + g_ddraw.mouse.x_adjust;
+        g_ddraw.mouse.rc.bottom = g_ddraw.render.viewport.height + g_ddraw.mouse.y_adjust;
+    }
+
+    {
+        /* With 'viewport=relative' the picture can be larger than the window;
+         * keep the cursor in the window */
+        g_ddraw.mouse.rc.left = max(g_ddraw.mouse.rc.left, 0);
+        g_ddraw.mouse.rc.top = max(g_ddraw.mouse.rc.top, 0);
+        g_ddraw.mouse.rc.right = min(g_ddraw.mouse.rc.right, (LONG)canvas_width);
+        g_ddraw.mouse.rc.bottom = min(g_ddraw.mouse.rc.bottom, (LONG)canvas_height);
+    }
+}
+
 /* Live reload of the settings: called from a timer on the game's window
  * (now = FALSE), and when the settings OSD has written directcrt.ini
- * (now = TRUE). When directcrt.ini has new shader settings, the picture is set
- * up again with them, as for Alt+Enter */
+ * (now = TRUE). What the picture is made with (the shader settings, the
+ * window, the frame rate, the renderer) sets it up again, as Alt+Enter; a new
+ * display goes to the window or fullscreen it gives */
 void dd_reload_settings(BOOL now)
 {
     CRT_AUTO_SETTINGS crt;
     DWORD refresh = g_config.emulated_refresh;
     BOOL status_osd = g_config.status_osd;
+    DISPLAY_MODE display = g_config.display;
+    WINDOW_SIZE window_size = g_config.window_size;
+    WINDOW_POSITION window_position = g_config.window_position;
+    BOOL decorations = g_config.window_decorations;
+    BOOL resizable = g_config.window_resizable;
+    int maxfps = g_config.maxfps;
+    BOOL vsync = g_config.vsync;
+    BOOL adjmouse = g_config.adjmouse;
+    char renderer[sizeof(g_config.renderer)];
+    memcpy(renderer, g_config.renderer, sizeof(renderer));
 
     if (!cfg_reload_settings(&crt, now))
         return;
@@ -607,9 +777,69 @@ void dd_reload_settings(BOOL now)
     if (g_config.emulated_refresh != refresh && g_ddraw.width)
         dd_set_refresh(g_ddraw.refresh_asked);
 
-    if (memcmp(&crt, &g_config.crt, sizeof(crt)) == 0)
+    BOOL size_changed = memcmp(&window_size, &g_config.window_size, sizeof(window_size)) != 0;
+    BOOL position_changed = memcmp(&window_position, &g_config.window_position, sizeof(window_position)) != 0;
+
+    /* A new size or place, over where the user dragged the window */
+    if (size_changed)
+        g_config.window_rect.right = g_config.window_rect.bottom = 0;
+
+    if (position_changed)
+        g_config.window_rect.left = g_config.window_rect.top = -32000;
+
+    /* battle.net keeps the window as it is until it's done */
+    if (g_ddraw.bnet_active)
     {
-        TRACE("     crt-auto: settings unchanged\n");
+        g_ddraw.bnet_was_resizable = g_config.window_resizable;
+        g_config.window_resizable = resizable;
+    }
+
+    BOOL window_changed = size_changed || position_changed ||
+        decorations != g_config.window_decorations || resizable != g_config.window_resizable;
+    /* Only when another one would run: OpenGL can wait (dd_opengl_waits) */
+    BOOL renderer_changed = _stricmp(renderer, g_config.renderer) != 0 &&
+        (!g_ddraw.renderer || dd_next_renderer() != g_ddraw.renderer);
+    BOOL picture_changed = memcmp(&crt, &g_config.crt, sizeof(crt)) != 0 || window_changed ||
+        maxfps != g_config.maxfps || vsync != g_config.vsync || adjmouse != g_config.adjmouse || renderer_changed;
+
+    /* What 'display' gives now, for what the game asked for */
+    DISPLAY_KIND kind = ds_display_start(g_config.display, g_ddraw.saw_fullscreen || !g_ddraw.saw_normal);
+    BOOL display_changed = display != g_config.display && kind != dd_display_kind();
+
+    if (!picture_changed && !display_changed)
+    {
+        TRACE("     settings: nothing to set up again\n");
+        return;
+    }
+
+    /* Only the picture: the render thread keeps going and sets up its shader
+       passes again between two frames. Stopping it would hold the screen
+       still a while, the settings OSD with it */
+    BOOL only_picture = !display_changed && !window_changed && !renderer_changed &&
+        maxfps == g_config.maxfps && vsync == g_config.vsync && adjmouse == g_config.adjmouse;
+
+    if (only_picture && g_ddraw.render.thread && g_ddraw.width && !g_ddraw.bnet_active &&
+        (g_ddraw.renderer == d3d11_render_main || g_ddraw.renderer == ogl_render_main))
+    {
+        TRACE("     settings: a new picture, set up while it runs\n");
+
+        BOOL relock = g_mouse_locked;
+
+        if (relock)
+            mouse_unlock();
+
+        EnterCriticalSection(&g_ddraw.cs);
+        g_config.crt = crt;
+        dd_set_picture(g_ddraw.render.width, g_ddraw.render.height - g_ddraw.render.opengl_y_align);
+        InterlockedExchange(&g_ddraw.render.picture_changed, TRUE);
+        InterlockedExchange(&g_ddraw.render.surface_updated, TRUE);
+        LeaveCriticalSection(&g_ddraw.cs);
+
+        ReleaseSemaphore(g_ddraw.render.sem, 1, NULL);
+
+        if (relock)
+            mouse_lock();
+
         return;
     }
 
@@ -617,21 +847,40 @@ void dd_reload_settings(BOOL now)
     {
         /* For the next display mode */
         g_config.crt = crt;
+
+        if (renderer_changed && !g_ddraw.render.thread)
+            dd_switch_renderer();
+
+        if (display_changed && !g_ddraw.width)
+        {
+            g_config.windowed = kind == DISPLAY_KIND_WINDOW;
+            g_config.fullscreen = kind == DISPLAY_KIND_DESKTOP;
+        }
+
         return;
     }
 
-    TRACE("     crt-auto: new settings, setting up the picture again\n");
+    TRACE("     settings: new ones, setting up the picture again\n");
 
-    /* The renderer reads the colour settings while it starts */
-    EnterCriticalSection(&g_ddraw.cs);
-    g_ddraw.render.run = FALSE;
-    ReleaseSemaphore(g_ddraw.render.sem, 1, NULL);
-    LeaveCriticalSection(&g_ddraw.cs);
-
-    WaitForSingleObject(g_ddraw.render.thread, INFINITE);
-    g_ddraw.render.thread = NULL;
-
+    /* The renderer reads its settings while it starts */
+    dd_stop_render_thread();
     g_config.crt = crt;
+
+    if (renderer_changed)
+        dd_switch_renderer();
+
+    if (display_changed)
+    {
+        /* To the window, and on to the fullscreen it gives (Alt+Enter); between
+         * two fullscreens by way of the window */
+        if (dd_display_kind() != DISPLAY_KIND_WINDOW)
+            util_toggle_fullscreen();
+
+        if (kind != DISPLAY_KIND_WINDOW && dd_display_kind() == DISPLAY_KIND_WINDOW)
+            util_toggle_fullscreen();
+
+        return;
+    }
 
     dd_SetDisplayMode(0, 0, 0, 0);
 }
@@ -1013,105 +1262,7 @@ HRESULT dd_SetDisplayMode(DWORD dwWidth, DWORD dwHeight, DWORD dwBPP, DWORD dwFl
         }
     }
 
-    g_ddraw.render.viewport.width = g_ddraw.render.width;
-    g_ddraw.render.viewport.height = g_ddraw.render.height;
-    g_ddraw.render.viewport.x = 0;
-    g_ddraw.render.viewport.y = 0;
-
-    {
-        /* As in DOSBox Staging: the picture's size from the aspect, viewport
-         * and integer_scaling settings, and with shader=crt-auto the shader
-         * from the screen pixels per game line */
-        CRT_AUTO_DISPLAY display = dd_crt_auto_display();
-
-        g_ddraw.render.crt =
-            crt_auto_calc_layout(
-                &g_config.crt,
-                &display,
-                g_ddraw.width,
-                g_ddraw.height,
-                g_ddraw.render.width,
-                g_ddraw.render.height);
-
-        if (g_ddraw.render.crt.viewport_rejected)
-        {
-            TRACE(
-                "     the viewport is larger than the %dx%d desktop (scale %.2f), using fit\n",
-                display.desktop_width,
-                display.desktop_height,
-                display.scale);
-        }
-
-        g_ddraw.render.viewport.x = g_ddraw.render.crt.x;
-        g_ddraw.render.viewport.y = g_ddraw.render.crt.y;
-        g_ddraw.render.viewport.width = g_ddraw.render.crt.width;
-        g_ddraw.render.viewport.height = g_ddraw.render.crt.height;
-
-        TRACE(
-            "     picture: %ux%u in %dx%d: %s, %d px/line, render %dx%d, picture %d,%d %dx%d\n",
-            g_ddraw.width,
-            g_ddraw.height,
-            g_ddraw.render.width,
-            g_ddraw.render.height,
-            crt_auto_shader_name(g_ddraw.render.crt.shader),
-            g_ddraw.render.crt.pixels_per_scanline,
-            g_ddraw.render.crt.render_width,
-            g_ddraw.render.crt.render_height,
-            g_ddraw.render.crt.x,
-            g_ddraw.render.crt.y,
-            g_ddraw.render.crt.width,
-            g_ddraw.render.crt.height);
-    }
-
-    g_ddraw.render.scale_w = ((float)g_ddraw.render.viewport.width / g_ddraw.width);
-    g_ddraw.render.scale_h = ((float)g_ddraw.render.viewport.height / g_ddraw.height);
-    g_ddraw.render.unscale_w = ((float)g_ddraw.width / g_ddraw.render.viewport.width);
-    g_ddraw.render.unscale_h = ((float)g_ddraw.height / g_ddraw.render.viewport.height);
-
-    /* Hack for games that require the cursor to be in the exact center of the screen (Worms 2 / Atlantis) */
-    if (g_config.center_cursor_fix)
-    {
-        g_ddraw.mouse.scale_x = ((float)(g_ddraw.render.viewport.width) / (g_ddraw.width));
-        g_ddraw.mouse.scale_y = ((float)(g_ddraw.render.viewport.height) / (g_ddraw.height));
-        g_ddraw.mouse.unscale_x = ((float)(g_ddraw.width) / (g_ddraw.render.viewport.width));
-        g_ddraw.mouse.unscale_y = ((float)(g_ddraw.height) / (g_ddraw.render.viewport.height));
-    }
-    else
-    {
-        g_ddraw.mouse.scale_x = ((float)(g_ddraw.render.viewport.width - 1) / (g_ddraw.width - 1));
-        g_ddraw.mouse.scale_y = ((float)(g_ddraw.render.viewport.height - 1) / (g_ddraw.height - 1));
-        g_ddraw.mouse.unscale_x = ((float)(g_ddraw.width - 1) / (g_ddraw.render.viewport.width - 1));
-        g_ddraw.mouse.unscale_y = ((float)(g_ddraw.height - 1) / (g_ddraw.render.viewport.height - 1));
-    }
-
-    g_ddraw.mouse.x_adjust = g_ddraw.render.viewport.x;
-    g_ddraw.mouse.y_adjust = g_ddraw.render.viewport.y;
-
-    if (g_config.lock_mouse_top_left)
-    {
-        g_ddraw.mouse.x_adjust = 0;
-        g_ddraw.mouse.y_adjust = 0;
-    }
-
-    g_ddraw.mouse.rc.left = g_ddraw.mouse.x_adjust;
-    g_ddraw.mouse.rc.top = g_ddraw.mouse.y_adjust;
-    g_ddraw.mouse.rc.right = g_ddraw.width + g_ddraw.mouse.x_adjust;
-    g_ddraw.mouse.rc.bottom = g_ddraw.height + g_ddraw.mouse.y_adjust;
-
-    if (g_config.adjmouse)
-    {
-        g_ddraw.mouse.rc.right = g_ddraw.render.viewport.width + g_ddraw.mouse.x_adjust;
-        g_ddraw.mouse.rc.bottom = g_ddraw.render.viewport.height + g_ddraw.mouse.y_adjust;
-    }
-
-    {
-        /* With 'viewport=relative' the picture can be larger than the window;
-         * keep the cursor in the window */
-        g_ddraw.mouse.rc.left = max(g_ddraw.mouse.rc.left, 0);
-        g_ddraw.mouse.rc.top = max(g_ddraw.mouse.rc.top, 0);
-        g_ddraw.mouse.rc.right = min(g_ddraw.mouse.rc.right, (LONG)g_ddraw.render.width);
-        g_ddraw.mouse.rc.bottom = min(g_ddraw.mouse.rc.bottom, (LONG)g_ddraw.render.height);
-    }
+    dd_set_picture(g_ddraw.render.width, g_ddraw.render.height);
 
     if (nonexclusive || (g_config.nonexclusive && !g_config.windowed && g_ddraw.renderer == ogl_render_main))
     {
@@ -1749,11 +1900,11 @@ HRESULT dd_GetDeviceIdentifier(LPDDDEVICEIDENTIFIER pDDDI, DWORD dwFlags, REFIID
 static BOOL g_dd_d3d11_failed;
 static BOOL g_dd_ogl_failed;
 
-typedef DWORD(WINAPI* DD_RENDERER)(void);
-
 static DD_RENDERER dd_next_renderer(void)
 {
-    if (_strcmpi(g_config.renderer, "opengl") == 0 && !g_dd_ogl_failed)
+    /* Not on a window Direct3D 11 has shown its frames in: OpenGL's wouldn't */
+    if (_strcmpi(g_config.renderer, "opengl") == 0 && !g_dd_ogl_failed &&
+        (g_dd_d3d11_failed || !d3d11_flipped(g_ddraw.hwnd)))
         return ogl_render_main;
 
     if (!g_dd_d3d11_failed)

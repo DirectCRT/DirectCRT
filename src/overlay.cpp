@@ -55,6 +55,7 @@ static const ImVec4 COL_DIALOG(0.114f, 0.119f, 0.135f, 0.99f);
 static const ImVec4 COL_ROW_HOVER(0.165f, 0.173f, 0.192f, 1.0f);
 static const ImVec4 COL_ROW_ACTIVE(0.200f, 0.210f, 0.235f, 1.0f);
 static const ImVec4 COL_PILL(0.137f, 0.145f, 0.165f, 1.0f);
+static const ImVec4 COL_GROUP(0.128f, 0.140f, 0.172f, 1.0f);
 static const ImVec4 COL_PILL_HOVER(0.190f, 0.200f, 0.225f, 1.0f);
 static const ImVec4 COL_TEXT(0.925f, 0.925f, 0.930f, 1.0f);
 static const ImVec4 COL_DIM(0.600f, 0.610f, 0.640f, 1.0f);
@@ -310,7 +311,6 @@ static void overlay_draw_status(const OVERLAY_STATUS& status, int width, int can
 
     ImGui::SetNextWindowBgAlpha(status.opacity);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12.0f * sc, 9.0f * sc));
-    ImGui::PushStyleVar(ImGuiStyleVar_CellPadding, ImVec2(5.0f * sc, 1.5f * sc));
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(8.0f * sc, 3.0f * sc));
 
     ImGuiWindowFlags flags =
@@ -327,27 +327,29 @@ static void overlay_draw_status(const OVERLAY_STATUS& status, int width, int can
         }
         else
         {
-            float graph_width = OVERLAY_HISTORY * sc;
+            /* Two columns, as wide as their text this frame: a table would
+               take its width from the window, which takes its own from the
+               table, and it would hardly shrink when the size goes down */
+            float label_w = 0.0f, value_w = 0.0f, gap = 10.0f * sc;
 
-            if (ImGui::BeginTable("##rows", 2, ImGuiTableFlags_SizingFixedFit))
+            for (int i = 0; i < status.rows; i++)
             {
-                for (int i = 0; i < status.rows; i++)
-                {
-                    ImGui::TableNextRow();
-                    ImGui::TableNextColumn();
-                    ImGui::PushStyleColor(ImGuiCol_Text, COL_DIM);
-                    ImGui::TextUnformatted(status.row[i].label);
-                    ImGui::PopStyleColor();
-                    ImGui::TableNextColumn();
-                    ImGui::TextUnformatted(status.row[i].value);
-                }
-
-                ImGui::EndTable();
-
-                /* as wide as the table */
-                if (ImGui::GetItemRectSize().x > graph_width)
-                    graph_width = ImGui::GetItemRectSize().x;
+                label_w = ImMax(label_w, ImGui::CalcTextSize(status.row[i].label).x);
+                value_w = ImMax(value_w, ImGui::CalcTextSize(status.row[i].value).x);
             }
+
+            float x0 = ImGui::GetCursorPosX();
+
+            for (int i = 0; i < status.rows; i++)
+            {
+                ImGui::PushStyleColor(ImGuiCol_Text, COL_DIM);
+                ImGui::TextUnformatted(status.row[i].label);
+                ImGui::PopStyleColor();
+                ImGui::SameLine(x0 + label_w + gap);
+                ImGui::TextUnformatted(status.row[i].value);
+            }
+
+            float graph_width = ImMax(OVERLAY_HISTORY * sc, label_w + gap + value_w);
 
             ImGui::Dummy(ImVec2(0.0f, 2.0f * sc));
             overlay_draw_graph(status, graph_width, 44.0f * sc);
@@ -355,7 +357,7 @@ static void overlay_draw_status(const OVERLAY_STATUS& status, int width, int can
     }
 
     ImGui::End();
-    ImGui::PopStyleVar(3);
+    ImGui::PopStyleVar(2);
 }
 
 /* -------------------------------------------------------- the settings OSD */
@@ -1048,23 +1050,45 @@ static float ui_dt(void)
     return dt < 0.0f ? 0.0f : dt > 0.1f ? 0.1f : dt;
 }
 
+/* Something of the OSD moved this frame: a change waits until nothing does */
+static bool g_ui_moving;
+
 /* x moved toward target by a part of the way that depends on the time, not
- * the frame rate; within snap of it, it's there */
-static float ui_approach(float x, float target, float speed, float snap)
+ * the frame rate; within snap of it, it's there. min_rate = the least it
+ * moves a second, so it doesn't crawl the last of the way */
+static float ui_approach(float x, float target, float speed, float snap, float min_rate = 0.0f)
 {
-    x += (target - x) * (1.0f - expf(-ui_dt() * speed));
-    return fabsf(target - x) < snap ? target : x;
+    float d = target - x;
+    float step = d * (1.0f - expf(-ui_dt() * speed));
+    float least = ui_dt() * min_rate;
+
+    if (fabsf(step) < least)
+        step = fabsf(d) < least ? d : d > 0.0f ? least : -least;
+
+    x += step;
+
+    if (fabsf(target - x) < snap)
+        x = target;
+
+    if (x != target)
+        g_ui_moving = true;
+
+    return x;
 }
 
 /* A rectangle gliding to target: the highlight of a row, the pill of a
  * choice. It's kept relative to origin (where the window's content starts),
- * so it doesn't glide when the window scrolls. snap = jump there */
+ * so it doesn't glide when the window scrolls. snap = jump there; it jumps
+ * too when it wasn't there the frame before (a list opened again, its rows
+ * moved since), so it never glides in from where it was long ago */
 static ImRect ui_slide(ImGuiID id, const ImRect& target, ImVec2 origin, bool snap)
 {
     ImGuiStorage* st = ImGui::GetStateStorage();
+    ImGuiID frame_key = ImHashStr("##frame", 0, id);
+    int frame = ImGui::GetFrameCount();
     float to[4] = { target.Min.x - origin.x, target.Min.y - origin.y, target.Max.x - origin.x, target.Max.y - origin.y };
     float v[4];
-    bool known = st->GetBool(id, false) && !snap;
+    bool known = st->GetBool(id, false) && !snap && st->GetInt(frame_key, -10) >= frame - 1;
 
     for (int i = 0; i < 4; i++)
     {
@@ -1074,6 +1098,21 @@ static ImRect ui_slide(ImGuiID id, const ImRect& target, ImVec2 origin, bool sna
     }
 
     st->SetBool(id, true);
+    st->SetInt(frame_key, frame);
+    return ImRect(v[0] + origin.x, v[1] + origin.y, v[2] + origin.x, v[3] + origin.y);
+}
+
+/* Where ui_slide left it, held there (a highlight fading out); it stays
+ * known, so it glides from there if it's wanted again before it's gone */
+static ImRect ui_slide_hold(ImGuiID id, ImVec2 origin)
+{
+    ImGuiStorage* st = ImGui::GetStateStorage();
+    float v[4];
+
+    for (int i = 0; i < 4; i++)
+        v[i] = st->GetFloat(ImHashData(&i, sizeof(i), id), 0.0f);
+
+    st->SetInt(ImHashStr("##frame", 0, id), ImGui::GetFrameCount());
     return ImRect(v[0] + origin.x, v[1] + origin.y, v[2] + origin.x, v[3] + origin.y);
 }
 
@@ -1489,28 +1528,36 @@ static void menu_heading(const SETTING* s, bool first, float F)
     }
 }
 
-/* A group's heading: its icon and its name. Returns where it starts, in the
- * list's own coordinates */
+/* A group's heading: its icon and its name, large, on a band across the
+ * list. Returns where it starts, in the list's own coordinates */
 static float menu_group_heading(int tab, float F)
 {
     ImGuiWindow* window = ImGui::GetCurrentWindow();
-    float size = 1.25f * F;
+    float size = 1.45f * F;
     const char* text = settings_tab(tab);
     ImVec2 sz = ui_text_size(size, text);
     bool top = window->DC.CursorPos.y <= window->DC.CursorStartPos.y + 1.0f;
-    float above = top ? 0.3f * F : 1.6f * F;
+    float above = top ? 0.3f * F : 1.9f * F;
+    float pad = 0.45f * F;
 
     ImVec2 pos(window->DC.CursorPos.x, window->DC.CursorPos.y + above);
     float w = ImGui::GetContentRegionAvail().x;
-    ImRect bb(window->DC.CursorPos, ImVec2(pos.x + w, pos.y + sz.y + 0.2f * F));
+    ImRect band(ImVec2(pos.x + 0.35f * F, pos.y), ImVec2(pos.x + w - 0.35f * F, floorf(pos.y + sz.y + 2.0f * pad)));
+    ImRect bb(window->DC.CursorPos, ImVec2(pos.x + w, band.Max.y + 0.25f * F));
     ImGui::ItemSize(bb);
 
     if (ImGui::ItemAdd(bb, 0))
     {
         ImDrawList* dl = window->DrawList;
-        float ih = 1.45f * F;
-        ui_icon(dl, menu_tab_icon(tab), ImVec2(pos.x + 0.7f * F + ih * 0.5f, pos.y + sz.y * 0.5f), ih, ui_col(COL_ACCENT_HI));
-        ui_text(dl, size, ImVec2(pos.x + 0.7f * F + ih + 0.55f * F, pos.y), ui_col(COL_TEXT), text);
+        float r = 0.3f * F;
+        dl->AddRectFilled(band.Min, band.Max, ui_col(COL_GROUP), r);
+        dl->AddRectFilled(band.Min, ImVec2(band.Min.x + floorf(0.22f * F), band.Max.y), ui_col(COL_ACCENT), r, ImDrawFlags_RoundLeft);
+
+        float ih = 1.6f * F;
+        float cy = (band.Min.y + band.Max.y) * 0.5f;
+        float x = band.Min.x + 0.9f * F;
+        ui_icon(dl, menu_tab_icon(tab), ImVec2(x + ih * 0.5f, cy), ih, ui_col(COL_ACCENT_HI));
+        ui_text(dl, size, ImVec2(x + ih + 0.6f * F, floorf(cy - sz.y * 0.5f)), ui_col(COL_TEXT), text);
     }
 
     float y = pos.y - 0.5f * F - window->DC.CursorStartPos.y;
@@ -1859,8 +1906,11 @@ static bool ui_int_field(const char* str_id, int v, int lo, int hi, float w, int
 }
 
 /* A label, a slider and a box to type the number in. Returns true and the
- * number when the slider is let go or a number is typed in */
-static bool ui_slider_box(const char* str_id, const char* label, int v, int lo, int hi, float F, int* out)
+ * number when the slider is let go or a number is typed in. The box takes
+ * numbers up to box_hi (0 = hi), past the slider's end; live = the number
+ * while the slider is dragged, -1 otherwise */
+static bool ui_slider_box(const char* str_id, const char* label, int v, int lo, int hi, float F, int* out,
+                          int box_hi = 0, int* live = NULL)
 {
     ImGuiStorage* st = ImGui::GetStateStorage();
     const ImGuiStyle& style = ImGui::GetStyle();
@@ -1868,6 +1918,7 @@ static bool ui_slider_box(const char* str_id, const char* label, int v, int lo, 
     ImGuiID dragging = ImGui::GetID("##dragging"), dragged = ImGui::GetID("##dragged");
     bool commit = false;
     int cur = st->GetBool(dragging) ? st->GetInt(dragged, v) : v;
+    int typed = cur;
 
     if (label)
     {
@@ -1890,6 +1941,7 @@ static bool ui_slider_box(const char* str_id, const char* label, int v, int lo, 
     {
         st->SetBool(dragging, true);
         st->SetInt(dragged, cur);
+        typed = cur;
     }
 
     if (ImGui::IsItemDeactivated() && st->GetBool(dragging))
@@ -1899,9 +1951,12 @@ static bool ui_slider_box(const char* str_id, const char* label, int v, int lo, 
         commit = true;
     }
 
+    if (live)
+        *live = st->GetBool(dragging) ? st->GetInt(dragged, v) : -1;
+
     ImGui::SameLine();
 
-    if (ui_int_field("##box", cur, lo, hi, box, out))
+    if (ui_int_field("##box", typed, lo, box_hi > hi ? box_hi : hi, box, out))
         commit = true;
 
     ImGui::PopID();
@@ -2124,16 +2179,21 @@ static void menu_viewport(int setting, const SETTING* s, float F)
     }
     else if (mode == VIEWPORT_RELATIVE)
     {
+        /* The slider to 100% (inside the window or screen), the box to
+         * 300%; linked, the other slider follows the one dragged */
+        static int live_h = -1, live_v = -1;
         int n;
+        int show_h = linked && live_v >= 0 ? live_v : a;
+        int show_v = linked && live_h >= 0 ? live_h : b;
 
-        if (ui_slider_box("##h", "Horizontal", a, 20, 300, F, &n))
+        if (ui_slider_box("##h", "Horizontal", show_h, 20, 100, F, &n, 300, &live_h))
         {
             write_mode = mode;
             wa = n;
             wb = linked ? n : b;
         }
 
-        if (ui_slider_box("##v", "Vertical", b, 20, 300, F, &n))
+        if (ui_slider_box("##v", "Vertical", show_v, 20, 100, F, &n, 300, &live_v))
         {
             write_mode = mode;
             wa = linked ? n : a;
@@ -2195,6 +2255,10 @@ static void menu_editor(int first, int count, float F)
 
     if (s->apply == SETTING_RESTART)
         ImGui::TextColored(COL_ACCENT_HI, "Takes effect when the game starts again");
+
+    if (s->key && !strcmp(s->key, "renderer") && dd_opengl_waits())
+        ImGui::TextColored(COL_ACCENT_HI, "OpenGL takes over when the game starts again: Windows shows only "
+            "Direct3D 11 in this window now that it has been used");
 
     ImGui::PopTextWrapPos();
     ImGui::PopFont();
@@ -2401,7 +2465,7 @@ static float menu_body(int first, int count, float F, float* bottom)
         return 0.0f;
 
     /* Its height isn't known until it's laid out once: a pixel of it then */
-    float h = open && full <= 0.0f ? 1.0f : ui_approach(shown, open ? full : 0.0f, 16.0f, 0.5f);
+    float h = open && full <= 0.0f ? 1.0f : ui_approach(shown, open ? full : 0.0f, 16.0f, 0.5f, 30.0f * F);
     st->SetFloat(shown_id, h);
 
     if (h <= 0.0f)
@@ -2439,7 +2503,12 @@ static float menu_body(int first, int count, float F, float* bottom)
     *bottom = ImGui::GetItemRectMax().y;
 
     full = st->GetFloat(full_id, 0.0f);
-    return full > 0.0f ? ImClamp(h / full, 0.0f, 1.0f) : 0.0f;
+    float amount = full > 0.0f ? ImClamp(h / full, 0.0f, 1.0f) : 0.0f;
+
+    /* The gap under it opens and shuts with it: else it would go at once
+       when it's shut, a jump at the end */
+    window->DC.CursorPos.y = *bottom + ImGui::GetStyle().ItemSpacing.y * amount;
+    return amount;
 }
 
 /* How far a row is open (as menu_body left it), in its ID scope */
@@ -2652,9 +2721,9 @@ static void menu_list(float F)
     else if (alpha > 0.0f)
     {
         /* Fading where it was */
-        ImRect r = ui_slide(hl_id, ImRect(0, 0, 0, 0), ImVec2(0, 0), false);
-        (void)r;
+        ImRect r = ui_slide_hold(hl_id, origin);
         alpha = ui_approach(alpha, 0.0f, 20.0f, 0.02f);
+        dl->AddRectFilled(r.Min, r.Max, ui_col(COL_ROW_HOVER, alpha), rounding);
     }
 
     st->SetFloat(hl_alpha, alpha);
@@ -2735,13 +2804,13 @@ static float menu_hint(ImDrawList* dl, float x, float cy, float min_x, const cha
 static void menu_draw(int width, int canvas_height, float F)
 {
     float ch = (float)canvas_height;
-    float pw = width * 0.42f;
+    float pw = width * 0.32f;
 
-    if (pw < 34.0f * F)
-        pw = 34.0f * F;
+    if (pw < 27.0f * F)
+        pw = 27.0f * F;
 
-    if (pw > 52.0f * F)
-        pw = 52.0f * F;
+    if (pw > 40.0f * F)
+        pw = 40.0f * F;
 
     if (pw > width)
         pw = (float)width;
@@ -2797,12 +2866,18 @@ static void menu_draw(int width, int canvas_height, float F)
             g_focus_rows = true;
 
         /* The header: the group's name, and the groups' icons to go to them */
-        float hh = floorf(3.4f * F);
+        float bs = 2.2f * F;
+        float row1 = floorf(3.4f * F);
+        float icons_w = groups * (bs + 0.1f * F);
+
+        /* The groups' icons beside the name, or on a row of their own when
+           they'd leave it too little room */
+        bool two_rows = pw - 0.5f * F - bs - 0.7f * F - icons_w - 1.5f * F < 9.0f * F;
+        float hh = two_rows ? row1 + floorf(2.6f * F) : row1;
         dl->AddRectFilled(ImVec2(0, 0), ImVec2(pw, hh), ui_col(COL_BAR));
         dl->AddLine(ImVec2(0, hh - 0.5f), ImVec2(pw, hh - 0.5f), ui_col(COL_RULE));
 
-        float bs = 2.2f * F;
-        float by = (hh - bs) * 0.5f;
+        float by = (row1 - bs) * 0.5f;
         float x = pw - 0.5f * F - bs;
 
         ImGui::SetCursorPos(ImVec2(x, by));
@@ -2812,7 +2887,15 @@ static void menu_draw(int width, int canvas_height, float F)
 
         ImGui::SetItemTooltip("Close");
 
-        x -= 0.7f * F;
+        float title_end = x - 0.6f * F;
+
+        if (two_rows)
+        {
+            by = hh - bs - 0.2f * F;
+            x = floorf((pw + icons_w) * 0.5f);
+        }
+        else
+            x -= 0.7f * F;
         ImGui::PushItemFlag(ImGuiItemFlags_NoNav, true);
         ImRect underline;
 
@@ -2847,11 +2930,11 @@ static void menu_draw(int width, int canvas_height, float F)
         }
 
         float title_x = 0.9f * F;
-        float title_w = x - 0.6f * F - title_x;
+        float title_w = (two_rows ? title_end : x - 0.6f * F) - title_x;
         char buf[128];
         float sub_size = 0.78f * F, group_size = 1.35f * F;
         ImVec2 ss = ui_text_size(sub_size, "A"), gs = ui_text_size(group_size, "A");
-        float ty = (hh - ss.y - gs.y) * 0.5f;
+        float ty = (row1 - ss.y - gs.y) * 0.5f;
         ui_text(dl, sub_size, ImVec2(title_x, ty), ui_col(COL_DIM), ui_fit(sub_size, "DirectCRT settings", title_w, buf, sizeof(buf)));
         ui_text(dl, group_size, ImVec2(title_x, ty + ss.y), ui_col(COL_TEXT),
             ui_fit(group_size, settings_tab(g_group) ? settings_tab(g_group) : "", title_w, buf, sizeof(buf)));
@@ -2946,7 +3029,15 @@ static void overlay_build_frame(int width, int height, int canvas_height)
     OVERLAY_STATUS status;
 
     if (status_shown)
+    {
         overlay_get_status(&status, width, canvas_height);
+
+        /* The settings OSD is on the left: the status OSD steps right for it */
+        if (menu && status.corner == OVERLAY_TOP_LEFT)
+            status.corner = OVERLAY_TOP_RIGHT;
+        else if (menu && status.corner == OVERLAY_BOTTOM_LEFT)
+            status.corner = OVERLAY_BOTTOM_RIGHT;
+    }
 
     /* Each in its own size */
     float menu_font = menu ? overlay_menu_font_size(canvas_height) : 13.0f;
@@ -3010,6 +3101,12 @@ static void overlay_build_frame(int width, int height, int canvas_height)
     g_menu_drawn = menu;
 
     ImGui::Render();
+
+    /* A change from the settings OSD is applied when it stands still */
+    if (menu)
+        overlay_menu_frame_drawn(g_ui_moving);
+
+    g_ui_moving = false;
 }
 
 /* ------------------------------------------------------------ Direct3D 11 */

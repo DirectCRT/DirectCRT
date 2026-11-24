@@ -78,8 +78,9 @@ static void test_1440p()
      * vga-1080p rather than the fake double scan */
     LAYOUT(400, 300, 2560, 1440, CRT_SHADER_VGA_1080P, 2, 800, 600, 480, 120, 1600, 1200);
 
-    /* 512x384 is doubled to 1024x768: 1.875x, sharp, no snapping */
-    LAYOUT(512, 384, 2560, 1440, CRT_SHADER_SHARP, 1, 512, 384, 320, 0, 1920, 1440);
+    /* 512x384 is doubled to 1024x768: 1.875x, sharp, on the game's picture at
+     * 3.75x, snapped to 3.5x (unlike DOSBox, whose auto doesn't snap sharp) */
+    LAYOUT(512, 384, 2560, 1440, CRT_SHADER_SHARP, 1, 512, 384, 384, 48, 1792, 1344);
 }
 
 static void test_1080p()
@@ -92,8 +93,8 @@ static void test_1080p()
     LAYOUT(320, 240, 1920, 1080, CRT_SHADER_VGA_1080P, 2, 640, 480, 320, 60, 1280, 960);
     LAYOUT(640, 480, 1920, 1080, CRT_SHADER_VGA_1080P, 2, 640, 480, 320, 60, 1280, 960);
 
-    /* 1.8x: sharp fills the height */
-    LAYOUT(800, 600, 1920, 1080, CRT_SHADER_SHARP, 1, 800, 600, 240, 0, 1440, 1080);
+    /* 1.8x: sharp, snapped to 1x */
+    LAYOUT(800, 600, 1920, 1080, CRT_SHADER_SHARP, 1, 800, 600, 560, 240, 800, 600);
 }
 
 static void test_4k()
@@ -113,8 +114,8 @@ static void test_windows()
     /* A windowed game shown 1:1 */
     LAYOUT(640, 480, 640, 480, CRT_SHADER_SHARP, 1, 640, 480, 0, 0, 640, 480);
 
-    /* A tall, narrow window: the width limits the picture */
-    LAYOUT(640, 480, 1000, 1440, CRT_SHADER_SHARP, 1, 640, 480, 0, 345, 1000, 750);
+    /* A tall, narrow window: the width limits the picture, 1.56x, snapped to 1x */
+    LAYOUT(640, 480, 1000, 1440, CRT_SHADER_SHARP, 1, 640, 480, 180, 480, 640, 480);
 
     /* A canvas smaller than the game */
     LAYOUT(800, 600, 400, 300, CRT_SHADER_SHARP, 0, 800, 600, 0, 0, 400, 300);
@@ -129,8 +130,8 @@ static void test_aspect()
     LAYOUT(1280, 720, 2560, 1440, CRT_SHADER_VGA_1080P, 2, 1280, 720, 0, 0, 2560, 1440);
 
     /* So does 1280x1024 (5:4), unlike in DOSBox, and 1280x800 (16:10) */
-    LAYOUT(1280, 1024, 2560, 1440, CRT_SHADER_SHARP, 1, 1280, 1024, 380, 0, 1800, 1440);
-    LAYOUT(1280, 800, 2560, 1440, CRT_SHADER_SHARP, 1, 1280, 800, 128, 0, 2304, 1440);
+    LAYOUT(1280, 1024, 2560, 1440, CRT_SHADER_SHARP, 1, 1280, 1024, 640, 208, 1280, 1024);
+    LAYOUT(1280, 800, 2560, 1440, CRT_SHADER_SHARP, 1, 1280, 800, 640, 320, 1280, 800);
 }
 
 static void test_doubling_flags()
@@ -226,9 +227,9 @@ static void test_viewport()
     s = settings_with("viewport", "3000x2000px");
     LAYOUT_WITH(s, &d, 640, 480, 2560, 1440, CRT_SHADER_HYLLIAN_VGA_1440P, 3, 640, 480, 320, 0, 1920, 1440);
 
-    /* relative: half of the 1920x1440 4:3 box, 1.5x, so sharp */
+    /* relative: half of the 1920x1440 4:3 box, 1.5x, so sharp, snapped to 1x */
     s = settings_with("viewport", "relative 50% 50%");
-    LAYOUT_WITH(s, NULL, 640, 480, 2560, 1440, CRT_SHADER_SHARP, 1, 640, 480, 800, 360, 960, 720);
+    LAYOUT_WITH(s, NULL, 640, 480, 2560, 1440, CRT_SHADER_SHARP, 1, 640, 480, 960, 480, 640, 480);
 
     /* relative can go past the canvas */
     s = settings_with("viewport", "relative 200% 200%");
@@ -411,23 +412,24 @@ static void test_fixed_shaders()
     CHECK(!crt_auto_set(&s, "shader", "crt/vga-1080p") && s.shader == CRT_SHADER_SETTING_CRT_AUTO);
 
     /* sharp and nearest get the game's picture as it is, bilinear the doubled
-     * one; none of them snaps with integer_scaling = auto */
+     * one; integer_scaling = auto snaps them as the CRT shaders (7.2x isn't
+     * snapped, 4.5x is a half step, 2.25x becomes 2x, 3.6x becomes 3.5x) */
     s = settings_with("shader", "sharp");
     LAYOUT_WITH(s, NULL, 320, 200, 2560, 1440, CRT_SHADER_SHARP, 3, 320, 200, 320, 0, 1920, 1440);
     LAYOUT_WITH(s, NULL, 640, 480, 3840, 2160, CRT_SHADER_SHARP, 4, 640, 480, 480, 0, 2880, 2160);
 
     s = settings_with("shader", "nearest");
     LAYOUT_WITH(s, NULL, 320, 200, 2560, 1440, CRT_SHADER_NEAREST, 3, 320, 200, 320, 0, 1920, 1440);
-    LAYOUT_WITH(s, NULL, 640, 480, 1920, 1080, CRT_SHADER_NEAREST, 2, 640, 480, 240, 0, 1440, 1080);
+    LAYOUT_WITH(s, NULL, 640, 480, 1920, 1080, CRT_SHADER_NEAREST, 2, 640, 480, 320, 60, 1280, 960);
 
     s = settings_with("shader", "bilinear");
-    LAYOUT_WITH(s, NULL, 320, 200, 2560, 1440, CRT_SHADER_BILINEAR, 3, 640, 400, 320, 0, 1920, 1440);
-    LAYOUT_WITH(s, NULL, 640, 480, 1920, 1080, CRT_SHADER_BILINEAR, 2, 640, 480, 240, 0, 1440, 1080);
+    LAYOUT_WITH(s, NULL, 320, 200, 2560, 1440, CRT_SHADER_BILINEAR, 3, 640, 400, 347, 20, 1867, 1400);
+    LAYOUT_WITH(s, NULL, 640, 480, 1920, 1080, CRT_SHADER_BILINEAR, 2, 640, 480, 320, 60, 1280, 960);
 
     /* A small window: still the fixed shader */
     LAYOUT_WITH(s, NULL, 640, 480, 640, 480, CRT_SHADER_BILINEAR, 1, 640, 480, 0, 0, 640, 480);
 
-    /* integer_scaling = vertical snaps every shader */
+    /* integer_scaling = vertical snaps above 5x too: 7.2x becomes 7x */
     s = settings_with("shader", "nearest");
     crt_auto_set(&s, "integer_scaling", "vertical");
     LAYOUT_WITH(s, NULL, 320, 200, 2560, 1440, CRT_SHADER_NEAREST, 3, 320, 200, 347, 20, 1867, 1400);
