@@ -1,4 +1,7 @@
 // The built-in test image, a photo shown 1:1 by the Test image pattern
 #include "resource.h"
 
+// A monitor showing colour bars; make_icon.py draws it
+IDI_DDTEST ICON "ddtest.ico"
+
 IDR_TESTIMAGE RCDATA "testimage.png"

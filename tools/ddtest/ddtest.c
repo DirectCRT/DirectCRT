@@ -21,6 +21,7 @@
  */
 
 #include "ddtest.h"
+#include "resource.h"
 
 #include <commdlg.h>
 #include <math.h>
@@ -50,11 +51,11 @@ enum { PRESENT_FLIP, PRESENT_BLT, PRESENT_VBLANK, PRESENT_LOCK, PRESENT_WINDOWED
 /* What the program asks DirectDraw for. DirectCRT follows it with
    display=auto; display=window/fullscreen override it. */
 static const char* PRESENT_NAMES[PRESENT_COUNT] = {
-    "Exclusive fullscreen, page flipping",
-    "Exclusive fullscreen, Blt to the primary surface",
-    "Exclusive fullscreen, WaitForVerticalBlank, then Blt to the primary",
-    "Exclusive fullscreen, write the primary surface",
-    "Windowed (normal cooperative level), Blt to the window",
+    "Fullscreen, page flipping",
+    "Fullscreen, Blt to the primary surface",
+    "Fullscreen, WaitForVerticalBlank, then Blt to the primary",
+    "Fullscreen, write the primary surface",
+    "Windowed, Blt to the window",
 };
 
 static const char* PRESENT_SHORT[PRESENT_COUNT] = { "flip", "blt", "vblank", "lock", "windowed" };
@@ -149,7 +150,7 @@ static struct
     HWND panel, display;
     HWND cb_res, ed_width, ed_height, rb_bpp[BPP_COUNT], ed_refresh, ed_fps;
     HWND rb_ddraw[DDRAW_COUNT], rb_present[PRESENT_COUNT], cb_pattern, chk_info, chk_mouse;
-    HWND ed_image, cb_modes, st_status;
+    HWND ed_image, cb_modes, st_status, lb_dll, st_dll;
     HWND bt_browse, bt_imgsize, bt_query, bt_run, bt_stop;
     HWND lb_size, lb_x, lb_bpp, lb_refresh, lb_hz, lb_fps, lb_fps_unit;
     HWND lb_ddraw, lb_present, lb_pattern, lb_image, st_image_note, lb_modes;
@@ -1877,6 +1878,10 @@ static void create_controls(void)
     const DWORD first_radio = radio | WS_GROUP | WS_TABSTOP;
 
     /* Created in tab order */
+    /* The ddraw.dll a run loads; long paths lose their middle */
+    g.lb_dll = add_label("ddraw.dll:");
+    g.st_dll = add_control("STATIC", "", SS_LEFT | SS_NOPREFIX | SS_PATHELLIPSIS, -1);
+
     g.lb_size = add_label("Resolution:");
     g.cb_res = add_control("COMBOBOX", "", combo, ID_RES);
     for (int i = 0; i < RES_COUNT; i++)
@@ -1985,7 +1990,7 @@ static SIZE layout_controls(void)
     int eh = line + S(7);
     int edy = (ch - eh) / 2;
 
-    const char* labels[] = { "Resolution:", "Bit depth:", "Refresh rate:", "Frame limit:", "Interface:", "Presentation:",
+    const char* labels[] = { "ddraw.dll:", "Resolution:", "Bit depth:", "Refresh rate:", "Frame limit:", "Interface:", "Presentation:",
                              "Pattern:", "Custom image:", "DirectDraw modes:" };
     int label_w = 0;
     for (int i = 0; i < (int)(sizeof(labels) / sizeof(labels[0])); i++)
@@ -2017,6 +2022,10 @@ static SIZE layout_controls(void)
 
     int full_w = fx + field_w - margin;
     int y = margin;
+
+    place(g.lb_dll, margin, y + text_dy, label_w, line);
+    place(g.st_dll, fx, y + text_dy, field_w, line);
+    y += row;
 
     /* Resolution, and the custom size next to it */
     place(g.lb_size, margin, y + text_dy, label_w, line);
@@ -2099,8 +2108,8 @@ static SIZE layout_controls(void)
     place(g.bt_stop, fx + big_w + gap, y, big_w, big_h);
     y += big_h + S(14);
 
-    /* State, the ddraw.dll path and the last error; the last two may wrap */
-    int status_h = line * 5 + S(6);
+    /* State and the last error; either may wrap */
+    int status_h = line * 4 + S(6);
     place(g.st_status, margin, y, full_w, status_h);
     y += status_h + margin;
 
@@ -2299,15 +2308,18 @@ static void update_status(void)
     state[sizeof(state) - 1] = '\0';
 
     char text[1500];
-    _snprintf(text, sizeof(text) - 1, "%s\r\nddraw.dll: %s\r\n%s%s", state,
-              g.ddraw_path[0] ? g.ddraw_path : "(not loaded)",
-              g.error[0] ? "Last error: " : "", g.error);
+    _snprintf(text, sizeof(text) - 1, "%s\r\n%s%s", state, g.error[0] ? "Last error: " : "", g.error);
     text[sizeof(text) - 1] = '\0';
 
     char old[1500];
     GetWindowTextA(g.st_status, old, sizeof(old));
     if (strcmp(old, text) != 0)
         SetWindowTextA(g.st_status, text);
+
+    const char* dll = g.ddraw_path[0] ? g.ddraw_path : "(not loaded)";
+    GetWindowTextA(g.st_dll, old, sizeof(old));
+    if (strcmp(old, dll) != 0)
+        SetWindowTextA(g.st_dll, dll);
 }
 
 /* Run starts a test with the panel's settings. The button is disabled during
@@ -2989,20 +3001,25 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
 
     load_ddraw();
 
-    WNDCLASSA wc;
+    WNDCLASSEXA wc;
     ZeroMemory(&wc, sizeof(wc));
+    wc.cbSize = sizeof(wc);
     wc.lpfnWndProc = panel_proc;
     wc.hInstance = inst;
     wc.hCursor = LoadCursor(NULL, IDC_ARROW);
-    wc.hIcon = LoadIcon(NULL, IDI_APPLICATION);
+    /* Each size drawn for itself: the title bar's from the small one */
+    wc.hIcon = (HICON)LoadImageA(inst, MAKEINTRESOURCEA(IDI_DDTEST), IMAGE_ICON,
+                                 GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON), 0);
+    wc.hIconSm = (HICON)LoadImageA(inst, MAKEINTRESOURCEA(IDI_DDTEST), IMAGE_ICON,
+                                   GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), 0);
     wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
     wc.lpszClassName = "DDTestPanel";
-    RegisterClassA(&wc);
+    RegisterClassExA(&wc);
 
     wc.lpfnWndProc = display_proc;
     wc.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
     wc.lpszClassName = "DDTestDisplay";
-    RegisterClassA(&wc);
+    RegisterClassExA(&wc);
 
     /* The panel sizes itself to its contents when it's created */
     CreateWindowExA(0, "DDTestPanel", "ddtest - DirectDraw test patterns",

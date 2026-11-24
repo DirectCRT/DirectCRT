@@ -64,12 +64,14 @@ DirectDraw for. DirectCRT follows the request with `display=auto` (the default):
 a window for the windowed method, fullscreen at the desktop resolution for the
 others. `display=original` switches the monitor to the resolution instead.
 `display=window` and `display=fullscreen` force one or the other whatever is
-asked.
+asked. The fullscreen methods all ask for exclusive fullscreen
+(`DDSCL_EXCLUSIVE | DDSCL_FULLSCREEN`), the only way DirectDraw goes
+fullscreen.
 
-- **Exclusive fullscreen, page flipping** - a primary surface with one back buffer, `Flip`
-- **Exclusive fullscreen, Blt to the primary surface** - draw into an off-screen surface, `Blt` it to the primary
-- **Exclusive fullscreen, WaitForVerticalBlank, then Blt to the primary** - the same, waiting for the vertical blank first, as many games did instead of flipping
-- **Exclusive fullscreen, write the primary surface** - write straight into the primary surface
+- **Fullscreen, page flipping** - a primary surface with one back buffer, `Flip`
+- **Fullscreen, Blt to the primary surface** - draw into an off-screen surface, `Blt` it to the primary
+- **Fullscreen, WaitForVerticalBlank, then Blt to the primary** - the same, waiting for the vertical blank first, as many games did instead of flipping
+- **Fullscreen, write the primary surface** - write straight into the primary surface
 - **Windowed** - normal cooperative level, a clipper, and `Blt` into the window
 
 **Interface** picks the DirectDraw interface the program uses, as games of

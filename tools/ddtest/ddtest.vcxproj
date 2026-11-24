@@ -86,6 +86,8 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="testimage.png" />
+    <None Include="ddtest.ico" />
+    <None Include="make_icon.py" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>
