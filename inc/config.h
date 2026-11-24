@@ -27,6 +27,7 @@ typedef struct CNCDDRAWCONFIG
     WINDOW_POSITION window_position;
     BOOL window_decorations;
     BOOL window_resizable;
+    BOOL fullscreen_minimize; /* when the game loses the focus, as exclusive fullscreen did */
     REMEMBER_WINDOW remember_window;
     int maxfps;
     BOOL vsync;

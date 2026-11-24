@@ -158,6 +158,7 @@ Why:
 
 ```ini
 display=auto            ; auto, window, fullscreen, original
+fullscreen_minimize=off ; off, on
 window_size=default     ; default (= medium), small, medium, large, unscaled, WxH, WxHpx
 window_position=auto    ; auto, X,Y, X,Ypx, X,Y%
 window_decorations=on
@@ -182,6 +183,12 @@ renderer=auto           ; auto (Direct3D 11, then OpenGL), direct3d11, opengl
 
 - **Fullscreen at the desktop resolution** scales the picture to the screen.
   It's what `windowed=auto` with `fullscreen=true` does now.
+  - It's a borderless window, never exclusive fullscreen. When the game loses
+    the focus (Alt+Tab, the Windows key, a click on another screen), it stays
+    shown behind the other windows and the cursor is free, as a borderless
+    window's would be; it isn't always on top. cnc-ddraw minimized it instead,
+    as exclusive fullscreen does. `fullscreen_minimize=on` brings that back,
+    for games that misbehave when they keep being shown.
 - **`original`** is what Windows' own DirectDraw did, and DirectCRT's default
   until now. The monitor, or the graphics card's scaler as set in its driver's
   control panel, stretches the picture to the panel. It's for real CRTs,
@@ -198,6 +205,8 @@ renderer=auto           ; auto (Direct3D 11, then OpenGL), direct3d11, opengl
   - Where a mode change fails without an error (Wayland under Wine), it falls
     back to fullscreen at the desktop resolution, as now.
   - The refresh rate is the game's, or `refresh_rate`.
+  - It's minimized when the game loses the focus, the desktop's mode coming
+    back, whatever `fullscreen_minimize` says.
   - The name comes from old DOSBox's `fullresolution`, whose `original` and
     `desktop` made the same choice.
 - **One setting decides two things,** how the game starts and which fullscreen

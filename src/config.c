@@ -447,6 +447,9 @@ static void cfg_load_display_settings()
 
     cfg_get_new_or_old("window_resizable", "on", cfg_legacy_resizable, "resizable", value, sizeof(value));
     g_config.window_resizable = cfg_parse_on_off("window_resizable", value);
+
+    cfg_get_string("fullscreen_minimize", "off", value, sizeof(value));
+    g_config.fullscreen_minimize = cfg_parse_on_off("fullscreen_minimize", value);
 }
 
 /* maxfps to screenshotdir: they apply while the game runs too, the picture

@@ -613,6 +613,16 @@ typedef DWORD(WINAPI* DD_RENDERER)(void);
 
 static DD_RENDERER dd_next_renderer(void);
 
+/* Fullscreen at the desktop resolution as a borderless window: it stays
+ * shown behind the other windows when the game loses the focus, so it isn't
+ * always on top. fullscreen_minimize=on minimizes it instead, as exclusive
+ * fullscreen did; display=original always does, the desktop's resolution
+ * coming back */
+BOOL dd_fullscreen_stays(void)
+{
+    return !g_config.windowed && g_config.fullscreen && !g_config.fullscreen_minimize;
+}
+
 /* Whether renderer=opengl waits for the game to start again: Direct3D 11
  * keeps going in the window it has shown its frames in (dd_next_renderer) */
 BOOL dd_opengl_waits(void)
@@ -762,6 +772,7 @@ void dd_reload_settings(BOOL now)
     WINDOW_POSITION window_position = g_config.window_position;
     BOOL decorations = g_config.window_decorations;
     BOOL resizable = g_config.window_resizable;
+    BOOL fullscreen_minimize = g_config.fullscreen_minimize;
     int maxfps = g_config.maxfps;
     BOOL vsync = g_config.vsync;
     BOOL adjmouse = g_config.adjmouse;
@@ -795,7 +806,8 @@ void dd_reload_settings(BOOL now)
     }
 
     BOOL window_changed = size_changed || position_changed ||
-        decorations != g_config.window_decorations || resizable != g_config.window_resizable;
+        decorations != g_config.window_decorations || resizable != g_config.window_resizable ||
+        fullscreen_minimize != g_config.fullscreen_minimize;
     /* Only when another one would run: OpenGL can wait (dd_opengl_waits) */
     BOOL renderer_changed = _stricmp(renderer, g_config.renderer) != 0 &&
         (!g_ddraw.renderer || dd_next_renderer() != g_ddraw.renderer);
@@ -1487,7 +1499,7 @@ HRESULT dd_SetDisplayMode(DWORD dwWidth, DWORD dwHeight, DWORD dwBPP, DWORD dwFl
 
         real_SetWindowPos(
             g_ddraw.hwnd,
-            HWND_TOPMOST,
+            dd_fullscreen_stays() ? HWND_NOTOPMOST : HWND_TOPMOST,
             0,
             0,
             g_ddraw.render.width,

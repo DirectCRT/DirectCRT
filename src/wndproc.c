@@ -317,7 +317,7 @@ LRESULT CALLBACK fake_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam
 
             real_SetWindowPos(
                 g_ddraw.hwnd,
-                HWND_TOPMOST,
+                dd_fullscreen_stays() ? HWND_NOTOPMOST : HWND_TOPMOST,
                 1,
                 1,
                 g_ddraw.render.width,
@@ -326,7 +326,7 @@ LRESULT CALLBACK fake_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam
 
             real_SetWindowPos(
                 g_ddraw.hwnd,
-                HWND_TOPMOST,
+                dd_fullscreen_stays() ? HWND_NOTOPMOST : HWND_TOPMOST,
                 0,
                 0,
                 g_ddraw.render.width,
@@ -652,10 +652,21 @@ LRESULT CALLBACK fake_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam
         {
             if (g_ddraw.got_child_windows)
                 RedrawWindow(hWnd, NULL, NULL, RDW_INVALIDATE | RDW_ALLCHILDREN);
+
+            /* Fullscreen as a borderless window: the cursor is locked again
+               when it's activated, from another program or another of the
+               game's own windows */
+            if (dd_fullscreen_stays())
+                mouse_lock();
         }
 
         if (LOWORD(wParam) == WA_INACTIVE)
         {
+            /* Shown behind another of the game's own windows: the cursor
+               goes to it, as to another program's (WM_ACTIVATEAPP) */
+            if (dd_fullscreen_stays())
+                mouse_unlock();
+
             if (g_config.windowed && !g_config.fullscreen && lParam && GetParent((HWND)lParam) == hWnd)
             {
                 char class_name[MAX_PATH] = { 0 };
@@ -713,7 +724,11 @@ LRESULT CALLBACK fake_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam
     {
         if (wParam)
         {
-            if (!g_config.windowed)
+            /* Fullscreen as a borderless window (dd_fullscreen_stays) kept its
+               mode and stayed shown: as borderless, the cursor is locked only
+               when the window itself is active (WM_ACTIVATE too), not another
+               of the game's windows */
+            if (!g_config.windowed && !dd_fullscreen_stays())
             {
                 ChangeDisplaySettings(&g_ddraw.render.mode, CDS_FULLSCREEN);
                 real_ShowWindow(g_ddraw.hwnd, SW_RESTORE);
@@ -736,7 +751,9 @@ LRESULT CALLBACK fake_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam
             if (IsWine() && g_ddraw.last_set_window_pos_tick + 500 > timeGetTime())
                 return 0;
 
-            if (!g_config.windowed)
+            /* Fullscreen at the desktop resolution stays shown, behind the
+               window the user went to, as a borderless window */
+            if (!g_config.windowed && !dd_fullscreen_stays())
             {
                 real_ShowWindow(g_ddraw.hwnd, SW_MINIMIZE);
                 ChangeDisplaySettings(NULL, g_ddraw.bnet_active ? CDS_FULLSCREEN : 0);

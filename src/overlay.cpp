@@ -898,6 +898,7 @@ static const char* menu_setting_icon(const char* key)
         const char* icon;
     } icons[] = {
         { "display", ICON_FULLSCREEN },
+        { "fullscreen_minimize", ICON_FULLSCREEN_EXIT },
         { "keytogglefullscreen*", ICON_FULLSCREEN },
         { "window_size", ICON_PHOTO_SIZE_SELECT_LARGE },
         { "window_position", ICON_OPEN_WITH },

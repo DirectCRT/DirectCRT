@@ -50,6 +50,14 @@ static const SETTING g_settings[] = {
         "Fullscreen is at the desktop resolution, except with 'original'. Alt+Enter switches between a window and fullscreen",
         T_DISPLAY, "Display", "auto|window|fullscreen|original", 0, 0, SETTING_LIVE },
 
+    { SETTING_BOOL, "fullscreen_minimize", "off",
+        "Minimize fullscreen when another window gets the focus (Alt+Tab, the Windows key, a click on another screen)\n"
+        "off = fullscreen stays shown behind the other windows, as a borderless window; the taskbar and the other\n"
+        "  screens work as usual\n"
+        "on = it's minimized, as exclusive fullscreen did; for games that misbehave when they keep being shown\n"
+        "Note: display=original always minimizes, the screen going back to the desktop's resolution",
+        T_DISPLAY, "Minimize when not in focus", BOOL_ONOFF, 0, 0, SETTING_LIVE },
+
     { SETTING_STRING, "window_size", "default",
         "The size of the window's contents, without its title bar and borders\n"
         "default = medium\n"

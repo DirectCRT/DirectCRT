@@ -20,6 +20,7 @@ void dd_set_refresh(DWORD game_hz); /* the emulated display's rate, after a mode
 HRESULT dd_RestoreDisplayMode();
 HRESULT dd_SetCooperativeLevel(HWND hwnd, DWORD dwFlags);
 HRESULT dd_SetDisplayMode(DWORD dwWidth, DWORD dwHeight, DWORD dwBPP, DWORD dwFlags);
+BOOL dd_fullscreen_stays(void); /* fullscreen as a borderless window, shown when the game loses the focus */
 void dd_reload_settings(BOOL now); /* live reload; now = without waiting for the file to settle */
 HRESULT dd_WaitForVerticalBlank(DWORD dwFlags, HANDLE hEvent);
 HRESULT dd_GetAvailableVidMem(LPDDSCAPS lpDDCaps, LPDWORD lpdwTotal, LPDWORD lpdwFree);
