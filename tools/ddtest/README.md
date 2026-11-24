@@ -138,9 +138,12 @@ ddtest --size 320x240 --bpp 8 --present flip --pattern grid --start --frames 300
 
 ## Regression test
 
-`regress.ps1` runs the blits pattern with every interface version (1, 2, 4,
-7), presentation method and bit depth (8, 16, 24, 32; windowed once, at the
-desktop's), and prints a table:
+`regress.ps1` runs the blits pattern, 20 frames a run, and prints a table.
+IDirectDraw7 gets every presentation method at every bit depth (8, 16, 24,
+32; windowed once, at the desktop's). IDirectDraw, 2 and 4 get each method
+once, the depth rotating so each version still meets every depth: the
+versions share everything but their interfaces' wrappers. That's 32 runs;
+`-Full` runs every combination (68 runs).
 
 ```
 powershell -NoProfile -ExecutionPolicy Bypass -File tools\ddtest\regress.ps1
@@ -150,12 +153,13 @@ It tests `bin\Release\ddraw.dll` with `bin\Release\ddtest.exe` by default,
 copied to a new folder under `%TEMP%` with a default `directcrt.ini`, so your
 own settings don't matter. `-Dll` and `-Exe` pick others, `-System` tests
 Windows' own DirectDraw, and `-Versions 1,7`, `-Methods flip,blt`,
-`-Depths 8,32`, `-Size 800x600` and `-Frames 120` narrow or change the runs.
+`-Depths 8,32`, `-Size 800x600` and `-Frames 120` narrow or change the runs;
+naming versions, methods or depths runs every combination of them.
 It exits with 1 if a run failed. A display mode the DLL doesn't offer counts
 as skipped: Windows' own DirectDraw sometimes refuses 8 and 16-bit modes on
 Windows 10 and 11.
 
-The fullscreen runs take over the screen, about two minutes for the whole
-table; leave the mouse and keyboard alone. A frame whose surfaces were lost
+The fullscreen runs take over the screen, about 40 seconds for the whole
+table (three minutes with `-Full`); leave the mouse and keyboard alone. A frame whose surfaces were lost
 (for example just after a mode switch) isn't checked, so a run can check a
 few frames fewer than it ran.

@@ -460,7 +460,8 @@ otherwise keep the no-shading trap. `original` has to be chosen.
      3-byte pixels; Direct3D 11 converts to BGRA on upload, OpenGL uploads
      `GL_BGR`, GDI draws the DIB as is, and screenshots save it. The picture
      matches 32-bit on all three renderers, and `regress.ps1` now covers
-     24-bit too (68 runs).
+     24-bit too (68 runs). Later cut to 32 runs of 20 frames by default:
+     only IDirectDraw7 gets the full matrix, and `-Full` keeps all 68.
    - Done: screenshots. The key saves two PNGs of the same frame:
      `<game>_<time>_raw.png`, the game's own surface (8-bit with its
      palette), and `<game>_<time>_crt.png`, the finished frame as shown,
@@ -616,8 +617,8 @@ otherwise keep the no-shading trap. `original` has to be chosen.
   five presentation methods, DirectDraw interface versions 1, 2, 4 and 7,
   scripted runs (`--start --frames N --log FILE`) and PNG dumps
   (`--dump DIR`). Its blits pattern checks DirectDraw's and GDI's drawing on
-  the surface, and `tools/ddtest/regress.ps1` runs that across every
-  combination as a regression test. See its README.
+  the surface, and `tools/ddtest/regress.ps1` runs that across versions,
+  methods and depths as a regression test. See its README.
 - **crt-compare** (`tools/crt-compare`): shows the same pictures in DirectCRT
   and DOSBox Staging, captures both and compares them pixel by pixel. Both
   renderers have to pass it, and match each other (`REFERENCE=opengl`).
