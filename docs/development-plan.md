@@ -498,31 +498,43 @@ otherwise keep the no-shading trap. `original` has to be chosen.
    - Done: the settings OSD, on Alt+F12 (`keysettingsosd`). One table of
      settings (`src/settings.c`: name, tab, kind, values, default, help,
      whether it applies live) now writes the default `directcrt.ini`, its
-     comments included, and the OSD's tabs (Display, Picture, Colour,
+     comments included, and the OSD's groups (Display, Picture, Colour,
      Timing, Overlay, Other, Compatibility, Hotkeys). It's a panel down
      the left of the screen (42% of the width, within 34 to 52 times the
-     text size): the tabs as icons along the top, a footer of keys, and a
-     row per setting with an icon, its name, the first line of its help
-     under it, and the value on the right: a switch for on and off, else
-     the value with a "›", which opens a dialog in the middle of the
-     screen. Rows that need a restart say so, and a dot marks a value that
-     isn't the default. The dialog has the whole help, then a list of the
-     values with each one's line of the help (the help is written one value
-     per line, `value = text`; "A number" or "Other" for one of your own),
-     a slider and a box to type the number in, a text field, or, for a
-     hotkey, a box that takes the next key pressed (Esc cancels; "None"
-     clears it). At the bottom are the default and a Reset button. A slider
-     can move in steps (100 K for the colour temperature, 5% for the status
-     OSD's opacity: the nearest step while it's dragged, the next one with
-     the keyboard); a number typed in needn't be on one. Settings can share
-     a row and a dialog (the red, green and blue gain, each in its colour),
-     and headings split a tab into groups (the Colour tab: Monitor, Colour
-     balance, the game's colours), with a tooltip of their own. With
-     `image_adjustments` off, the rest of the Colour tab is greyed out.
+     text size): a header naming the group in view, with the groups'
+     icons to jump to them (a line under the icon glides along), a footer
+     of keys, and one scrolling list of every setting, group after group.
+     A row has an icon, its name, the first line of its help under it, and
+     the value on the right: a switch for on and off, else the value with a
+     chevron. Clicking it opens the row in place (the rows below slide
+     down, the chevron turns): the rest of the help, then the control. A
+     few short values are side by side, the picked one on a pill that
+     glides to the next, with its line of the help under them; more, or
+     longer, are a list with each one's line (the help is written one
+     value per line, `value = text`; "A number" or "Other" for one of your
+     own), the picked one on a pill too. Numbers get a slider and a box to
+     type them in, text a field, a hotkey a box that takes the next key
+     pressed (Esc cancels; "None" clears it). At the bottom are the default
+     and a Reset button. The viewport has a section of its own: Fit, Size,
+     Pixels, Desktop or Relative, each with its controls (width and height
+     with the 4:3 sizes that fit the desktop, a percentage of the desktop,
+     or the horizontal and vertical stretch, with a button for
+     `aspect=stretch` when they differ), so none of its formats has to be
+     typed. Rows that need a restart say so, and a dot marks a value that
+     isn't the default. The highlight under the mouse's or the keyboard's
+     row glides from row to row. A slider can move in steps (100 K for the
+     colour temperature, 5% for the status OSD's opacity: the nearest step
+     while it's dragged, the next one with the keyboard); a number typed
+     in needn't be on one. Settings can share a row (the red, green and
+     blue gain, each in its colour), and headings split a group (Colour:
+     Monitor, Colour balance, the game's colours), with a tooltip of their
+     own. With `image_adjustments` off, the rest of Colour is greyed out.
      It's made for the mouse, and works from the keyboard too: arrows,
-     Enter, Esc, and Left and Right change the tab. The look takes ideas
-     from DuckStation's (no code, icons or theme), in a dark palette with
-     a blue accent; the status OSD shares it, with a filled graph.
+     Enter (opening a row puts the keyboard on its current value), Esc
+     (closes the row, then the OSD), and Left and Right go to the group
+     before or after. The look takes ideas from DuckStation's (no code,
+     icons or theme), in a dark palette with a blue accent; the status OSD
+     shares it, with a filled graph.
      Each change is written to `directcrt.ini` at once and applied as when
      the file is saved (`WM_OVERLAY_MENU`, then `dd_reload_settings`).
      While it's open the game keeps running and drawing but gets no keyboard
@@ -530,7 +542,7 @@ otherwise keep the no-shading trap. `original` has to be chosen.
      the OSD instead, `GetKeyState`, `GetAsyncKeyState` and DirectInput's
      keyboard and mouse report nothing, the cursor is unlocked and shown,
      and on closing it's locked again and the game gets the releases of keys
-     it saw go down. Esc or the hotkey closes it. Both OSDs are in Source
+     it saw go down. Esc (with no row open) or the hotkey closes it. Both OSDs are in Source
      Sans 3 (`third_party/fonts`, built in as a resource; Adobe's unmodified
      TTF, so its Reserved Font Name stays), rasterised 1.2 times the asked
      size, since its size counts accents and descenders. The icons are

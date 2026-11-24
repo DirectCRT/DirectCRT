@@ -361,15 +361,25 @@ static void overlay_draw_status(const OVERLAY_STATUS& status, int width, int can
 /* -------------------------------------------------------- the settings OSD */
 
 #define MENU_TEXT 264
+#define MENU_GROUPS 16
 
 static bool g_menu_drawn;      /* the settings OSD was in the last frame */
-static int g_tab;              /* the tab shown */
-static bool g_focus_rows;      /* give the tab's rows the keyboard next */
-static int g_dialog = -1;      /* the setting whose dialog is open, and how many share its row */
-static int g_dialog_count;
-static bool g_dialog_request;  /* open it */
+static bool g_focus_rows;      /* give the list the keyboard next */
+static int g_focus_row = -1;   /* and this row of it */
+static int g_open = -1;        /* the row open under its heading, and how many settings share it */
+static int g_open_count;
+static bool g_open_scroll;     /* scroll it into view when it's known how tall it is */
+static float g_scroll_to = -1.0f; /* where the list is gliding to */
+
+/* The groups of the list (settings_tab), as the last frame laid them out */
+static int g_groups;
+static float g_group_y[MENU_GROUPS]; /* where each starts in the list */
+static int g_group_row[MENU_GROUPS]; /* its first row */
+static int g_group;                  /* the one the header names */
+static int g_group_pinned = -1;      /* the one jumped to, named while the list stays where it went */
+static float g_pinned_scroll;
+
 static int g_capture = -1;     /* the hotkey being set */
-static bool g_capture_seen;    /* its dialog was drawn this frame */
 static int g_slider = -1;      /* the slider being dragged, and its value */
 static int g_slider_value;
 static int g_number = -1;      /* the number box being typed in, and its number */
@@ -378,12 +388,12 @@ static int g_text = -1;        /* the text being edited, and its text */
 static char g_text_value[MENU_TEXT];
 static int g_custom = -1;      /* the setting whose "A number" or "Other" was picked */
 static bool g_custom_focus;
+static bool g_focus_body;      /* give the row just opened with the keyboard its control */
 static bool g_key_down[256];   /* the keys ImGui saw pressed */
 
 static void menu_capture(int setting)
 {
     g_capture = setting;
-    g_capture_seen = setting >= 0; /* its dialog is on screen: it was just opened */
     overlay_menu_set_capturing(setting >= 0);
 
     /* The keys go to the capture now: ImGui won't see the Enter that opened
@@ -395,15 +405,29 @@ static void menu_capture(int setting)
     }
 }
 
-static void menu_reset(void)
+/* Closes the open row; focus = give its heading the keyboard */
+static void menu_close_row(bool focus)
 {
-    menu_capture(-1);
-    g_dialog = -1;
-    g_dialog_request = false;
+    if (g_capture >= 0)
+        menu_capture(-1);
+
+    if (focus && g_open >= 0)
+        g_focus_row = g_open;
+
+    g_open = -1;
+    g_focus_body = false;
+    g_custom = -1;
     g_slider = -1;
     g_number = -1;
     g_text = -1;
-    g_custom = -1;
+}
+
+static void menu_reset(void)
+{
+    menu_close_row(false);
+    g_focus_row = -1;
+    g_scroll_to = -1.0f;
+    g_group_pinned = -1;
 }
 
 static ImGuiKey menu_imgui_key(int vk)
@@ -988,38 +1012,232 @@ static void menu_tooltip(int setting, float F)
 
     const SETTING* s = menu_help_of(setting);
     const char* cursor = s && s->help ? s->help : "";
-    char line[1024];
+    char line[1024], desc[1024];
+    bool has_desc = menu_description(setting, desc, sizeof(desc));
+    bool open = false;
 
-    if (!*cursor)
-        return;
-
-    ImGui::BeginTooltip();
-    ImGui::PushTextWrapPos(30.0f * F);
-
+    /* The help the row doesn't already show */
     while (menu_general_line(s, &cursor, line, sizeof(line), true))
-        ImGui::TextUnformatted(line);
+    {
+        if (has_desc && !strcmp(line, desc))
+            continue;
 
-    ImGui::PopTextWrapPos();
-    ImGui::EndTooltip();
+        if (!open)
+        {
+            ImGui::BeginTooltip();
+            ImGui::PushTextWrapPos(30.0f * F);
+            open = true;
+        }
+
+        ImGui::TextUnformatted(line);
+    }
+
+    if (open)
+    {
+        ImGui::PopTextWrapPos();
+        ImGui::EndTooltip();
+    }
 }
 
-/* Opens the dialog of a row: settings first to first + count - 1 */
-static void menu_open_dialog(int first, int count)
-{
-    const SETTING* s = settings_get(first);
+/* ------------------------------------------------------------ the motion */
 
-    g_dialog = first;
-    g_dialog_count = count;
-    g_dialog_request = true;
-    g_custom = -1;
-    g_slider = -1;
-    g_number = -1;
-    g_text = -1;
+/* The frame's time step, for the animations: a long frame doesn't skip them */
+static float ui_dt(void)
+{
+    float dt = ImGui::GetIO().DeltaTime;
+    return dt < 0.0f ? 0.0f : dt > 0.1f ? 0.1f : dt;
+}
+
+/* x moved toward target by a part of the way that depends on the time, not
+ * the frame rate; within snap of it, it's there */
+static float ui_approach(float x, float target, float speed, float snap)
+{
+    x += (target - x) * (1.0f - expf(-ui_dt() * speed));
+    return fabsf(target - x) < snap ? target : x;
+}
+
+/* A rectangle gliding to target: the highlight of a row, the pill of a
+ * choice. It's kept relative to origin (where the window's content starts),
+ * so it doesn't glide when the window scrolls. snap = jump there */
+static ImRect ui_slide(ImGuiID id, const ImRect& target, ImVec2 origin, bool snap)
+{
+    ImGuiStorage* st = ImGui::GetStateStorage();
+    float to[4] = { target.Min.x - origin.x, target.Min.y - origin.y, target.Max.x - origin.x, target.Max.y - origin.y };
+    float v[4];
+    bool known = st->GetBool(id, false) && !snap;
+
+    for (int i = 0; i < 4; i++)
+    {
+        ImGuiID key = ImHashData(&i, sizeof(i), id);
+        v[i] = known ? ui_approach(st->GetFloat(key, to[i]), to[i], 18.0f, 0.25f) : to[i];
+        st->SetFloat(key, v[i]);
+    }
+
+    st->SetBool(id, true);
+    return ImRect(v[0] + origin.x, v[1] + origin.y, v[2] + origin.x, v[3] + origin.y);
+}
+
+/* A chevron pointing right, turned by angle (radians) clockwise */
+static void ui_chevron(ImDrawList* dl, ImVec2 c, float size, float angle, ImU32 col)
+{
+    float ca = cosf(angle), sa = sinf(angle);
+    ImVec2 pts[3] = { ImVec2(-0.17f, -0.34f), ImVec2(0.17f, 0.0f), ImVec2(-0.17f, 0.34f) };
+
+    for (int i = 0; i < 3; i++)
+    {
+        float x = pts[i].x * size, y = pts[i].y * size;
+        pts[i] = ImVec2(c.x + x * ca - y * sa, c.y + x * sa + y * ca);
+    }
+
+    float thick = size * 0.12f > 1.5f ? size * 0.12f : 1.5f;
+    dl->AddPolyline(pts, 3, col, thick);
+}
+
+/* The keyboard is in use: its cursor shows, and the mouse hasn't moved since */
+static bool ui_keyboard(void)
+{
+    ImGuiContext& g = *GImGui;
+    return g.NavCursorVisible && g.NavHighlightItemUnderNav;
+}
+
+/* The keyboard goes to this item when its row was just opened with the
+ * keyboard; called straight after its ItemAdd */
+static void menu_take_focus(ImGuiID id)
+{
+    if (!g_focus_body)
+        return;
+
+    ImGuiContext& g = *GImGui;
+    ImGui::SetFocusID(id, g.CurrentWindow);
+    g.NavCursorVisible = true;
+    g.NavHighlightItemUnderNav = true;
+    g_focus_body = false;
+}
+
+/* Choices side by side, the one picked on a pill that glides to the next.
+ * Returns the one clicked, or -1 */
+static int ui_segmented(const char* str_id, const char* const* labels, int n, int selected, float F)
+{
+    ImGuiWindow* window = ImGui::GetCurrentWindow();
+
+    if (window->SkipItems || n <= 0 || n > 16)
+        return -1;
+
+    ImGuiContext& g = *GImGui;
+    ImDrawList* dl = window->DrawList;
+    ImGui::PushID(str_id);
+
+    float h = floorf(2.1f * F), w = ImGui::GetContentRegionAvail().x;
+    float inset = floorf(0.2f * F > 2.0f ? 0.2f * F : 2.0f), r = 0.45f * F;
+    float label_size = 0.98f * F;
+    ImVec2 pos = window->DC.CursorPos;
+    ImRect bar(pos, ImVec2(pos.x + w, pos.y + h));
+    ImGui::ItemSize(bar);
+    dl->AddRectFilled(bar.Min, bar.Max, ui_col(COL_PILL), r);
+
+    ImRect segs[16];
+    int picked = -1;
+
+    for (int i = 0; i < n; i++)
+    {
+        ImRect seg(ImVec2(floorf(pos.x + w * i / n), pos.y), ImVec2(floorf(pos.x + w * (i + 1) / n), pos.y + h));
+        segs[i] = ImRect(seg.Min + ImVec2(inset, inset), seg.Max - ImVec2(inset, inset));
+
+        ImGuiID id = window->GetID(i);
+
+        bool visible = ImGui::ItemAdd(seg, id);
+
+        if (i == (selected >= 0 ? selected : 0))
+            menu_take_focus(id);
+
+        if (!visible)
+            continue;
+
+        bool hovered, held;
+
+        if (ImGui::ButtonBehavior(seg, id, &hovered, &held))
+            picked = i;
+
+        if (i != selected && (hovered || (g.NavId == id && ui_keyboard())))
+            dl->AddRectFilled(segs[i].Min, segs[i].Max, ui_col(held ? COL_ROW_ACTIVE : COL_PILL_HOVER), r - inset);
+
+        ImGui::RenderNavCursor(seg, id, ImGuiNavRenderCursorFlags_None, r);
+
+        if (i == selected)
+            ImGui::SetItemDefaultFocus();
+    }
+
+    ImGuiID pill_id = window->GetID("##pill");
+    ImRect pill;
+    bool has_pill = selected >= 0 && selected < n;
+
+    if (has_pill)
+    {
+        pill = ui_slide(pill_id, segs[selected], window->DC.CursorStartPos, false);
+        dl->AddRectFilled(pill.Min, pill.Max, ui_col(COL_ACCENT), r - inset);
+    }
+    else
+    {
+        ImGui::GetStateStorage()->SetBool(pill_id, false); /* it appears where it's next put */
+    }
+
+    /* The text white as far as the pill is under it */
+    static const ImVec4 off(0.80f, 0.81f, 0.83f, 1.0f);
+    float vh = ui_text_size(label_size, "A").y;
+
+    for (int i = 0; i < n; i++)
+    {
+        float k = 0.0f;
+
+        if (has_pill)
+        {
+            float o = ImMin(pill.Max.x, segs[i].Max.x) - ImMax(pill.Min.x, segs[i].Min.x);
+            k = ImClamp(o / (segs[i].GetWidth() > 1.0f ? segs[i].GetWidth() : 1.0f), 0.0f, 1.0f);
+        }
+
+        ImVec4 c(off.x + (1.0f - off.x) * k, off.y + (1.0f - off.y) * k, off.z + (1.0f - off.z) * k, 1.0f);
+        char buf[MENU_TEXT];
+        const char* text = ui_fit(label_size, labels[i], segs[i].GetWidth() - 0.5f * F, buf, sizeof(buf));
+        float tw = ui_text_size(label_size, text).x;
+        ui_text(dl, label_size, ImVec2((segs[i].Min.x + segs[i].Max.x - tw) * 0.5f, pos.y + (h - vh) * 0.5f), ui_col(c), text);
+    }
+
+    ImGui::PopID();
+    return picked;
+}
+
+/* -------------------------------------------------- the settings OSD's rows */
+
+/* A row as it was laid out, for the highlight drawn under it */
+struct MENU_ROW
+{
+    ImGuiID id;
+    ImRect bb;
+    bool hovered, held;
+};
+
+/* Opens a row (settings first to first + count - 1) under its heading, or
+ * closes it when it's open */
+static void menu_open_row(int first, int count)
+{
+    if (g_open == first)
+    {
+        menu_close_row(false);
+        return;
+    }
+
+    menu_close_row(false);
+
+    const SETTING* s = settings_get(first);
+    g_open = first;
+    g_open_count = count;
+    g_open_scroll = true;
+    g_focus_body = ui_keyboard() && s->kind != SETTING_KEY && !(s->kind == SETTING_STRING && !s->choices);
 
     if (s->kind == SETTING_KEY)
         menu_capture(first);
 
-    /* Text of its own only: the dialog is the text field */
+    /* Text of its own only: it's typed in straight away */
     if (s->kind == SETTING_STRING && !s->choices)
     {
         g_custom = first;
@@ -1028,22 +1246,21 @@ static void menu_open_dialog(int first, int count)
 }
 
 /* A row: its icon, its name and what it is, and its value (a switch, or what
- * opens its dialog) on the right; settings first to first + count - 1 */
-static void menu_row(int first, int count, float F)
+ * opens it) on the right; settings first to first + count - 1. open = how far
+ * it's open, which turns its chevron */
+static void menu_row(int first, int count, float open, float F, MENU_ROW* out)
 {
     ImGuiWindow* window = ImGui::GetCurrentWindow();
-
-    if (window->SkipItems)
-        return;
-
     const SETTING* s = settings_get(first);
     ImDrawList* dl = window->DrawList;
     ImGuiID id = window->GetID("##row");
 
+    out->id = id;
+    out->hovered = out->held = false;
+
     float pad_x = 0.7f * F, pad_y = 0.55f * F;
     float icon_w = 1.9f * F;
     float title_size = 1.12f * F, desc_size = 0.88f * F, value_size = 1.0f * F;
-    float rounding = 0.4f * F;
 
     ImVec2 pos = window->DC.CursorPos;
     float w = ImGui::GetContentRegionAvail().x;
@@ -1138,6 +1355,7 @@ static void menu_row(int first, int count, float F)
     float h = (content_h > 2.0f * F ? content_h : 2.0f * F) + 2 * pad_y;
 
     ImRect bb(pos, ImVec2(pos.x + w, pos.y + h));
+    out->bb = bb;
     ImGui::ItemSize(bb);
 
     if (!ImGui::ItemAdd(bb, id))
@@ -1146,14 +1364,10 @@ static void menu_row(int first, int count, float F)
     bool hovered, held;
     bool pressed = ImGui::ButtonBehavior(bb, id, &hovered, &held);
     ImGuiContext& g = *GImGui;
-    bool nav = g.NavId == id && g.NavCursorVisible;
+    bool lit = hovered || (g.NavId == id && ui_keyboard());
 
-    if (held && hovered)
-        dl->AddRectFilled(bb.Min, bb.Max, ui_col(COL_ROW_ACTIVE), rounding);
-    else if (hovered || nav)
-        dl->AddRectFilled(bb.Min, bb.Max, ui_col(COL_ROW_HOVER), rounding);
-
-    ImGui::RenderNavCursor(bb, id, ImGuiNavRenderCursorFlags_None, rounding);
+    out->hovered = hovered;
+    out->held = held;
 
     float cy = pos.y + h * 0.5f;
     bool changed = false;
@@ -1165,7 +1379,8 @@ static void menu_row(int first, int count, float F)
     if (changed)
         dl->AddCircleFilled(ImVec2(pos.x + pad_x * 0.5f, cy), 0.16f * F, ui_col(COL_ACCENT), 12);
 
-    ui_icon(dl, menu_setting_icon(s->key), ImVec2(pos.x + pad_x + icon_w * 0.4f, cy), 1.35f * F, ui_col(COL_HEADING));
+    ui_icon(dl, menu_setting_icon(s->key), ImVec2(pos.x + pad_x + icon_w * 0.4f, cy), 1.35f * F,
+        ui_col(open > 0.5f ? COL_ACCENT_HI : COL_HEADING));
 
     float ty = pos.y + (h - content_h) * 0.5f;
     ui_text(dl, title_size, ImVec2(text_x, ty), ui_col(COL_TEXT), title_fit);
@@ -1188,13 +1403,13 @@ static void menu_row(int first, int count, float F)
     if (is_bool)
     {
         float sh = 1.35f * F;
-        ui_switch(dl, ImVec2(vx, cy - sh * 0.5f), value_w, sh, on != 0, hovered || nav);
+        ui_switch(dl, ImVec2(vx, cy - sh * 0.5f), value_w, sh, on != 0, lit);
     }
     else
     {
         float ph = 2.0f * F;
         ImVec2 a(vx, cy - ph * 0.5f), b(vx + value_w, cy + ph * 0.5f);
-        dl->AddRectFilled(a, b, ui_col(hovered || nav ? COL_PILL_HOVER : COL_PILL), 0.45f * F);
+        dl->AddRectFilled(a, b, ui_col(lit ? COL_PILL_HOVER : COL_PILL), 0.45f * F);
 
         float x = a.x + pill_pad;
         float vh = ui_text_size(value_size, "A").y;
@@ -1209,7 +1424,8 @@ static void menu_row(int first, int count, float F)
             x += parts[i].w;
         }
 
-        ui_icon(dl, ICON_CHEVRON_RIGHT, ImVec2(b.x - chevron_w * 0.5f, cy), 1.2f * F, ui_col(COL_DIM));
+        float e = open * open * (3.0f - 2.0f * open);
+        ui_chevron(dl, ImVec2(b.x - chevron_w * 0.5f, cy), 1.0f * F, e * IM_PI * 0.5f, ui_col(open > 0.5f ? COL_TEXT : COL_DIM));
     }
 
     if (is_bool)
@@ -1226,13 +1442,14 @@ static void menu_row(int first, int count, float F)
         }
         else
         {
-            menu_open_dialog(first, count);
+            menu_open_row(first, count);
         }
     }
 }
 
-/* A heading between a tab's rows; its help in a tooltip */
-static void menu_heading(const SETTING* s, float F)
+/* A heading between a group's rows; its help in a tooltip. first = straight
+ * under the group's heading */
+static void menu_heading(const SETTING* s, bool first, float F)
 {
     ImGuiWindow* window = ImGui::GetCurrentWindow();
 
@@ -1242,7 +1459,7 @@ static void menu_heading(const SETTING* s, float F)
     float size = 0.95f * F;
     const char* text = s->label ? s->label : "";
     ImVec2 sz = ui_text_size(size, text);
-    float above = window->DC.CursorPos.y > window->DC.CursorStartPos.y + 1.0f ? 0.9f * F : 0.2f * F;
+    float above = first ? 0.2f * F : 0.9f * F;
 
     ImVec2 pos(window->DC.CursorPos.x, window->DC.CursorPos.y + above);
     float w = ImGui::GetContentRegionAvail().x;
@@ -1272,121 +1489,155 @@ static void menu_heading(const SETTING* s, float F)
     }
 }
 
-/* A tab's rows between its headings. A setting marked SETTING_JOINED shares
- * the row of the one before */
-static void menu_rows(int tab, float F)
+/* A group's heading: its icon and its name. Returns where it starts, in the
+ * list's own coordinates */
+static float menu_group_heading(int tab, float F)
 {
-    const char* name = settings_tab(tab);
-    bool gated = false; /* a SETTING_GATE before is off */
+    ImGuiWindow* window = ImGui::GetCurrentWindow();
+    float size = 1.25f * F;
+    const char* text = settings_tab(tab);
+    ImVec2 sz = ui_text_size(size, text);
+    bool top = window->DC.CursorPos.y <= window->DC.CursorStartPos.y + 1.0f;
+    float above = top ? 0.3f * F : 1.6f * F;
 
-    for (int i = 0; name && i < settings_count(); i++)
+    ImVec2 pos(window->DC.CursorPos.x, window->DC.CursorPos.y + above);
+    float w = ImGui::GetContentRegionAvail().x;
+    ImRect bb(window->DC.CursorPos, ImVec2(pos.x + w, pos.y + sz.y + 0.2f * F));
+    ImGui::ItemSize(bb);
+
+    if (ImGui::ItemAdd(bb, 0))
     {
-        const SETTING* s = settings_get(i);
-
-        if (!s->tab || strcmp(s->tab, name))
-            continue;
-
-        if (s->kind == SETTING_HEADING)
-        {
-            menu_heading(s, F);
-            continue;
-        }
-
-        if (!s->key || (s->flags & SETTING_JOINED))
-            continue;
-
-        int count = 1;
-
-        while (i + count < settings_count() && (settings_get(i + count)->flags & SETTING_JOINED))
-            count++;
-
-        ImGui::PushID(i);
-        ImGui::BeginDisabled(gated);
-        menu_row(i, count, F);
-        ImGui::EndDisabled();
-        ImGui::PopID();
-
-        for (int m = i; m < i + count; m++)
-        {
-            if (settings_get(m)->flags & SETTING_GATE)
-            {
-                int on = 0;
-                gated = !(ds_parse_bool(overlay_menu_value(m, NULL), &on) && on);
-            }
-        }
-
-        i += count - 1;
+        ImDrawList* dl = window->DrawList;
+        float ih = 1.45f * F;
+        ui_icon(dl, menu_tab_icon(tab), ImVec2(pos.x + 0.7f * F + ih * 0.5f, pos.y + sz.y * 0.5f), ih, ui_col(COL_ACCENT_HI));
+        ui_text(dl, size, ImVec2(pos.x + 0.7f * F + ih + 0.55f * F, pos.y), ui_col(COL_TEXT), text);
     }
+
+    float y = pos.y - 0.5f * F - window->DC.CursorStartPos.y;
+    return y > 0.0f ? y : 0.0f;
 }
 
-/* ------------------------------------------------- the settings OSD's dialog */
+/* -------------------------------------------- what opens under a row */
 
 #define MENU_OTHER -2 /* a value of its own: "A number" or "Other" */
 
-/* A choice in a dialog: a tick when it's the one, its name, and its help */
-static bool menu_choice_row(int choice, const char* label, const char* help, bool selected, float F)
+/* Choices one under another, with their help; the one picked on a pill that
+ * glides to the next. The last is "A number" or "Other" when own. Returns the
+ * one clicked, or -1 */
+static int menu_choice_list(const SETTING* s, const char* const* labels, int n, bool own, int selected, float F)
 {
     ImGuiWindow* window = ImGui::GetCurrentWindow();
 
     if (window->SkipItems)
-        return false;
+        return -1;
 
-    ImGui::PushID(choice);
-    ImGuiID id = window->GetID("##choice");
-    ImGui::PopID();
-
-    float pad_y = 0.4f * F, check_w = 1.8f * F;
-    float label_size = 1.05f * F, help_size = 0.88f * F;
-    ImVec2 pos = window->DC.CursorPos;
-    float w = ImGui::GetContentRegionAvail().x;
-    float text_x = pos.x + check_w;
-    float text_w = pos.x + w - 0.6f * F - text_x;
-
-    if (help && (!*help || !_stricmp(help, label)))
-        help = NULL;
-
-    ImVec2 label_sz = ui_text_size(label_size, label, text_w);
-    ImVec2 help_sz = help ? ui_text_size(help_size, help, text_w) : ImVec2(0, 0);
-    float gap = help ? 0.08f * F : 0.0f;
-    float h = label_sz.y + gap + help_sz.y + 2 * pad_y;
-
-    if (h < 2.0f * F)
-        h = 2.0f * F;
-
-    ImRect bb(pos, ImVec2(pos.x + w, pos.y + h));
-    ImGui::ItemSize(bb);
-
-    if (!ImGui::ItemAdd(bb, id))
-        return false;
-
-    bool hovered, held;
-    bool pressed = ImGui::ButtonBehavior(bb, id, &hovered, &held);
     ImGuiContext& g = *GImGui;
     ImDrawList* dl = window->DrawList;
+    float pad_y = 0.38f * F, check_w = 1.8f * F;
+    float label_size = 1.0f * F, help_size = 0.86f * F;
     float rounding = 0.4f * F;
+    float w = ImGui::GetContentRegionAvail().x;
+    int picked = -1;
+    ImRect selected_bb;
+    bool has_selected = false;
+    float label_h = ui_text_size(label_size, "A").y;
 
-    if (held && hovered)
-        dl->AddRectFilled(bb.Min, bb.Max, ui_col(COL_ROW_ACTIVE), rounding);
-    else if (hovered || (g.NavId == id && g.NavCursorVisible))
-        dl->AddRectFilled(bb.Min, bb.Max, ui_col(COL_ROW_HOVER), rounding);
+    for (int i = 0; i < n; i++)
+    {
+        char v[MENU_TEXT], l[MENU_TEXT], h[1024];
+        bool has_help;
 
-    ImGui::RenderNavCursor(bb, id, ImGuiNavRenderCursorFlags_None, rounding);
+        if (own && i == n - 1)
+        {
+            has_help = settings_choice_help(s, NULL, h, sizeof(h)) != 0;
+        }
+        else
+        {
+            settings_choice(s, i, v, sizeof(v), l, sizeof(l));
+            has_help = settings_choice_help(s, v, h, sizeof(h)) != 0;
+        }
 
-    float content_h = label_sz.y + gap + help_sz.y;
-    float ty = pos.y + (h - content_h) * 0.5f;
+        const char* help = has_help && *h && _stricmp(h, labels[i]) ? h : NULL;
 
-    if (selected)
-        ui_icon(dl, ICON_CHECK, ImVec2(pos.x + check_w * 0.5f, ty + label_sz.y * 0.5f), 1.3f * F, ui_col(COL_ACCENT_HI));
+        ImGui::PushID(i == n - 1 && own ? MENU_OTHER : i);
+        ImGuiID id = window->GetID("##choice");
+        ImGui::PopID();
 
-    ui_text(dl, label_size, ImVec2(text_x, ty), ui_col(selected ? COL_ACCENT_HI : COL_TEXT), label, text_w);
+        ImVec2 pos = window->DC.CursorPos;
+        float text_x = pos.x + check_w;
+        float text_w = pos.x + w - 0.6f * F - text_x;
+        ImVec2 label_sz = ui_text_size(label_size, labels[i], text_w);
+        ImVec2 help_sz = help ? ui_text_size(help_size, help, text_w) : ImVec2(0, 0);
+        float gap = help ? 0.06f * F : 0.0f;
+        float rh = label_sz.y + gap + help_sz.y + 2 * pad_y;
 
-    if (help)
-        ui_text(dl, help_size, ImVec2(text_x, ty + label_sz.y + gap), ui_col(COL_DIM), help, text_w);
+        if (rh < 1.9f * F)
+            rh = 1.9f * F;
 
-    if (selected)
-        ImGui::SetItemDefaultFocus();
+        ImRect bb(pos, ImVec2(pos.x + w, pos.y + rh));
+        ImGui::ItemSize(bb);
 
-    return pressed;
+        if (i == selected)
+        {
+            selected_bb = bb;
+            has_selected = true;
+        }
+
+        bool visible = ImGui::ItemAdd(bb, id);
+
+        if (i == (selected >= 0 ? selected : 0))
+            menu_take_focus(id);
+
+        if (!visible)
+            continue;
+
+        bool hovered, held;
+
+        if (ImGui::ButtonBehavior(bb, id, &hovered, &held))
+            picked = i;
+
+        if (i != selected && (hovered || (g.NavId == id && ui_keyboard())))
+        {
+            dl->ChannelsSetCurrent(0);
+            dl->AddRectFilled(bb.Min, bb.Max, ui_col(held ? COL_ROW_ACTIVE : COL_ROW_HOVER), rounding);
+            dl->ChannelsSetCurrent(1);
+        }
+
+        ImGui::RenderNavCursor(bb, id, ImGuiNavRenderCursorFlags_None, rounding);
+
+        float content_h = label_sz.y + gap + help_sz.y;
+        float ty = pos.y + (rh - content_h) * 0.5f;
+        ui_text(dl, label_size, ImVec2(text_x, ty), ui_col(i == selected ? COL_ACCENT_HI : COL_TEXT), labels[i], text_w);
+
+        if (help)
+            ui_text(dl, help_size, ImVec2(text_x, ty + label_sz.y + gap), ui_col(COL_DIM), help, text_w);
+
+        if (i == selected)
+            ImGui::SetItemDefaultFocus();
+    }
+
+    /* The pill, under the choices, and its tick over them */
+    ImGuiID pill_id = window->GetID("##pill");
+
+    if (has_selected)
+    {
+        ImRect p = ui_slide(pill_id, selected_bb, window->DC.CursorStartPos, false);
+        float bar = floorf(0.2f * F > 2.0f ? 0.2f * F : 2.0f);
+
+        dl->ChannelsSetCurrent(0);
+        dl->AddRectFilled(p.Min, p.Max, ui_col(COL_ACCENT, 0.20f), rounding);
+        dl->AddRectFilled(p.Min, ImVec2(p.Min.x + bar, p.Max.y), ui_col(COL_ACCENT), rounding, ImDrawFlags_RoundLeft);
+        dl->ChannelsSetCurrent(1);
+
+        float ty = p.Min.y + pad_y + label_h * 0.5f;
+        ui_icon(dl, ICON_CHECK, ImVec2(p.Min.x + check_w * 0.5f + bar * 0.5f, ty), 1.25f * F, ui_col(COL_ACCENT_HI));
+    }
+    else
+    {
+        ImGui::GetStateStorage()->SetBool(pill_id, false);
+    }
+
+    return picked;
 }
 
 /* A slider and a box to type the number in, the rest of the line. The slider
@@ -1417,9 +1668,10 @@ static void menu_number(int setting, const SETTING* s, float F)
     /* The joined ones are told apart by their colours' names */
     if (tint && (s->flags & SETTING_JOINED || (setting + 1 < settings_count() && settings_get(setting + 1)->flags & SETTING_JOINED)))
     {
+        float x0 = ImGui::GetCursorPosX();
         ImGui::AlignTextToFramePadding();
         ImGui::TextColored(ImVec4(tint->x * 0.5f + 0.5f, tint->y * 0.5f + 0.5f, tint->z * 0.5f + 0.5f, 1.0f), "%s", tint_name);
-        ImGui::SameLine(4.0f * F);
+        ImGui::SameLine(x0 + 3.6f * F);
     }
 
     char lo[16], hi[16];
@@ -1451,7 +1703,10 @@ static void menu_number(int setting, const SETTING* s, float F)
     ImGui::PushID(setting);
     ImGui::SetNextItemWidth(slider);
 
-    if (ImGui::SliderInt("##int", &v, s->min, s->max, "", ImGuiSliderFlags_AlwaysClamp | ImGuiSliderFlags_NoInput))
+    bool slid = ImGui::SliderInt("##int", &v, s->min, s->max, "", ImGuiSliderFlags_AlwaysClamp | ImGuiSliderFlags_NoInput);
+    menu_take_focus(ImGui::GetItemID());
+
+    if (slid)
     {
         g_slider = setting;
         g_slider_value = menu_clamp(s, menu_snap(v, old, s->step, ImGui::IsMouseDown(ImGuiMouseButton_Left)));
@@ -1490,7 +1745,7 @@ static void menu_number(int setting, const SETTING* s, float F)
     ImGui::PopID();
 }
 
-/* A text field, the width of the dialog. Returns true when Enter is pressed */
+/* A text field, the width of the row. Returns true when Enter is pressed */
 static bool menu_text_field(int setting)
 {
     char value[MENU_TEXT];
@@ -1539,19 +1794,6 @@ static bool menu_text_field(int setting)
     return enter;
 }
 
-static void menu_dialog_closed(void)
-{
-    if (g_capture >= 0)
-        menu_capture(-1);
-
-    g_dialog = -1;
-    g_dialog_request = false;
-    g_custom = -1;
-    g_slider = -1;
-    g_number = -1;
-    g_text = -1;
-}
-
 /* A button, accent = the one to press */
 static bool menu_button(const char* label, float w, bool accent)
 {
@@ -1570,307 +1812,898 @@ static bool menu_button(const char* label, float w, bool accent)
     return pressed;
 }
 
-/* The dialog of the row clicked: the help, and its choices, a number, a text
- * or a key; its default and Reset at the bottom */
-static void menu_dialog(int width, float canvas_h, float F)
+/* Text in the help's grey, wrapped, a little smaller */
+static void menu_note(const char* text, float F, const ImVec4& col = COL_DIM)
 {
-    if (g_dialog_request)
+    ImGui::PushFont(NULL, 0.9f * F);
+    ImGui::PushStyleColor(ImGuiCol_Text, col);
+    ImGui::PushTextWrapPos(0.0f);
+    ImGui::TextUnformatted(text);
+    ImGui::PopTextWrapPos();
+    ImGui::PopStyleColor();
+    ImGui::PopFont();
+}
+
+/* A box to type a number in, written when it's left. Returns true and the
+ * number then */
+static bool ui_int_field(const char* str_id, int v, int lo, int hi, float w, int* out)
+{
+    ImGuiStorage* st = ImGui::GetStateStorage();
+    ImGui::PushID(str_id);
+    ImGuiID edited = ImGui::GetID("##edited"), typed = ImGui::GetID("##typed");
+    bool commit = false;
+    int n = v;
+
+    ImGui::SetNextItemWidth(w);
+
+    if (ImGui::InputInt("##n", &n, 0, 0))
     {
-        ImGui::OpenPopup("##dialog");
-        g_dialog_request = false;
+        st->SetBool(edited, true);
+        st->SetInt(typed, n);
     }
 
-    if (g_dialog < 0)
+    if (ImGui::IsItemDeactivated() && st->GetBool(edited))
     {
-        /* Left open when the OSD was closed */
-        if (ImGui::IsPopupOpen("##dialog") && ImGui::BeginPopupModal("##dialog"))
+        st->SetBool(edited, false);
+
+        if (ImGui::IsItemDeactivatedAfterEdit())
         {
-            ImGui::CloseCurrentPopup();
-            ImGui::EndPopup();
+            n = st->GetInt(typed, v);
+            *out = n < lo ? lo : n > hi ? hi : n;
+            commit = true;
         }
-
-        return;
     }
 
-    if (!ImGui::IsPopupOpen("##dialog"))
+    ImGui::PopID();
+    return commit;
+}
+
+/* A label, a slider and a box to type the number in. Returns true and the
+ * number when the slider is let go or a number is typed in */
+static bool ui_slider_box(const char* str_id, const char* label, int v, int lo, int hi, float F, int* out)
+{
+    ImGuiStorage* st = ImGui::GetStateStorage();
+    const ImGuiStyle& style = ImGui::GetStyle();
+    ImGui::PushID(str_id);
+    ImGuiID dragging = ImGui::GetID("##dragging"), dragged = ImGui::GetID("##dragged");
+    bool commit = false;
+    int cur = st->GetBool(dragging) ? st->GetInt(dragged, v) : v;
+
+    if (label)
     {
-        menu_dialog_closed();
-        return;
+        float x0 = ImGui::GetCursorPosX();
+        float lw = ImGui::CalcTextSize(label).x + style.ItemSpacing.x * 2;
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted(label);
+        ImGui::SameLine(x0 + (lw > 7.0f * F ? lw : 7.0f * F));
     }
 
-    int first = g_dialog, count = g_dialog_count;
-    const SETTING* s = settings_get(first);
+    float box = ImGui::CalcTextSize("00000").x + style.FramePadding.x * 2;
+    float slider = ImGui::GetContentRegionAvail().x - box - style.ItemSpacing.x;
 
-    float dw = 36.0f * F;
+    if (slider < ImGui::GetFrameHeight())
+        slider = ImGui::GetFrameHeight();
 
-    if (dw > width - 2.0f * F)
-        dw = width - 2.0f * F;
+    ImGui::SetNextItemWidth(slider);
 
-    ImGui::SetNextWindowPos(ImVec2(width * 0.5f, canvas_h * 0.5f), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
-    ImGui::SetNextWindowSizeConstraints(ImVec2(dw, 0.0f), ImVec2(dw, canvas_h * 0.9f));
-    /* Whole pixels: ImGui truncates the fitted size, and a fraction short of the content shows a scrollbar */
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(ImFloor(1.1f * F), ImFloor(0.9f * F)));
-    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.5f * F, 0.45f * F));
-    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0.6f * F, 0.4f * F));
-
-    ImGuiWindowFlags flags =
-        ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
-        ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings;
-
-    if (ImGui::BeginPopupModal("##dialog", NULL, flags))
+    if (ImGui::SliderInt("##slider", &cur, lo, hi, "", ImGuiSliderFlags_AlwaysClamp | ImGuiSliderFlags_NoInput))
     {
-        bool close = false;
-        bool capturing = g_capture == first;
+        st->SetBool(dragging, true);
+        st->SetInt(dragged, cur);
+    }
 
-        if (capturing)
-            g_capture_seen = true;
+    if (ImGui::IsItemDeactivated() && st->GetBool(dragging))
+    {
+        st->SetBool(dragging, false);
+        *out = st->GetInt(dragged, v);
+        commit = true;
+    }
 
-        /* Esc closes it, unless it's for a text field; and a click outside it */
-        if (ImGui::IsKeyPressed(ImGuiKey_Escape, false) && g_capture < 0 && !ImGui::IsAnyItemActive())
-            close = true;
+    ImGui::SameLine();
 
-        if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
-            !ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows | ImGuiHoveredFlags_AllowWhenBlockedByActiveItem))
-            close = true;
+    if (ui_int_field("##box", cur, lo, hi, box, out))
+        commit = true;
 
-        ImDrawList* dl = ImGui::GetWindowDrawList();
-        const ImGuiStyle& style = ImGui::GetStyle();
-        float iw = ImGui::GetContentRegionAvail().x;
-        char text[1024];
+    ImGui::PopID();
+    return commit;
+}
 
-        /* The icon, the name, and a close button */
-        float hh = 2.2f * F;
-        ImGui::Dummy(ImVec2(iw - hh - style.ItemSpacing.x, hh));
-        ImVec2 p = ImGui::GetItemRectMin();
-        ui_icon(dl, menu_setting_icon(s->key), ImVec2(p.x + 0.7f * F, p.y + hh * 0.5f), 1.5f * F, ui_col(COL_ACCENT_HI));
+/* The desktop in pixels */
+static void menu_desktop(int* w, int* h)
+{
+    DEVMODEA dm;
+    memset(&dm, 0, sizeof(dm));
+    dm.dmSize = sizeof(dm);
 
-        float title_size = 1.25f * F;
-        const char* title = ui_fit(title_size, s->label ? s->label : s->key, iw - hh - 2.4f * F, text, sizeof(text));
-        ui_text(dl, title_size, ImVec2(p.x + 1.9f * F, p.y + (hh - ui_text_size(title_size, title).y) * 0.5f), ui_col(COL_TEXT), title);
+    if (EnumDisplaySettingsA(NULL, ENUM_CURRENT_SETTINGS, &dm) && dm.dmPelsWidth && dm.dmPelsHeight)
+    {
+        *w = (int)dm.dmPelsWidth;
+        *h = (int)dm.dmPelsHeight;
+    }
+    else
+    {
+        *w = GetSystemMetrics(SM_CXSCREEN);
+        *h = GetSystemMetrics(SM_CYSCREEN);
+    }
+}
 
+enum
+{
+    VIEWPORT_FIT,
+    VIEWPORT_SIZE,
+    VIEWPORT_PIXELS,
+    VIEWPORT_DESKTOP,
+    VIEWPORT_RELATIVE,
+};
+
+/* A viewport's kind, and its numbers; what crt_auto.c doesn't take is "fit" */
+static int menu_viewport_mode(const char* v, int* a, int* b)
+{
+    char rest[8] = "", sep = 0;
+
+    if (!_strnicmp(v, "relative", 8) && sscanf(v + 8, " %d%% %d%%", a, b) == 2)
+        return VIEWPORT_RELATIVE;
+
+    int n = sscanf(v, "%d%c%d%7s", a, &sep, b, rest);
+
+    if (n >= 3 && (sep == 'x' || sep == 'X' || sep == ','))
+    {
+        if (n == 3)
+            return VIEWPORT_SIZE;
+
+        if (!_stricmp(rest, "px"))
+            return VIEWPORT_PIXELS;
+    }
+
+    if (sscanf(v, "%d", a) == 1 && strchr(v, '%'))
+        return VIEWPORT_DESKTOP;
+
+    return VIEWPORT_FIT;
+}
+
+static void menu_viewport_value(int mode, int a, int b, char* buf, size_t size)
+{
+    switch (mode)
+    {
+    case VIEWPORT_SIZE: _snprintf(buf, size - 1, "%dx%d", a, b); break;
+    case VIEWPORT_PIXELS: _snprintf(buf, size - 1, "%dx%dpx", a, b); break;
+    case VIEWPORT_DESKTOP: _snprintf(buf, size - 1, "%d%%", a); break;
+    case VIEWPORT_RELATIVE: _snprintf(buf, size - 1, "relative %d%% %d%%", a, b); break;
+    default: _snprintf(buf, size - 1, "fit"); break;
+    }
+
+    buf[size - 1] = 0;
+}
+
+/* The viewport, each of its kinds with its own controls: crt_auto.c's
+ * formats without typing them */
+static void menu_viewport(int setting, const SETTING* s, float F)
+{
+    /* Each kind's numbers, kept while another kind is tried */
+    static int nums[5][2] = { { 0, 0 }, { 960, 720 }, { 1440, 1080 }, { 80, 0 }, { 100, 100 } };
+    static bool linked = true;
+    static const char* modes[] = { "Fit", "Size", "Pixels", "Desktop", "Relative" };
+    static const char* formats[] = { "fit", "WxH", "WxHpx", "N%", "relative H% V%" };
+
+    char value[MENU_TEXT], text[1024];
+    strncpy(value, overlay_menu_value(setting, NULL), sizeof(value) - 1);
+    value[sizeof(value) - 1] = 0;
+
+    int a = 0, b = 0;
+    int mode = menu_viewport_mode(value, &a, &b);
+
+    if (mode != VIEWPORT_FIT)
+    {
+        nums[mode][0] = a;
+        nums[mode][1] = b;
+    }
+
+    if (mode == VIEWPORT_RELATIVE && a != b)
+        linked = false;
+
+    const ImGuiStyle& style = ImGui::GetStyle();
+    int write_mode = -1, wa = 0, wb = 0;
+    int picked = ui_segmented("##mode", modes, 5, mode, F);
+
+    if (picked >= 0 && picked != mode)
+    {
+        write_mode = picked;
+        wa = nums[picked][0];
+        wb = nums[picked][1];
+    }
+
+    if (settings_choice_help(s, formats[mode], text, sizeof(text)))
+        menu_note(text, F);
+
+    int dw, dh;
+    menu_desktop(&dw, &dh);
+    float scale = overlay_dpi_scale();
+
+    if (scale <= 0.0f)
+        scale = 1.0f;
+
+    char line[256];
+
+    if (mode == VIEWPORT_SIZE || mode == VIEWPORT_PIXELS)
+    {
+        bool px = mode == VIEWPORT_PIXELS;
+        int max_w = px ? dw : (int)(dw / scale), max_h = px ? dh : (int)(dh / scale);
+        float field = ImGui::CalcTextSize("000000").x + style.FramePadding.x * 2;
+        int n;
+
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted("Width");
         ImGui::SameLine();
 
-        if (menu_icon_button("##close", ICON_CLOSE, hh, 1.3f * F, false))
-            close = true;
+        if (ui_int_field("##w", a, 1, 65535, field, &n))
+        {
+            write_mode = mode;
+            wa = n;
+            wb = b;
+        }
 
-        /* What it is: the help, without the lines about the choices shown below */
-        const SETTING* help = menu_help_of(first);
-        const char* cursor = help && help->help ? help->help : "";
-        bool listed = s->choices && s->kind != SETTING_BOOL && s->kind != SETTING_KEY && count == 1;
+        ImGui::SameLine();
+        ImGui::TextUnformatted("Height");
+        ImGui::SameLine();
 
-        ImGui::PushFont(NULL, 0.95f * F);
-        ImGui::PushStyleColor(ImGuiCol_Text, COL_DIM);
-        ImGui::PushTextWrapPos(0.0f);
+        if (ui_int_field("##h", b, 1, 65535, field, &n))
+        {
+            write_mode = mode;
+            wa = a;
+            wb = n;
+        }
 
-        while (menu_general_line(help, &cursor, text, sizeof(text), !listed))
+        ImGui::SameLine();
+        ImGui::TextDisabled(px ? "pixels" : "logical units");
+
+        /* The 4:3 sizes that fit on the desktop */
+        static const int presets[][2] = {
+            { 640, 480 }, { 800, 600 }, { 960, 720 }, { 1024, 768 }, { 1280, 960 },
+            { 1440, 1080 }, { 1600, 1200 }, { 1920, 1440 }, { 2560, 1920 }, { 2880, 2160 },
+        };
+
+        float right = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x;
+        bool first = true;
+
+        for (size_t i = 0; i < sizeof(presets) / sizeof(presets[0]); i++)
+        {
+            if (presets[i][0] > max_w || presets[i][1] > max_h)
+                continue;
+
+            _snprintf(line, sizeof(line) - 1, "%d\xc3\x97%d", presets[i][0], presets[i][1]);
+            line[sizeof(line) - 1] = 0;
+
+            float bw = ImGui::CalcTextSize(line).x + style.FramePadding.x * 2;
+
+            if (!first)
+            {
+                ImGui::SameLine();
+
+                if (ImGui::GetCursorPosX() + bw > right)
+                    ImGui::NewLine();
+            }
+
+            first = false;
+            ImGui::PushID((int)i);
+
+            if (menu_button(line, bw, presets[i][0] == a && presets[i][1] == b))
+            {
+                write_mode = mode;
+                wa = presets[i][0];
+                wb = presets[i][1];
+            }
+
+            ImGui::PopID();
+        }
+
+        if (px)
+            _snprintf(line, sizeof(line) - 1, "The desktop is %d\xc3\x97%d pixels", dw, dh);
+        else
+            _snprintf(line, sizeof(line) - 1, "The desktop is %d\xc3\x97%d logical units (%d\xc3\x97%d pixels at %d%%)",
+                max_w, max_h, dw, dh, (int)(scale * 100.0f + 0.5f));
+
+        line[sizeof(line) - 1] = 0;
+        menu_note(line, F);
+
+        if (a > max_w || b > max_h)
+            menu_note("That's larger than the desktop: the window or screen is used, as with Fit", F, COL_ACCENT_HI);
+    }
+    else if (mode == VIEWPORT_DESKTOP)
+    {
+        int n;
+
+        if (ui_slider_box("##desktop", "Percentage", a, 1, 100, F, &n))
+        {
+            write_mode = mode;
+            wa = n;
+        }
+
+        _snprintf(line, sizeof(line) - 1, "%d%% of the desktop is %d\xc3\x97%d pixels", a, (int)(dw * a / 100.0f), (int)(dh * a / 100.0f));
+        line[sizeof(line) - 1] = 0;
+        menu_note(line, F);
+    }
+    else if (mode == VIEWPORT_RELATIVE)
+    {
+        int n;
+
+        if (ui_slider_box("##h", "Horizontal", a, 20, 300, F, &n))
+        {
+            write_mode = mode;
+            wa = n;
+            wb = linked ? n : b;
+        }
+
+        if (ui_slider_box("##v", "Vertical", b, 20, 300, F, &n))
+        {
+            write_mode = mode;
+            wa = linked ? n : a;
+            wb = n;
+        }
+
+        if (ImGui::Checkbox("Same for both", &linked) && linked && a != b)
+        {
+            write_mode = mode;
+            wa = wb = a;
+        }
+
+        /* Another shape */
+        int aspect = settings_index("aspect");
+
+        if (a != b && aspect >= 0 && _stricmp(overlay_menu_value(aspect, NULL), "stretch"))
+        {
+            menu_note("The picture keeps its shape inside this area. Aspect ratio: Stretch fills it", F);
+
+            if (menu_button("Stretch the picture", 0.0f, false))
+                overlay_menu_write(aspect, "stretch");
+        }
+    }
+
+    if (write_mode >= 0)
+    {
+        char v[64];
+        menu_viewport_value(write_mode, wa, wb, v, sizeof(v));
+
+        if (strcmp(v, value))
+            overlay_menu_write(setting, v);
+    }
+}
+
+/* What opens under a row: the rest of its help, its control, its default and Reset */
+static void menu_editor(int first, int count, float F)
+{
+    const SETTING* s = settings_get(first);
+    const SETTING* help = menu_help_of(first);
+    const char* cursor = help && help->help ? help->help : "";
+    const ImGuiStyle& style = ImGui::GetStyle();
+    bool listed = s->choices && s->kind != SETTING_BOOL && s->kind != SETTING_KEY && count == 1;
+    bool viewport = s->key && !strcmp(s->key, "viewport");
+    char text[1024], desc[1024];
+    bool has_desc = menu_description(first, desc, sizeof(desc));
+
+    /* The help the row doesn't show; the lines about the values are with them */
+    ImGui::PushFont(NULL, 0.9f * F);
+    ImGui::PushStyleColor(ImGuiCol_Text, COL_DIM);
+    ImGui::PushTextWrapPos(0.0f);
+
+    while (menu_general_line(help, &cursor, text, sizeof(text), !listed && !viewport))
+    {
+        if (!has_desc || strcmp(text, desc))
             ImGui::TextUnformatted(text);
+    }
 
-        ImGui::PopStyleColor();
+    ImGui::PopStyleColor();
 
-        if (s->apply == SETTING_RESTART)
-            ImGui::TextColored(COL_ACCENT_HI, "Takes effect when the game starts again");
+    if (s->apply == SETTING_RESTART)
+        ImGui::TextColored(COL_ACCENT_HI, "Takes effect when the game starts again");
 
-        ImGui::PopTextWrapPos();
-        ImGui::PopFont();
-        ImGui::Dummy(ImVec2(0.0f, 0.2f * F));
+    ImGui::PopTextWrapPos();
+    ImGui::PopFont();
 
-        char value[MENU_TEXT];
-        strncpy(value, overlay_menu_value(first, NULL), sizeof(value) - 1);
-        value[sizeof(value) - 1] = 0;
+    char value[MENU_TEXT];
+    strncpy(value, overlay_menu_value(first, NULL), sizeof(value) - 1);
+    value[sizeof(value) - 1] = 0;
 
-        bool number = s->kind == SETTING_INT;
-        bool editor = (s->kind == SETTING_INT || s->kind == SETTING_STRING) && (!s->choices || count > 1);
+    bool number = s->kind == SETTING_INT;
+    bool editor = (s->kind == SETTING_INT || s->kind == SETTING_STRING) && (!s->choices || count > 1);
 
-        /* The choices, and "A number" or "Other" */
-        if (listed)
+    if (viewport)
+    {
+        menu_viewport(first, s, F);
+        editor = false;
+    }
+    else if (listed)
+    {
+        /* The choices, and "A number" or "Other": side by side when they're
+         * few and short, the picked one's help under them; else a list */
+        int current = menu_find_choice(s, value, NULL, 0);
+
+        if (current < 0 && s->kind == SETTING_CHOICE)
+            current = menu_find_choice(s, s->value, NULL, 0);
+
+        bool own = s->kind != SETTING_CHOICE;
+        bool on_own = own && (current < 0 || g_custom == first);
+
+        static char names[17][64];
+        const char* labels[17];
+        int n = 0;
+        char v[MENU_TEXT], l[MENU_TEXT];
+
+        for (int i = 0; n < 16 && settings_choice(s, i, v, sizeof(v), l, sizeof(l)); i++)
         {
-            int current = menu_find_choice(s, value, NULL, 0);
-
-            if (current < 0 && s->kind == SETTING_CHOICE)
-                current = menu_find_choice(s, s->value, NULL, 0);
-
-            bool own = s->kind != SETTING_CHOICE;
-            bool on_own = own && (current < 0 || g_custom == first);
-            char v[MENU_TEXT], l[MENU_TEXT], h[1024];
-
-            for (int i = 0; settings_choice(s, i, v, sizeof(v), l, sizeof(l)); i++)
-            {
-                bool has_help = settings_choice_help(s, v, h, sizeof(h)) != 0;
-
-                if (menu_choice_row(i, l, has_help ? h : NULL, !on_own && current == i, F))
-                {
-                    g_custom = -1;
-                    menu_write_choice(first, s, i, value);
-                    close = true;
-                }
-            }
-
-            if (own)
-            {
-                bool has_help = settings_choice_help(s, NULL, h, sizeof(h)) != 0;
-
-                if (menu_choice_row(MENU_OTHER, number ? "A number" : "Other", has_help ? h : NULL, on_own, F) && !on_own)
-                {
-                    g_custom = first;
-                    g_custom_focus = true;
-                }
-
-                editor = on_own || g_custom == first;
-            }
+            strncpy(names[n], l, sizeof(names[n]) - 1);
+            names[n][sizeof(names[n]) - 1] = 0;
+            labels[n] = names[n];
+            n++;
         }
 
-        if (editor)
+        if (own)
+            labels[n++] = number ? "A number" : "Other";
+
+        int selected = on_own ? n - 1 : current;
+        float seg_w = ImGui::GetContentRegionAvail().x / (n ? n : 1);
+        bool side = n <= 5;
+
+        for (int i = 0; side && i < n; i++)
+            side = ui_text_size(0.98f * F, labels[i]).x + 1.2f * F <= seg_w;
+
+        int picked;
+
+        if (side)
         {
-            ImGui::Dummy(ImVec2(0.0f, 0.1f * F));
+            picked = ui_segmented("##choices", labels, n, selected, F);
 
-            if (number)
-            {
-                for (int m = first; m < first + count; m++)
-                    menu_number(m, settings_get(m), F);
-            }
-            else if (menu_text_field(first))
-            {
-                close = true;
-            }
-        }
+            char h[1024];
+            int has_help = 0;
 
-        /* A hotkey: what's pressed next */
-        if (s->kind == SETTING_KEY)
-        {
-            float bh = 3.0f * F;
-            ImGui::Dummy(ImVec2(iw, bh));
-            ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
-            dl->AddRectFilled(a, b, ui_col(COL_PILL), 0.45f * F);
+            if (own && selected == n - 1)
+                has_help = settings_choice_help(s, NULL, h, sizeof(h));
+            else if (selected >= 0 && settings_choice(s, selected, v, sizeof(v), l, sizeof(l)))
+                has_help = settings_choice_help(s, v, h, sizeof(h));
 
-            float pulse = 0.55f + 0.45f * sinf((float)ImGui::GetTime() * 5.0f);
-
-            if (capturing)
-                dl->AddRect(a, b, ui_col(COL_ACCENT, pulse), 0.45f * F, 0.12f * F > 1.0f ? 0.12f * F : 1.0f);
-
-            if (capturing)
-            {
-                strcpy(text, "Press a key");
-            }
-            else
-            {
-                menu_key_name((int)strtol(value, NULL, 0), text, sizeof(text), true);
-            }
-
-            float size = 1.15f * F;
-            ImVec2 sz = ui_text_size(size, text);
-            ui_text(dl, size, ImVec2((a.x + b.x - sz.x) * 0.5f, (a.y + b.y - sz.y) * 0.5f), ui_col(COL_TEXT), text);
-
-            if (capturing)
-            {
-                ImGui::PushStyleColor(ImGuiCol_Text, COL_DIM);
-                ImGui::TextUnformatted("Esc cancels");
-                ImGui::PopStyleColor();
-            }
-
-            /* A key was pressed, or Esc */
-            if (!capturing)
-                close = true;
-        }
-
-        /* The default, and the buttons */
-        ImGui::Dummy(ImVec2(0.0f, 0.2f * F));
-        ImGui::Separator();
-        ImGui::Dummy(ImVec2(0.0f, 0.1f * F));
-
-        bool changed = false;
-        char defaults[MENU_TEXT * 2] = "";
-
-        for (int m = first; m < first + count; m++)
-        {
-            changed = changed || menu_changed(m);
-            menu_append_value(defaults, sizeof(defaults), settings_get(m), settings_get(m)->value);
-        }
-
-        const char* labels[3];
-        int n_buttons = 0;
-
-        if (s->kind == SETTING_KEY)
-        {
-            labels[n_buttons++] = "None";
-            labels[n_buttons++] = "Reset";
-            labels[n_buttons++] = "Cancel";
+            if (has_help && _stricmp(h, labels[selected]))
+                menu_note(h, F);
         }
         else
         {
-            labels[n_buttons++] = "Reset";
-            labels[n_buttons++] = "Done";
+            picked = menu_choice_list(s, labels, n, own, selected, F);
         }
 
-        float bw = 5.0f * F;
-
-        for (int i = 0; i < n_buttons; i++)
+        if (picked >= 0 && picked != selected)
         {
-            float w = ImGui::CalcTextSize(labels[i]).x + style.FramePadding.x * 2;
-
-            if (w > bw)
-                bw = w;
-        }
-
-        float buttons_w = bw * n_buttons + style.ItemSpacing.x * (n_buttons - 1);
-        char line[MENU_TEXT * 2 + 16], cut[MENU_TEXT * 2 + 16];
-        _snprintf(line, sizeof(line) - 1, "Default: %s", defaults);
-        line[sizeof(line) - 1] = 0;
-
-        ImGui::AlignTextToFramePadding();
-        ImGui::PushStyleColor(ImGuiCol_Text, COL_DIM);
-        ImGui::TextUnformatted(ui_fit(ImGui::GetFontSize(), line, iw - buttons_w - style.ItemSpacing.x * 2, cut, sizeof(cut)));
-        ImGui::PopStyleColor();
-        ImGui::SameLine(iw - buttons_w + style.WindowPadding.x);
-
-        for (int i = 0; i < n_buttons; i++)
-        {
-            const char* label = labels[i];
-            bool reset = !strcmp(label, "Reset");
-
-            if (i)
-                ImGui::SameLine();
-
-            ImGui::BeginDisabled(reset && !changed);
-
-            if (menu_button(label, bw, !strcmp(label, "Done")))
+            if (own && picked == n - 1)
             {
-                if (!strcmp(label, "None"))
-                {
-                    menu_capture(-1);
-                    overlay_menu_write(first, "0x00");
-                }
-                else if (reset)
-                {
-                    if (g_capture >= 0)
-                        menu_capture(-1);
+                g_custom = first;
+                g_custom_focus = true;
+            }
+            else
+            {
+                g_custom = -1;
+                menu_write_choice(first, s, picked, value);
+            }
+        }
 
-                    for (int m = first; m < first + count; m++)
+        editor = own && (on_own || g_custom == first);
+    }
+
+    if (editor)
+    {
+        if (number)
+        {
+            for (int m = first; m < first + count; m++)
+                menu_number(m, settings_get(m), F);
+        }
+        else if (menu_text_field(first))
+        {
+            menu_close_row(true);
+        }
+    }
+
+    /* A hotkey: what's pressed next */
+    if (s->kind == SETTING_KEY)
+    {
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        bool capturing = g_capture == first;
+        float bh = 2.6f * F;
+        ImGui::Dummy(ImVec2(ImGui::GetContentRegionAvail().x, bh));
+        ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
+        dl->AddRectFilled(a, b, ui_col(COL_PILL), 0.45f * F);
+
+        if (capturing)
+        {
+            float pulse = 0.55f + 0.45f * sinf((float)ImGui::GetTime() * 5.0f);
+            dl->AddRect(a, b, ui_col(COL_ACCENT, pulse), 0.45f * F, 0.12f * F > 1.0f ? 0.12f * F : 1.0f);
+            strcpy(text, "Press a key   (Esc cancels)");
+        }
+        else
+        {
+            menu_key_name((int)strtol(value, NULL, 0), text, sizeof(text), true);
+        }
+
+        float size = 1.1f * F;
+        ImVec2 sz = ui_text_size(size, text);
+        ui_text(dl, size, ImVec2((a.x + b.x - sz.x) * 0.5f, (a.y + b.y - sz.y) * 0.5f), ui_col(capturing ? COL_TEXT : COL_DIM), text);
+
+        /* A key was pressed, or Esc */
+        if (!capturing && g_open == first)
+            menu_close_row(ui_keyboard());
+    }
+
+    /* The default, and Reset (and None for a hotkey) */
+    bool changed = false;
+    char defaults[MENU_TEXT * 2] = "";
+
+    for (int m = first; m < first + count; m++)
+    {
+        changed = changed || menu_changed(m);
+        menu_append_value(defaults, sizeof(defaults), settings_get(m), settings_get(m)->value);
+    }
+
+    bool key = s->kind == SETTING_KEY;
+    float bw = ImGui::CalcTextSize("Reset").x + style.FramePadding.x * 4;
+    float buttons_w = key ? bw * 2 + style.ItemSpacing.x : bw;
+    float x0 = ImGui::GetCursorPosX(), iw = ImGui::GetContentRegionAvail().x;
+    char line[MENU_TEXT * 2 + 16], cut[MENU_TEXT * 2 + 16];
+    _snprintf(line, sizeof(line) - 1, "Default: %s", defaults);
+    line[sizeof(line) - 1] = 0;
+
+    ImGui::Dummy(ImVec2(0.0f, 0.05f * F));
+    ImGui::AlignTextToFramePadding();
+    ImGui::PushStyleColor(ImGuiCol_Text, COL_DIM);
+    ImGui::TextUnformatted(ui_fit(ImGui::GetFontSize(), line, iw - buttons_w - style.ItemSpacing.x * 2, cut, sizeof(cut)));
+    ImGui::PopStyleColor();
+    ImGui::SameLine(x0 + iw - buttons_w);
+
+    if (key)
+    {
+        if (menu_button("None", bw, false))
+        {
+            overlay_menu_write(first, "0x00");
+            menu_close_row(ui_keyboard());
+        }
+
+        ImGui::SameLine();
+    }
+
+    ImGui::BeginDisabled(!changed);
+
+    if (menu_button("Reset", bw, false))
+    {
+        for (int m = first; m < first + count; m++)
+        {
+            if (menu_changed(m))
+                overlay_menu_write(m, settings_get(m)->value);
+        }
+
+        g_slider = g_number = g_text = -1;
+        g_custom = -1;
+
+        if (key)
+            menu_close_row(ui_keyboard());
+    }
+
+    ImGui::EndDisabled();
+}
+
+/* What opens under a row, sliding open and shut. Returns how far it's open
+ * (0 to 1); bottom = where it ends */
+static float menu_body(int first, int count, float F, float* bottom)
+{
+    ImGuiWindow* window = ImGui::GetCurrentWindow();
+    ImGuiStorage* st = &window->StateStorage;
+    ImGuiID shown_id = window->GetID("##shown"), full_id = window->GetID("##full");
+    bool open = g_open == first;
+    float shown = st->GetFloat(shown_id, 0.0f);
+    float full = st->GetFloat(full_id, 0.0f);
+
+    *bottom = window->DC.CursorPos.y;
+
+    if (!open && shown <= 0.0f)
+        return 0.0f;
+
+    /* Its height isn't known until it's laid out once: a pixel of it then */
+    float h = open && full <= 0.0f ? 1.0f : ui_approach(shown, open ? full : 0.0f, 16.0f, 0.5f);
+    st->SetFloat(shown_id, h);
+
+    if (h <= 0.0f)
+        return 0.0f;
+
+    float w = ImGui::GetContentRegionAvail().x;
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(ImFloor(0.7f * F), ImFloor(0.3f * F)));
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.5f * F, 0.45f * F));
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0.6f * F, 0.4f * F));
+
+    ImGuiWindowFlags flags = ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoBackground;
+
+    if (ImGui::BeginChild("##body", ImVec2(w, floorf(h > 1.0f ? h : 1.0f)), ImGuiChildFlags_NavFlattened | ImGuiChildFlags_AlwaysUseWindowPadding, flags))
+    {
+        ImGuiWindow* body = ImGui::GetCurrentWindow();
+        ImDrawList* dl = body->DrawList;
+
+        /* Channel 0 is under the rest: the pill of a list of choices */
+        dl->ChannelsSplit(2);
+        dl->ChannelsSetCurrent(1);
+        ImGui::Indent(1.9f * F);
+        menu_editor(first, count, F);
+        ImGui::Unindent(1.9f * F);
+        dl->ChannelsMerge();
+
+        float measured = floorf(body->DC.CursorMaxPos.y - body->DC.CursorStartPos.y + body->WindowPadding.y * 2.0f + 0.4f * F);
+
+        if (measured > 0.0f)
+            st->SetFloat(full_id, measured);
+    }
+
+    ImGui::EndChild();
+    ImGui::PopStyleVar(3);
+
+    *bottom = ImGui::GetItemRectMax().y;
+
+    full = st->GetFloat(full_id, 0.0f);
+    return full > 0.0f ? ImClamp(h / full, 0.0f, 1.0f) : 0.0f;
+}
+
+/* How far a row is open (as menu_body left it), in its ID scope */
+static float menu_open_amount(void)
+{
+    ImGuiWindow* window = ImGui::GetCurrentWindow();
+    float full = window->StateStorage.GetFloat(window->GetID("##full"), 0.0f);
+    float shown = window->StateStorage.GetFloat(window->GetID("##shown"), 0.0f);
+    return full > 0.0f ? ImClamp(shown / full, 0.0f, 1.0f) : 0.0f;
+}
+
+/* ------------------------------------------------ the settings OSD's list */
+
+/* The list goes to a group: its heading at the top, or as far as it goes */
+static void menu_go_to_group(int group, bool focus)
+{
+    if (group < 0 || group >= g_groups)
+        return;
+
+    g_scroll_to = g_group_y[group];
+    g_group_pinned = group;
+    g_pinned_scroll = -1.0f;
+
+    if (focus && g_group_row[group] >= 0)
+        g_focus_row = g_group_row[group];
+}
+
+/* Every setting, a group (settings_tab) after another. A setting marked
+ * SETTING_JOINED shares the row of the one before */
+static void menu_list(float F)
+{
+    ImGuiWindow* window = ImGui::GetCurrentWindow();
+    ImGuiContext& g = *GImGui;
+    ImGuiIO& io = ImGui::GetIO();
+    ImDrawList* dl = window->DrawList;
+
+    /* Gliding to a group, unless the wheel or the keys move the list */
+    if (g_scroll_to >= 0.0f)
+    {
+        if (io.MouseWheel != 0.0f || ImGui::IsKeyPressed(ImGuiKey_UpArrow) || ImGui::IsKeyPressed(ImGuiKey_DownArrow) ||
+            ImGui::IsKeyPressed(ImGuiKey_PageUp) || ImGui::IsKeyPressed(ImGuiKey_PageDown) || ImGui::IsMouseDragging(ImGuiMouseButton_Left))
+        {
+            g_scroll_to = -1.0f;
+        }
+        else
+        {
+            float to = ImMin(g_scroll_to, ImGui::GetScrollMaxY());
+            float y = ui_approach(ImGui::GetScrollY(), to, 14.0f, 1.0f);
+            ImGui::SetScrollY(y);
+
+            if (y == to)
+                g_scroll_to = -1.0f;
+        }
+    }
+
+    /* Channel 0 is under the rows: the highlight, and the open rows' cards */
+    dl->ChannelsSplit(2);
+    dl->ChannelsSetCurrent(1);
+
+    ImVec2 origin = window->DC.CursorStartPos;
+    ImRect target;
+    bool has_target = false, target_held = false;
+    struct { ImRect r; float a; } cards[4];
+    int n_cards = 0;
+    int nav_group = -1, open_group = -1;
+    bool nav_on_row = false;
+
+    g_groups = 0;
+
+    for (int tab = 0; settings_tab(tab) && g_groups < MENU_GROUPS; tab++)
+    {
+        const char* name = settings_tab(tab);
+        bool gated = false; /* a SETTING_GATE before is off */
+        bool top = true;    /* straight under the group's heading */
+
+        g_group_y[g_groups] = menu_group_heading(tab, F);
+        g_group_row[g_groups] = -1;
+
+        for (int i = 0; i < settings_count(); i++)
+        {
+            const SETTING* s = settings_get(i);
+
+            if (!s->tab || strcmp(s->tab, name))
+                continue;
+
+            if (s->kind == SETTING_HEADING)
+            {
+                menu_heading(s, top, F);
+                top = false;
+                continue;
+            }
+
+            if (!s->key || (s->flags & SETTING_JOINED))
+                continue;
+
+            int count = 1;
+
+            while (i + count < settings_count() && (settings_get(i + count)->flags & SETTING_JOINED))
+                count++;
+
+            top = false;
+
+            if (g_group_row[g_groups] < 0)
+                g_group_row[g_groups] = i;
+
+            ImGui::PushID(i);
+            ImGui::BeginDisabled(gated);
+
+            MENU_ROW row;
+            menu_row(i, count, menu_open_amount(), F, &row);
+
+            if (g_focus_row == -2)
+                g_focus_row = i; /* the first row, when the OSD opens */
+
+            if (g_focus_row == i)
+            {
+                ImGui::SetFocusID(row.id, window);
+                g.NavCursorVisible = true;
+                g.NavHighlightItemUnderNav = true;
+                g_focus_row = -1;
+            }
+
+            if (g.NavId == row.id)
+            {
+                nav_group = g_groups;
+                nav_on_row = true;
+            }
+
+            /* The keyboard's row, or else the mouse's */
+            bool nav_here = g.NavId == row.id && ui_keyboard();
+
+            if (nav_here || (!ui_keyboard() && row.hovered))
+            {
+                target = row.bb;
+                target_held = row.held && row.hovered;
+                has_target = true;
+            }
+
+            float bottom;
+            float amount = menu_body(i, count, F, &bottom);
+
+            if (amount > 0.0f && n_cards < 4)
+            {
+                cards[n_cards].r = ImRect(row.bb.Min, ImVec2(row.bb.Max.x, bottom));
+                cards[n_cards].a = amount;
+                n_cards++;
+            }
+
+            if (g_open == i)
+            {
+                open_group = g_groups;
+
+                /* Its whole height is known: scroll it into view */
+                float full = window->StateStorage.GetFloat(window->GetID("##full"), 0.0f);
+
+                if (g_open_scroll && full > 0.0f)
+                {
+                    float top_y = row.bb.Min.y - origin.y;
+                    float end_y = row.bb.Max.y - origin.y + full;
+                    float view = window->InnerRect.GetHeight();
+                    float sy = g_scroll_to >= 0.0f ? g_scroll_to : ImGui::GetScrollY();
+
+                    if (end_y > sy + view)
                     {
-                        if (menu_changed(m))
-                            overlay_menu_write(m, settings_get(m)->value);
+                        float to = end_y - view + 0.5f * F;
+                        g_scroll_to = to < top_y - 0.5f * F ? to : top_y - 0.5f * F;
                     }
 
-                    g_slider = g_number = g_text = -1;
+                    g_open_scroll = false;
                 }
-
-                /* Reset leaves a number or a text open, to go on from the default */
-                if (!reset || s->kind == SETTING_KEY || listed)
-                    close = true;
             }
 
             ImGui::EndDisabled();
+            ImGui::PopID();
+
+            for (int m = i; m < i + count; m++)
+            {
+                if (settings_get(m)->flags & SETTING_GATE)
+                {
+                    int on = 0;
+                    gated = !(ds_parse_bool(overlay_menu_value(m, NULL), &on) && on);
+                }
+            }
+
+            i += count - 1;
         }
 
-        if (close)
-        {
-            ImGui::CloseCurrentPopup();
-            menu_dialog_closed();
-        }
-
-        ImGui::EndPopup();
+        g_groups++;
     }
 
-    ImGui::PopStyleVar(3);
+    ImGui::Dummy(ImVec2(0.0f, 0.6f * F));
+
+    /* Under the rows */
+    dl->ChannelsSetCurrent(0);
+    float rounding = 0.4f * F;
+
+    for (int i = 0; i < n_cards; i++)
+        dl->AddRectFilled(cards[i].r.Min, cards[i].r.Max, ui_col(COL_DIALOG, cards[i].a), rounding);
+
+    ImGuiStorage* st = &window->StateStorage;
+    ImGuiID hl_id = window->GetID("##highlight"), hl_alpha = window->GetID("##highlight_alpha");
+    float alpha = st->GetFloat(hl_alpha, 0.0f);
+
+    if (has_target)
+    {
+        ImRect r = ui_slide(hl_id, target, origin, alpha < 0.05f);
+        alpha = ui_approach(alpha, 1.0f, 20.0f, 0.02f);
+        dl->AddRectFilled(r.Min, r.Max, ui_col(target_held ? COL_ROW_ACTIVE : COL_ROW_HOVER, alpha), rounding);
+    }
+    else if (alpha > 0.0f)
+    {
+        /* Fading where it was */
+        ImRect r = ui_slide(hl_id, ImRect(0, 0, 0, 0), ImVec2(0, 0), false);
+        (void)r;
+        alpha = ui_approach(alpha, 0.0f, 20.0f, 0.02f);
+    }
+
+    st->SetFloat(hl_alpha, alpha);
+    dl->ChannelsSetCurrent(1);
+    dl->ChannelsMerge();
+
+    /* The group the header names: the keyboard's, the one jumped to, or the
+     * one at the top */
+    float sy = ImGui::GetScrollY();
+
+    if (g_group_pinned >= 0 && g_scroll_to < 0.0f)
+    {
+        if (g_pinned_scroll < 0.0f)
+            g_pinned_scroll = sy;
+        else if (fabsf(sy - g_pinned_scroll) > 2.0f)
+            g_group_pinned = -1;
+    }
+
+    if (ui_keyboard() && nav_group >= 0)
+    {
+        g_group = nav_group;
+    }
+    else if (ui_keyboard() && open_group >= 0 && !nav_on_row && g.NavWindow == window)
+    {
+        g_group = open_group;
+    }
+    else if (g_group_pinned >= 0)
+    {
+        g_group = g_group_pinned;
+    }
+    else
+    {
+        g_group = 0;
+
+        for (int i = 0; i < g_groups; i++)
+        {
+            if (g_group_y[i] <= sy + 1.5f * F)
+                g_group = i;
+        }
+    }
+
+    /* Left and Right go to the group before and after, from a row's heading */
+    if (nav_on_row && g_capture < 0 && !ImGui::IsAnyItemActive() && g_groups > 0)
+    {
+        if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow))
+            menu_go_to_group((g_group + g_groups - 1) % g_groups, true);
+        else if (ImGui::IsKeyPressed(ImGuiKey_RightArrow))
+            menu_go_to_group((g_group + 1) % g_groups, true);
+    }
 }
 
 /* -------------------------------------------------- the settings OSD's panel */
@@ -1922,10 +2755,10 @@ static void menu_draw(int width, int canvas_height, float F)
     {
         ImGui::SetNextWindowFocus();
         g_focus_rows = true;
+        g_focus_row = -2;
     }
 
     bool open = true;
-    g_capture_seen = false;
 
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
@@ -1940,41 +2773,30 @@ static void menu_draw(int width, int canvas_height, float F)
 
     if (shown)
     {
-        ImDrawList* dl = ImGui::GetWindowDrawList();
-        int tabs = 0;
+        ImGuiWindow* panel = ImGui::GetCurrentWindow();
+        ImDrawList* dl = panel->DrawList;
+        int groups = 0;
 
-        while (settings_tab(tabs))
-            tabs++;
+        while (settings_tab(groups))
+            groups++;
 
-        if (g_tab >= tabs)
-            g_tab = 0;
+        if (g_group >= groups)
+            g_group = 0;
 
-        bool popup = ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel);
-
-        /* Esc closes it, unless it's for a text field or a dialog; Left and Right change the page */
-        if (!popup && g_capture < 0 && !ImGui::IsAnyItemActive())
+        /* Esc closes the open row, or the OSD; not while a text or a key is being typed */
+        if (g_capture < 0 && !ImGui::IsAnyItemActive() && ImGui::IsKeyPressed(ImGuiKey_Escape, false))
         {
-            if (ImGui::IsKeyPressed(ImGuiKey_Escape, false))
+            if (g_open >= 0)
+                menu_close_row(true);
+            else
                 open = false;
-
-            if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow, false) && tabs)
-            {
-                g_tab = (g_tab + tabs - 1) % tabs;
-                g_focus_rows = true;
-            }
-
-            if (ImGui::IsKeyPressed(ImGuiKey_RightArrow, false) && tabs)
-            {
-                g_tab = (g_tab + 1) % tabs;
-                g_focus_rows = true;
-            }
         }
 
-        /* The keyboard goes to the rows, not the panel around them */
-        if (ImGui::IsWindowFocused() && !popup)
+        /* The keyboard goes to the list, not the panel around it */
+        if (ImGui::IsWindowFocused())
             g_focus_rows = true;
 
-        /* The header: the page's name, and the pages' icons */
+        /* The header: the group's name, and the groups' icons to go to them */
         float hh = floorf(3.4f * F);
         dl->AddRectFilled(ImVec2(0, 0), ImVec2(pw, hh), ui_col(COL_BAR));
         dl->AddLine(ImVec2(0, hh - 0.5f), ImVec2(pw, hh - 0.5f), ui_col(COL_RULE));
@@ -1992,26 +2814,24 @@ static void menu_draw(int width, int canvas_height, float F)
 
         x -= 0.7f * F;
         ImGui::PushItemFlag(ImGuiItemFlags_NoNav, true);
+        ImRect underline;
 
-        for (int t = tabs - 1; t >= 0; t--)
+        for (int t = groups - 1; t >= 0; t--)
         {
             x -= bs;
             ImGui::SetCursorPos(ImVec2(x, by));
             ImGui::PushID(t);
 
-            if (menu_icon_button("##tab", menu_tab_icon(t), bs, 1.45f * F, t == g_tab) && t != g_tab)
-            {
-                g_tab = t;
-                g_focus_rows = true;
-            }
+            if (menu_icon_button("##group", menu_tab_icon(t), bs, 1.45f * F, t == g_group))
+                menu_go_to_group(t, false);
 
             ImGui::SetItemTooltip("%s", settings_tab(t));
             ImGui::PopID();
 
-            if (t == g_tab)
+            if (t == g_group)
             {
                 float u = floorf(0.16f * F > 2.0f ? 0.16f * F : 2.0f);
-                dl->AddRectFilled(ImVec2(x + 0.35f * F, hh - u), ImVec2(x + bs - 0.35f * F, hh), ui_col(COL_ACCENT), u * 0.5f);
+                underline = ImRect(ImVec2(x + 0.35f * F, hh - u), ImVec2(x + bs - 0.35f * F, hh));
             }
 
             x -= 0.1f * F;
@@ -2019,36 +2839,39 @@ static void menu_draw(int width, int canvas_height, float F)
 
         ImGui::PopItemFlag();
 
+        /* The line under the group's icon glides to the next */
+        if (groups > 0)
+        {
+            ImRect u = ui_slide(panel->GetID("##underline"), underline, panel->Pos, false);
+            dl->AddRectFilled(u.Min, u.Max, ui_col(COL_ACCENT), u.GetHeight() * 0.5f);
+        }
+
         float title_x = 0.9f * F;
         float title_w = x - 0.6f * F - title_x;
         char buf[128];
-        float sub_size = 0.78f * F, tab_size = 1.35f * F;
-        ImVec2 ss = ui_text_size(sub_size, "A"), bsz = ui_text_size(tab_size, "A");
-        float ty = (hh - ss.y - bsz.y) * 0.5f;
+        float sub_size = 0.78f * F, group_size = 1.35f * F;
+        ImVec2 ss = ui_text_size(sub_size, "A"), gs = ui_text_size(group_size, "A");
+        float ty = (hh - ss.y - gs.y) * 0.5f;
         ui_text(dl, sub_size, ImVec2(title_x, ty), ui_col(COL_DIM), ui_fit(sub_size, "DirectCRT settings", title_w, buf, sizeof(buf)));
-        ui_text(dl, tab_size, ImVec2(title_x, ty + ss.y), ui_col(COL_TEXT), ui_fit(tab_size, settings_tab(g_tab) ? settings_tab(g_tab) : "", title_w, buf, sizeof(buf)));
+        ui_text(dl, group_size, ImVec2(title_x, ty + ss.y), ui_col(COL_TEXT),
+            ui_fit(group_size, settings_tab(g_group) ? settings_tab(g_group) : "", title_w, buf, sizeof(buf)));
 
-        /* The rows */
+        /* The list */
         float fh = floorf(2.4f * F);
         ImGui::SetCursorPos(ImVec2(0.0f, hh));
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.55f * F, 0.5f * F));
         ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.5f * F, 0.1f * F));
-        ImGui::PushID(g_tab);
 
-        if (g_focus_rows && !popup)
+        if (g_focus_rows)
         {
             ImGui::SetNextWindowFocus();
             g_focus_rows = false;
         }
 
         if (ImGui::BeginChild("##rows", ImVec2(pw, ch - hh - fh), ImGuiChildFlags_AlwaysUseWindowPadding))
-        {
-            menu_rows(g_tab, F);
-            ImGui::Dummy(ImVec2(0.0f, 0.3f * F));
-        }
+            menu_list(F);
 
         ImGui::EndChild();
-        ImGui::PopID();
         ImGui::PopStyleVar(2);
 
         /* The footer: the keys */
@@ -2058,30 +2881,28 @@ static void menu_draw(int width, int canvas_height, float F)
         dl->AddRectFilled(ImVec2(0, fy), ImVec2(pw, ch), ui_col(COL_BAR));
         dl->AddLine(ImVec2(0, fy + 0.5f), ImVec2(pw, fy + 0.5f), ui_col(COL_RULE));
 
-        static const char* hints[][2] = {
-            { "\xe2\x86\x90\xe2\x86\x92", "Change page" },
+        const char* hints[4][2] = {
+            { "\xe2\x86\x90\xe2\x86\x92", "Section" },
             { "\xe2\x86\x91\xe2\x86\x93", "Navigate" },
-            { "Enter", "Select" },
-            { "Esc", "Close" },
+            { "Enter", g_open >= 0 ? "Select" : "Open" },
+            { "Esc", g_open >= 0 ? "Back" : "Close" },
         };
 
         float hx = pw - 0.9f * F;
 
-        for (int i = (int)(sizeof(hints) / sizeof(hints[0])) - 1; i >= 0; i--)
+        for (int i = 3; i >= 0; i--)
         {
             hx = menu_hint(dl, hx, fy + fh * 0.5f, 0.9f * F, hints[i][0], hints[i][1], F);
 
             if (hx < 0.0f)
                 break;
         }
-
-        menu_dialog(width, ch, F);
     }
 
     ImGui::End();
 
-    /* The hotkey being set lost its dialog */
-    if (g_capture >= 0 && !g_capture_seen)
+    /* The hotkey being set lost its row */
+    if (g_capture >= 0 && g_capture != g_open)
         menu_capture(-1);
 
     if (!open)
