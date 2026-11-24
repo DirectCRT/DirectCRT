@@ -43,6 +43,19 @@ void cfg_load()
     cfg_load_display_settings();
     GET_INT(g_config.maxfps, "maxfps", -1);
     GET_BOOL(g_config.vsync, "vsync", FALSE);
+    {
+        char rate[16];
+        cfg_get_string("emulated_refresh", "auto", rate, sizeof(rate));
+        g_config.emulated_refresh = _stricmp(rate, "auto") == 0 ? 0 : strtoul(rate, NULL, 10);
+
+        if (g_config.emulated_refresh && (g_config.emulated_refresh < 24 || g_config.emulated_refresh > 240))
+        {
+            TRACE("     emulated_refresh=%s is invalid, using auto\n", rate);
+            g_config.emulated_refresh = 0;
+        }
+
+        TRACE("emulated_refresh=%lu\n", g_config.emulated_refresh);
+    }
     GET_BOOL(g_config.adjmouse, "adjmouse", TRUE);
     cfg_load_crt_auto_settings(&g_config.crt);
     GET_STRING("renderer", "auto", g_config.renderer, sizeof(g_config.renderer));
@@ -256,6 +269,13 @@ static void cfg_create_ini()
             "; Note: vsync=true can fix tearing but it will cause input lag\n"
             "vsync=false\n"
             "\n"
+            "; The refresh rate of the emulated display, in Hz\n"
+            "; auto = the rate the game asks for, or 60 if it doesn't ask\n"
+            "; 24-240 = always this rate; CRTs of the era ran at 60, 70, 72, 75 or 85\n"
+            "; Note: The game sees this rate, and its flips and waits for the vertical blank follow it.\n"
+            ";   Your monitor's own rate stays as it is\n"
+            "emulated_refresh=auto\n"
+            "\n"
             "; Automatic mouse sensitivity scaling\n"
             "; Note: Sensitivity will be adjusted according to the size of the picture\n"
             "adjmouse=true\n"
@@ -365,7 +385,9 @@ static void cfg_create_ini()
             "; Hide WM_ACTIVATEAPP and WM_NCACTIVATE messages to prevent problems on alt+tab\n"
             "noactivateapp=false\n"
             "\n"
-            "; Max game ticks per second, possible values: -1 = disabled, -2 = refresh rate, 0 = emulate 60hz vblank, 1-1000 = custom game speed\n"
+            "; Max game ticks per second, possible values: -1 = disabled, -2 = your monitor's vertical blank,\n"
+            ";   0 = the emulated display's vertical blank (see 'emulated_refresh'), 1-1000 = custom game speed\n"
+            "; Note: With 0, a flip is shown at the next vertical blank, and drawing into the picture still on screen waits for it\n"
             "; Note: Can be used to slow down a too fast running game, fix flickering or too fast animations\n"
             "; Note: Usually one of the following values will work: 60 / 30 / 25 / 20 / 15 (lower value = slower game speed)\n"
             "maxgameticks=0\n"

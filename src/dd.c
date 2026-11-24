@@ -19,6 +19,7 @@
 #include "dllmain.h"
 #include "directinput.h"
 #include "opengl_utils.h"
+#include "vbeam.h"
 
 
 CNCDDRAW g_ddraw;
@@ -87,7 +88,7 @@ static void dd_mode_desc(DDSURFACEDESC2* s, DWORD width, DWORD height)
 
     s->dwSize = sizeof(DDSURFACEDESC);
     s->dwFlags = DDSD_HEIGHT | DDSD_REFRESHRATE | DDSD_WIDTH | DDSD_PITCH | DDSD_PIXELFORMAT;
-    s->dwRefreshRate = 60;
+    s->dwRefreshRate = vbeam_rate();
     s->dwWidth = width;
     s->dwHeight = height;
 }
@@ -450,7 +451,7 @@ HRESULT dd_GetDisplayMode(LPDDSURFACEDESC lpDDSurfaceDesc)
 
         lpDDSurfaceDesc->dwSize = size;
         lpDDSurfaceDesc->dwFlags = DDSD_HEIGHT | DDSD_REFRESHRATE | DDSD_WIDTH | DDSD_PITCH | DDSD_PIXELFORMAT;
-        lpDDSurfaceDesc->dwRefreshRate = 60;
+        lpDDSurfaceDesc->dwRefreshRate = vbeam_rate();
         lpDDSurfaceDesc->dwWidth = width;
         lpDDSurfaceDesc->dwHeight = height;
 
@@ -481,10 +482,19 @@ HRESULT dd_GetDisplayMode(LPDDSURFACEDESC lpDDSurfaceDesc)
     return DD_OK;
 }
 
+void dd_set_refresh(DWORD game_hz)
+{
+    DWORD hz = g_config.emulated_refresh ? g_config.emulated_refresh : game_hz;
+
+    /* A game that doesn't ask, or asks for a rate no CRT had, gets 60 Hz */
+    vbeam_set_rate(hz >= 24 && hz <= 240 ? hz : 60);
+    TRACE("     emulated refresh %lu Hz (the game asked for %lu)\n", vbeam_rate(), game_hz);
+}
+
 HRESULT dd_GetMonitorFrequency(LPDWORD lpdwFreq)
 {
     if (lpdwFreq)
-        *lpdwFreq = 60;
+        *lpdwFreq = vbeam_rate();
 
     return DD_OK;
 }
@@ -494,22 +504,24 @@ HRESULT dd_GetVerticalBlankStatus(LPBOOL lpbIsInVB)
     if (!lpbIsInVB)
         return DDERR_INVALIDPARAMS;
 
-    static DWORD last_vb;
-    DWORD tick = GetTickCount();
-
-    if (last_vb + 16 > tick)
-    {
-        *lpbIsInVB = FALSE;
-    }
-    else
-    {
-        last_vb = tick;
-        *lpbIsInVB = TRUE;
-    }
+    *lpbIsInVB = vbeam_in_vblank();
 
     TRACE("     lpbIsInVB = %s\n", *lpbIsInVB ? "TRUE" : "FALSE");
 
     return DD_OK;
+}
+
+HRESULT dd_GetScanLine(LPDWORD lpdwScanLine)
+{
+    if (!lpdwScanLine)
+        return DDERR_INVALIDPARAMS;
+
+    BOOL in_vblank;
+    *lpdwScanLine = vbeam_scanline(&in_vblank);
+
+    TRACE_EXT("     lpdwScanLine = %u%s\n", *lpdwScanLine, in_vblank ? " (vertical blank)" : "");
+
+    return in_vblank ? DDERR_VERTICALBLANKINPROGRESS : DD_OK;
 }
 
 HRESULT dd_RestoreDisplayMode()
@@ -764,6 +776,7 @@ HRESULT dd_SetDisplayMode(DWORD dwWidth, DWORD dwHeight, DWORD dwBPP, DWORD dwFl
 
     g_ddraw.width = dwWidth;
     g_ddraw.height = dwHeight;
+    vbeam_set_lines(dwHeight);
     g_ddraw.bpp = dwBPP;
 
     /* A window's client size: the user's, or window_size */
@@ -1572,50 +1585,10 @@ HRESULT dd_WaitForVerticalBlank(DWORD dwFlags, HANDLE hEvent)
             return DD_OK;
     }
 
-    if (!g_ddraw.flip_limiter.tick_length)
+    if (g_config.maxgameticks < 0)
         return DD_OK;
 
-    if (g_ddraw.flip_limiter.htimer)
-    {
-        FILETIME ft = { 0 };
-        GetSystemTimeAsFileTime(&ft);
-
-        if (CompareFileTime((FILETIME*)&g_ddraw.flip_limiter.due_time, &ft) == -1)
-        {
-            memcpy(&g_ddraw.flip_limiter.due_time, &ft, sizeof(LARGE_INTEGER));
-        }
-        else
-        {
-            WaitForSingleObject(g_ddraw.flip_limiter.htimer, g_ddraw.flip_limiter.tick_length * 2);
-        }
-
-        g_ddraw.flip_limiter.due_time.QuadPart += g_ddraw.flip_limiter.tick_length_ns;
-        SetWaitableTimer(g_ddraw.flip_limiter.htimer, &g_ddraw.flip_limiter.due_time, 0, NULL, NULL, FALSE);
-    }
-    else
-    {
-        static DWORD next_game_tick;
-
-        if (!next_game_tick)
-        {
-            next_game_tick = timeGetTime();
-            return DD_OK;
-        }
-
-        next_game_tick += g_ddraw.flip_limiter.tick_length;
-        DWORD tick_count = timeGetTime();
-
-        int sleep_time = next_game_tick - tick_count;
-
-        if (sleep_time <= 0 || sleep_time > g_ddraw.flip_limiter.tick_length)
-        {
-            next_game_tick = tick_count;
-        }
-        else
-        {
-            Sleep(sleep_time);
-        }
-    }
+    vbeam_wait((dwFlags & DDWAITVB_BLOCKEND) != 0);
 
     return DD_OK;
 }
@@ -1682,13 +1655,6 @@ ULONG dd_Release()
             CancelWaitableTimer(g_ddraw.ticks_limiter.htimer);
             CloseHandle(g_ddraw.ticks_limiter.htimer);
             g_ddraw.ticks_limiter.htimer = NULL;
-        }
-
-        if (g_ddraw.flip_limiter.htimer)
-        {
-            CancelWaitableTimer(g_ddraw.flip_limiter.htimer);
-            CloseHandle(g_ddraw.flip_limiter.htimer);
-            g_ddraw.flip_limiter.htimer = NULL;
         }
 
         if (g_fpsl.htimer)
@@ -1993,19 +1959,6 @@ HRESULT dd_CreateEx(GUID* lpGuid, LPVOID* lplpDD, REFIID iid, IUnknown* pUnkOute
             float len = 1000.0f / g_config.maxgameticks;
             g_ddraw.ticks_limiter.tick_length_ns = (LONGLONG)(len * 10000);
             g_ddraw.ticks_limiter.tick_length = (DWORD)(len + 0.5f);
-        }
-
-        if (g_config.maxgameticks >= 0 || g_config.maxgameticks == -2)
-        {
-            /* always using 60 fps for flip...  */
-            g_ddraw.flip_limiter.htimer = createTimerExW ? createTimerExW(NULL, NULL, timer_flags, TIMER_ALL_ACCESS) : NULL;
-
-            if (!g_ddraw.flip_limiter.htimer)
-                g_ddraw.flip_limiter.htimer = CreateWaitableTimer(NULL, TRUE, NULL);
-
-            float flip_len = 1000.0f / 60;
-            g_ddraw.flip_limiter.tick_length_ns = (LONGLONG)(flip_len * 10000);
-            g_ddraw.flip_limiter.tick_length = (DWORD)(flip_len + 0.5f);
         }
 
 

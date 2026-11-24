@@ -183,6 +183,9 @@
     <ClCompile Include="src\fps_limiter.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="src\vbeam.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="src\crc32.c">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -309,6 +312,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="inc\fps_limiter.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\vbeam.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="inc\patch.h">

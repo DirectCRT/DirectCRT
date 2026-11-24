@@ -402,9 +402,9 @@ HRESULT __stdcall IDirectDraw__GetMonitorFrequency(IDirectDrawImpl* This, LPDWOR
 
 HRESULT __stdcall IDirectDraw__GetScanLine(IDirectDrawImpl* This, LPDWORD lpdwScanLine)
 {
-    TRACE("NOT_IMPLEMENTED -> %s(This=%p) [%p]\n", __FUNCTION__, This, _ReturnAddress());
-    HRESULT ret = DDERR_UNSUPPORTED;
-    TRACE("NOT_IMPLEMENTED <- %s\n", __FUNCTION__);
+    TRACE_EXT("-> %s(This=%p, lpdwScanLine=%p) [%p]\n", __FUNCTION__, This, lpdwScanLine, _ReturnAddress());
+    HRESULT ret = dd_GetScanLine(lpdwScanLine);
+    TRACE_EXT("<- %s\n", __FUNCTION__);
     return ret;
 }
 
@@ -452,6 +452,10 @@ HRESULT __stdcall IDirectDraw__SetDisplayMode(IDirectDrawImpl* This, DWORD dwWid
         _ReturnAddress());
 
     HRESULT ret = dd_SetDisplayMode(dwWidth, dwHeight, dwBPP, SDM_MODE_SET_BY_GAME);
+
+    if (SUCCEEDED(ret))
+        dd_set_refresh(0);
+
     TRACE("<- %s\n", __FUNCTION__);
     return ret;
 }
@@ -476,6 +480,9 @@ HRESULT __stdcall IDirectDraw__SetDisplayModeX(
         _ReturnAddress());
 
     HRESULT ret = dd_SetDisplayMode(dwWidth, dwHeight, dwBPP, SDM_MODE_SET_BY_GAME);
+
+    if (SUCCEEDED(ret))
+        dd_set_refresh(dwRefreshRate);
 
     TRACE("<- %s\n", __FUNCTION__);
     return ret;

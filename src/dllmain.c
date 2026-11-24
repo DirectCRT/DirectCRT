@@ -14,6 +14,7 @@
 #include "versionhelpers.h"
 #include "delay_imports.h"
 #include "keyboard.h"
+#include "vbeam.h"
 
 
 /* export for cncnet cnc games */
@@ -149,6 +150,7 @@ BOOL WINAPI DllMain(HANDLE hDll, DWORD dwReason, LPVOID lpReserved)
 
         indeo_enable();
         timeBeginPeriod(1);
+        vbeam_init();
         hook_init();
         break;
     }

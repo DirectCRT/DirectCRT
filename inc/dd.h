@@ -15,6 +15,8 @@ HRESULT dd_GetCaps(LPDDCAPS_DX1 lpDDDriverCaps, LPDDCAPS_DX1 lpDDEmulCaps);
 HRESULT dd_GetDisplayMode(LPDDSURFACEDESC lpDDSurfaceDesc);
 HRESULT dd_GetMonitorFrequency(LPDWORD lpdwFreq);
 HRESULT dd_GetVerticalBlankStatus(LPBOOL lpbIsInVB);
+HRESULT dd_GetScanLine(LPDWORD lpdwScanLine);
+void dd_set_refresh(DWORD game_hz); /* the emulated display's rate, after a mode set; 0 = the game didn't ask */
 HRESULT dd_RestoreDisplayMode();
 HRESULT dd_SetCooperativeLevel(HWND hwnd, DWORD dwFlags);
 HRESULT dd_SetDisplayMode(DWORD dwWidth, DWORD dwHeight, DWORD dwBPP, DWORD dwFlags);
@@ -172,7 +174,6 @@ typedef struct CNCDDRAW
     DWORD last_set_window_pos_tick; /* WINE hack */
     DWORD last_msg_pull_tick;
     SPEEDLIMITER ticks_limiter;
-    SPEEDLIMITER flip_limiter;
     DWORD minfps_tick_len;
     DWORD gui_thread_id;
     BOOL windowed_hack;

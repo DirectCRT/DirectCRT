@@ -31,6 +31,7 @@ typedef struct CNCDDRAWCONFIG
     REMEMBER_WINDOW remember_window;
     int maxfps;
     BOOL vsync;
+    DWORD emulated_refresh; /* Hz; 0 = auto, the rate the game asks for */
     BOOL adjmouse;
     CRT_AUTO_SETTINGS crt; /* shader and DOSBox Staging's [render] settings: aspect, viewport, integer_scaling, colour */
     char renderer[256];

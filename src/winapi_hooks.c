@@ -22,6 +22,7 @@
 #include "directinput.h"
 #include "ddpalette.h"
 #include "palette.h"
+#include "vbeam.h"
 
 
 BOOL WINAPI fake_GetCursorPos(LPPOINT lpPoint)
@@ -821,7 +822,7 @@ BOOL WINAPI fake_EnumDisplaySettingsA(LPCSTR lpszDeviceName, DWORD iModeNum, DEV
             lpDevMode->dmBitsPerPel = 16;
         }
 
-        lpDevMode->dmDisplayFrequency = 60;
+        lpDevMode->dmDisplayFrequency = vbeam_rate();
     }
 
     if (result && !lpszDeviceName && lpDevMode && iModeNum != ENUM_CURRENT_SETTINGS)

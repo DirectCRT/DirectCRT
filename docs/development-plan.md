@@ -502,6 +502,20 @@ otherwise keep the no-shading trap. `original` has to be chosen.
      `opengl32.dll` away in the game's folder, and with forced setup
      failures. (Windows' own DirectDraw draws black with those fakes too,
      since it uses Direct3D itself.)
+   - Done, outside the plan: the virtual beam (`src/vbeam.c`), the emulated
+     display's refresh on one fixed timeline. Each refresh is the active lines
+     and VGA's share of vertical blank (45 of 525 lines).
+     `WaitForVerticalBlank`, `GetVerticalBlankStatus`, `GetScanLine` (was
+     unsupported) and `GetFlipStatus` read it. `Flip` with `DDFLIP_WAIT`
+     behaves as on hardware: it waits only while the previous flip is still
+     pending, and drawing with a wait flag into the buffer still on screen
+     waits until the flip is shown. Triple buffering doesn't wait, and a
+     double-buffered game with slow frames gets 30 or 20 fps, as on a real
+     card. BG2, which busy-polls, went from 98.5% to 74% of a core (Windows'
+     own DirectDraw: 87%), with no visible difference. `emulated_refresh`:
+     `auto`, the rate the game asks for in `SetDisplayMode` (60 if it
+     doesn't ask), or a fixed rate from 24 to 240 Hz. The game gets that
+     rate wherever it used to get 60. Your monitor's rate doesn't change.
 5. **Later.** HDR output first; deinterlacing and dedithering after it, at a
    lower priority.
    - HDR output, Direct3D 11 only: the extra peak brightness makes up for the

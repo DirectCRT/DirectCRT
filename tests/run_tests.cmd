@@ -11,3 +11,6 @@ bin\test_crt_auto.exe || exit /b 1
 
 cl /nologo /W4 /I..\inc /Fobin\ /Febin\test_display_settings.exe test_display_settings.c ..\src\display_settings.c || exit /b 1
 bin\test_display_settings.exe || exit /b 1
+
+cl /nologo /W4 /I..\inc /Fobin\ /Febin\test_vbeam.exe test_vbeam.c ..\src\vbeam.c winmm.lib || exit /b 1
+bin\test_vbeam.exe || exit /b 1

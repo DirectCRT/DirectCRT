@@ -16,9 +16,28 @@
 #include "versionhelpers.h"
 #include "ddpalette.h"
 #include "palette.h"
+#include "vbeam.h"
 
 
 LONG g_dds_gdi_handles;
+
+/* After a flip the buffer that was on screen is in the last surface of the
+   primary's chain: the back buffer, or with triple buffering the spare one.
+   It stays on screen until the flip is shown at the next vertical blank, so a
+   game drawing into it with a wait flag waits for that, as on hardware. */
+static void dds_wait_for_flip(IDirectDrawSurfaceImpl* This, BOOL wait)
+{
+    if (!wait || g_config.maxgameticks != 0 || This->backbuffer || !g_ddraw.ref || !g_ddraw.primary)
+        return;
+
+    IDirectDrawSurfaceImpl* last = g_ddraw.primary->backbuffer;
+
+    for (int i = 0; last && last->backbuffer && i < 8; i++)
+        last = last->backbuffer;
+
+    if (This == last)
+        vbeam_wait_flip_shown();
+}
 
 HRESULT dds_AddAttachedSurface(IDirectDrawSurfaceImpl* This, IDirectDrawSurfaceImpl* lpDDSurface)
 {
@@ -63,6 +82,7 @@ HRESULT dds_Blt(
     dbg_dump_dds_blt_fx_flags((dwFlags & DDBLT_DDFX) && lpDDBltFx ? lpDDBltFx->dwDDFX : 0);
 
     util_pull_messages();
+    dds_wait_for_flip(This, (dwFlags & DDBLT_WAIT) != 0);
 
     if (g_ddraw.ref && 
         g_ddraw.iskkndx &&
@@ -469,6 +489,7 @@ HRESULT dds_BltFast(
     DWORD dwFlags)
 {
     dbg_dump_dds_blt_fast_flags(dwFlags);
+    dds_wait_for_flip(This, (dwFlags & DDBLTFAST_WAIT) != 0);
 
     IDirectDrawSurfaceImpl* src_surface = lpDDSrcSurface;
 
@@ -830,7 +851,11 @@ HRESULT dds_Flip(IDirectDrawSurfaceImpl* This, IDirectDrawSurfaceImpl* lpDDSurfa
         ReleaseSemaphore(g_ddraw.render.sem, 1, NULL);
         SwitchToThread();
 
-        if ((g_config.maxgameticks == 0 && (dwFlags & DDFLIP_WAIT)) || g_config.maxgameticks == -2)
+        if (g_config.maxgameticks == 0 && (dwFlags & DDFLIP_WAIT))
+        {
+            vbeam_flip();
+        }
+        else if (g_config.maxgameticks == -2)
         {
             dd_WaitForVerticalBlank(DDWAITVB_BLOCKEND, NULL);
         }
@@ -1006,6 +1031,7 @@ HRESULT dds_Lock(
     dbg_dump_dds_lock_flags(dwFlags);
 
     util_pull_messages();
+    dds_wait_for_flip(This, (dwFlags & DDLOCK_WAIT) != 0);
 
     HRESULT ret = dds_GetSurfaceDesc(This, lpDDSurfaceDesc);
 

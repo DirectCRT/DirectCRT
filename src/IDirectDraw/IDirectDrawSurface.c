@@ -4,6 +4,7 @@
 #include "ddsurface.h"
 #include "dd.h"
 #include "debug.h"
+#include "vbeam.h"
 
 
 HRESULT __stdcall IDirectDrawSurface__QueryInterface(IDirectDrawSurfaceImpl* This, REFIID riid, LPVOID FAR* ppvObj)
@@ -341,7 +342,8 @@ HRESULT __stdcall IDirectDrawSurface__GetDC(IDirectDrawSurfaceImpl* This, HDC FA
 HRESULT __stdcall IDirectDrawSurface__GetFlipStatus(IDirectDrawSurfaceImpl* This, DWORD dwFlags)
 {
     TRACE_EXT("-> %s(This=%p, dwFlags=%08X) [%p]\n", __FUNCTION__, This, dwFlags, _ReturnAddress());
-    HRESULT ret = DD_OK;
+    /* A flip waiting for the vertical blank is still in progress */
+    HRESULT ret = (This->caps & DDSCAPS_PRIMARYSURFACE) && vbeam_flip_pending() ? DDERR_WASSTILLDRAWING : DD_OK;
     TRACE_EXT("<- %s\n", __FUNCTION__);
     return ret;
 }
