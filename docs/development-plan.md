@@ -499,29 +499,30 @@ otherwise keep the no-shading trap. `original` has to be chosen.
      settings (`src/settings.c`: name, tab, kind, values, default, help,
      whether it applies live) now writes the default `directcrt.ini`, its
      comments included, and the OSD's tabs (Display, Picture, Colour,
-     Timing, Overlay, Other, Compatibility, Hotkeys). A row per setting:
-     a checkbox, radio buttons for a fixed set of values, a slider and a
-     box to type the number in (with "a number" next to named values), a
-     text field (with "other" next to named values) or a hotkey button that
-     takes the next key pressed. A slider can move in steps (100 K for the
-     colour temperature, 5% for the status OSD's opacity: the nearest step
-     while it's dragged, the next one with the keyboard); a number typed in
-     needn't be on one. Settings can share a row (the red, green and blue
-     gain, each slider in its colour), and headings split a tab into groups
-     (the Colour tab: Monitor, Colour balance, the game's colours), with
-     a tooltip of their own. With `image_adjustments` off, the rest of the
-     Colour tab is greyed out. A
-     tooltip under the mouse or keyboard focus gives the help: on a radio
-     button, that value's own line of the help (the help is written one
-     value per line, `value = text`); on the row's label or a slider, the
-     whole help. Under it, the ini line, the default and whether it applies
-     now or after a restart (also marked `*` in the row).
-     It writes to `[directcrt]`, the only section: the ini is the game's
-     own, next to its `ddraw.dll`, so there's no choice between all games
-     and this one (sections named after a game, as in cnc-ddraw, aren't
-     read any more: a value there hid a change made in the OSD).
-     Every row has a reset button (a circular arrow; dim when it's already
-     the default) that writes the default; its tooltip says which.
+     Timing, Overlay, Other, Compatibility, Hotkeys). It's a panel down
+     the left of the screen (42% of the width, within 34 to 52 times the
+     text size): the tabs as icons along the top, a footer of keys, and a
+     row per setting with an icon, its name, the first line of its help
+     under it, and the value on the right: a switch for on and off, else
+     the value with a "›", which opens a dialog in the middle of the
+     screen. Rows that need a restart say so, and a dot marks a value that
+     isn't the default. The dialog has the whole help, then a list of the
+     values with each one's line of the help (the help is written one value
+     per line, `value = text`; "A number" or "Other" for one of your own),
+     a slider and a box to type the number in, a text field, or, for a
+     hotkey, a box that takes the next key pressed (Esc cancels; "None"
+     clears it). At the bottom are the default and a Reset button. A slider
+     can move in steps (100 K for the colour temperature, 5% for the status
+     OSD's opacity: the nearest step while it's dragged, the next one with
+     the keyboard); a number typed in needn't be on one. Settings can share
+     a row and a dialog (the red, green and blue gain, each in its colour),
+     and headings split a tab into groups (the Colour tab: Monitor, Colour
+     balance, the game's colours), with a tooltip of their own. With
+     `image_adjustments` off, the rest of the Colour tab is greyed out.
+     It's made for the mouse, and works from the keyboard too: arrows,
+     Enter, Esc, and Left and Right change the tab. The look takes ideas
+     from DuckStation's (no code, icons or theme), in a dark palette with
+     a blue accent; the status OSD shares it, with a filled graph.
      Each change is written to `directcrt.ini` at once and applied as when
      the file is saved (`WM_OVERLAY_MENU`, then `dd_reload_settings`).
      While it's open the game keeps running and drawing but gets no keyboard
@@ -532,7 +533,9 @@ otherwise keep the no-shading trap. `original` has to be chosen.
      it saw go down. Esc or the hotkey closes it. Both OSDs are in Source
      Sans 3 (`third_party/fonts`, built in as a resource; Adobe's unmodified
      TTF, so its Reserved Font Name stays), rasterised 1.2 times the asked
-     size, since its size counts accents and descenders. Its text is 16 px times
+     size, since its size counts accents and descenders. The icons are
+     Google's Material Icons (Apache 2.0), cut down by
+     `tools/subset-icons.py` to the ones used. Its text is 16 px times
      the display scale (13 to a 30th of the picture's height); the status
      OSD keeps its own size, and stays visible, while it's open.
      Not yet: it shows only the settings' own names, not the legacy keys

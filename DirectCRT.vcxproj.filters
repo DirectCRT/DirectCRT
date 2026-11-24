@@ -257,6 +257,9 @@
     <ClInclude Include="inc\overlay.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="inc\overlay_icons.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="inc\render_ogl.h">
       <Filter>Header Files</Filter>
     </ClInclude>

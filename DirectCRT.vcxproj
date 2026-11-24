@@ -90,6 +90,7 @@
     <ClInclude Include="inc\ddclipper.h" />
     <ClInclude Include="inc\ddraw.h" />
     <ClInclude Include="inc\overlay.h" />
+    <ClInclude Include="inc\overlay_icons.h" />
     <ClInclude Include="inc\delay_imports.h" />
     <ClInclude Include="inc\directinput.h" />
     <ClInclude Include="inc\dllmain.h" />
