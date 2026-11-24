@@ -13,6 +13,7 @@
 #include "utils.h"
 #include "debug.h"
 #include "versionhelpers.h"
+#include "overlay.h"
 
 
 LRESULT CALLBACK fake_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
@@ -39,6 +40,12 @@ LRESULT CALLBACK fake_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam
     static BOOL in_size_move = FALSE;
     static int redraw_count = 0;
     static BOOL mbutton_unlocked = FALSE;
+
+    /* The settings OSD is open: it has the keyboard and the mouse */
+    LRESULT menu_result;
+
+    if (overlay_menu_wndproc(hWnd, uMsg, wParam, lParam, &menu_result))
+        return menu_result;
 
     /* unlockcursor_middleclick: a middle click releases the cursor. The game
        doesn't see the click, and the button-up is swallowed too, because a
@@ -209,6 +216,15 @@ LRESULT CALLBACK fake_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam
 
         break;
     }
+    case WM_OVERLAY_MENU:
+    {
+        if (wParam == 0)
+            overlay_close_menu();
+        else if (!in_size_move)
+            dd_reload_settings(TRUE);
+
+        return 0;
+    }
     case WM_SIZE_DDRAW:
     {
         uMsg = WM_SIZE;
@@ -262,7 +278,7 @@ LRESULT CALLBACK fake_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam
             /* Not while the window is being resized: that sets up the picture
                again when it ends */
             if (!in_size_move)
-                dd_poll_settings();
+                dd_reload_settings(FALSE);
 
             return 0;
         }

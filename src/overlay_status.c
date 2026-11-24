@@ -7,12 +7,15 @@
 #include "render_d3d11.h"
 #include "render_ogl.h"
 #include "overlay.h"
+#include "vbeam.h"
+#include "hook.h"
 
 /* The status OSD's state and numbers. The hotkey runs on the game's thread,
  * everything else on the render thread */
 
 #define OVERLAY_PERIOD_MS 500.0  /* the numbers change twice a second */
 #define OVERLAY_REFRESH_MS 250   /* the longest wait for the game while shown */
+#define OVERLAY_MENU_MS 16       /* the same, while the settings OSD is open */
 
 static volatile LONG g_overlay_visible;
 static volatile LONG g_overlay_reset;
@@ -62,8 +65,17 @@ BOOL overlay_status_visible(void)
     return g_overlay_visible != 0;
 }
 
+BOOL overlay_visible(void)
+{
+    return g_overlay_visible != 0 || overlay_menu_open();
+}
+
 DWORD overlay_wait_timeout(DWORD timeout)
 {
+    /* The settings OSD answers the mouse at about 60 frames a second */
+    if (overlay_menu_open() && timeout > OVERLAY_MENU_MS)
+        return OVERLAY_MENU_MS;
+
     if (g_overlay_visible && timeout > OVERLAY_REFRESH_MS)
         return OVERLAY_REFRESH_MS;
 
@@ -220,7 +232,75 @@ static const char* overlay_shader_setting(void)
     return "?";
 }
 
-static float overlay_dpi_scale(void)
+/* The emulated display's rate and where it comes from */
+static void overlay_refresh(char* buf, size_t size)
+{
+    DWORD hz = vbeam_rate();
+
+    if (g_config.emulated_refresh)
+        _snprintf(buf, size - 1, "%lu Hz, from emulated_refresh", hz);
+    else if (g_ddraw.refresh_asked == hz)
+        _snprintf(buf, size - 1, "%lu Hz, the game's choice", hz);
+    else if (g_ddraw.refresh_asked)
+        _snprintf(buf, size - 1, "%lu Hz, the game asked for %lu", hz, g_ddraw.refresh_asked);
+    else
+        _snprintf(buf, size - 1, "%lu Hz, the game didn't ask", hz);
+
+    buf[size - 1] = 0;
+}
+
+/* The refresh rate of the monitor the window is on, looked up twice a second;
+   0 if Windows doesn't say */
+static DWORD overlay_monitor_hz(void)
+{
+    static DWORD hz, looked_at;
+    static BOOL looked;
+    DWORD now = GetTickCount();
+
+    if (looked && now - looked_at < (DWORD)OVERLAY_PERIOD_MS)
+        return hz;
+
+    looked = TRUE;
+    looked_at = now;
+    hz = 0;
+
+    MONITORINFOEXA mi = { 0 };
+    mi.cbSize = sizeof(mi);
+
+    HMONITOR monitor = MonitorFromWindow(g_ddraw.hwnd, MONITOR_DEFAULTTONEAREST);
+
+    DEVMODEA m = { 0 };
+    m.dmSize = sizeof(m);
+
+    if (monitor && GetMonitorInfoA(monitor, (MONITORINFO*)&mi) &&
+        real_EnumDisplaySettingsA(mi.szDevice, ENUM_CURRENT_SETTINGS, &m) &&
+        m.dmDisplayFrequency > 1) /* 0 and 1 mean the hardware's default */
+    {
+        hz = m.dmDisplayFrequency;
+    }
+
+    return hz;
+}
+
+/* What the game's waits for the vertical blank and its flips follow
+   (maxgameticks) */
+static void overlay_vblank(char* buf, size_t size)
+{
+    int ticks = g_config.maxgameticks;
+
+    if (ticks == 0)
+        _snprintf(buf, size - 1, "emulated, flips are shown at it");
+    else if (ticks == -2)
+        _snprintf(buf, size - 1, "your monitor's");
+    else if (ticks < 0)
+        _snprintf(buf, size - 1, "off, waiting for it returns at once");
+    else
+        _snprintf(buf, size - 1, "emulated, flips don't wait; game speed %d ticks/s", ticks);
+
+    buf[size - 1] = 0;
+}
+
+float overlay_dpi_scale(void)
 {
     typedef UINT(WINAPI* GETDPIFORWINDOWPROC)(HWND);
     static GETDPIFORWINDOWPROC get_dpi_for_window;
@@ -282,8 +362,8 @@ void overlay_get_status(OVERLAY_STATUS* status, int canvas_width, int canvas_hei
     if (!g_config.status_osd_full)
     {
         overlay_row(
-            status, "", "%dx%d %d-bit -> %dx%d, %s",
-            g_ddraw.width, g_ddraw.height, g_ddraw.bpp,
+            status, "", "%dx%d %d-bit %lu Hz -> %dx%d, %s",
+            g_ddraw.width, g_ddraw.height, g_ddraw.bpp, vbeam_rate(),
             g_ddraw.render.viewport.width, g_ddraw.render.viewport.height, scale);
 
         overlay_row(status, "", "%s, %s", shader, overlay_renderer_name());
@@ -323,6 +403,19 @@ void overlay_get_status(OVERLAY_STATUS* status, int canvas_width, int canvas_hei
     }
 
     overlay_row(status, "Renderer", "%s, vsync %s", overlay_renderer_name(), g_config.vsync ? "on" : "off");
+
+    char refresh[64], vblank[64];
+    overlay_refresh(refresh, sizeof(refresh));
+    overlay_vblank(vblank, sizeof(vblank));
+
+    DWORD monitor_hz = overlay_monitor_hz();
+
+    if (monitor_hz)
+        overlay_row(status, "Refresh", "%s; monitor %lu Hz", refresh, monitor_hz);
+    else
+        overlay_row(status, "Refresh", "%s", refresh);
+
+    overlay_row(status, "Vertical blank", "%s", vblank);
 
     if (g_stats.ready)
     {

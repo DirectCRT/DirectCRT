@@ -55,6 +55,18 @@ LRESULT CALLBACK keyboard_hook_proc(int code, WPARAM wParam, LPARAM lParam)
         g_ddraw.alt_key_down = alt_down;
     }
 
+    /* A hotkey is being set in the settings OSD: every key goes to it */
+    if (overlay_menu_capturing())
+        return CallNextHookEx(g_keyboard_hook, code, wParam, lParam);
+
+    if (wParam == g_config.hotkeys.settings_osd && alt_down && key_down)
+    {
+        if (key_triggered)
+            overlay_toggle_menu();
+
+        return 1;
+    }
+
     if (wParam == g_config.hotkeys.toggle_fullscreen && alt_down && key_down)
     {
         if (key_triggered)

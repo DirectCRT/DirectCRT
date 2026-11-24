@@ -8,6 +8,7 @@
 #define WM_TOGGLE_FULLSCREEN WM_APP+117
 #define WM_TOGGLE_MAXIMIZE WM_APP+118
 #define WM_RESTORE_STYLE WM_APP+119
+#define WM_OVERLAY_MENU WM_APP+120 /* wParam: 0 = close the settings OSD, 1 = apply directcrt.ini */
 
 #define IDT_TIMER_LEAVE_BNET 541287654
 #define IDT_TIMER_LINUX_FIX_WINDOW_SIZE 345267753

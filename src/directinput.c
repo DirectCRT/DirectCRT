@@ -10,6 +10,7 @@
 
 #ifdef _MSC_VER
 #include "detours.h"
+#include "overlay.h"
 #endif
 
 BOOL g_dinput_hook_active;
@@ -89,7 +90,9 @@ static HRESULT WINAPI fake_did_GetDeviceData(
         _ReturnAddress());
     */
         
-    BOOL block_mouse = This == g_mouse_device && !g_mouse_locked && !g_config.devmode;
+    /* The settings OSD: every device's events are dropped, so what's typed
+       in it doesn't reach the game afterwards */
+    BOOL block_mouse = (This == g_mouse_device && !g_mouse_locked && !g_config.devmode) || overlay_menu_open();
     BOOL in_background = FALSE;//g_ddraw.ref && g_ddraw.hwnd && !util_in_foreground(g_ddraw.hwnd);
 
     HRESULT result = real_did_GetDeviceData(This, cbObjectData, rgdod, pdwInOut, dwFlags);
@@ -114,7 +117,11 @@ static HRESULT WINAPI fake_did_GetDeviceState(IDirectInputDeviceA* This, DWORD c
 {
     //TRACE("DirectInput GetDeviceState(This=%p, cbData=%lu, lpvData=%p) [%p]\n", This, cbData, lpvData, _ReturnAddress());
 
-    BOOL block_mouse = This == g_mouse_device && !g_mouse_locked && !g_config.devmode;
+    /* The settings OSD: the mouse and the keyboard (a 256 byte state); a
+       joystick's zeros wouldn't be its centre */
+    BOOL block_mouse =
+        (This == g_mouse_device && !g_mouse_locked && !g_config.devmode) ||
+        (overlay_menu_open() && (This == g_mouse_device || cbData == 256));
     BOOL in_background = g_ddraw.ref && g_ddraw.hwnd && !util_in_foreground(g_ddraw.hwnd);
 
     HRESULT result = real_did_GetDeviceState(This, cbData, lpvData);

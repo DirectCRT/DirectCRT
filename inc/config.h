@@ -96,6 +96,7 @@ typedef struct CNCDDRAWCONFIG
         BOOL unlock_cursor_middleclick;
         int screenshot;
         int status_osd;
+        int settings_osd;
     } hotkeys;
 
 } CNCDDRAWCONFIG;
@@ -104,6 +105,6 @@ extern CNCDDRAWCONFIG g_config;
 
 void cfg_load();
 void cfg_save();
-BOOL cfg_poll_crt_auto_settings(CRT_AUTO_SETTINGS* settings);
+BOOL cfg_reload_settings(CRT_AUTO_SETTINGS* settings, BOOL now);
 
 #endif

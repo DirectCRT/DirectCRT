@@ -5,13 +5,15 @@
 #include "hook.h"
 #include "utils.h"
 #include "config.h"
+#include "overlay.h"
 
 
 BOOL g_mouse_locked;
 
 void mouse_lock()
 {
-    if (g_config.devmode || g_ddraw.bnet_active || !g_ddraw.hwnd)
+    /* The settings OSD locks it again when it closes */
+    if (g_config.devmode || g_ddraw.bnet_active || !g_ddraw.hwnd || overlay_menu_open())
         return;
 
     if (g_hook_active && !g_mouse_locked && !util_is_minimized(g_ddraw.hwnd))

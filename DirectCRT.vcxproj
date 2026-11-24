@@ -66,7 +66,9 @@
     <ClCompile Include="src\render_blank.c" />
     <ClCompile Include="src\screenshot.c" />
     <ClCompile Include="src\overlay.cpp" />
+    <ClCompile Include="src\overlay_menu.c" />
     <ClCompile Include="src\overlay_status.c" />
+    <ClCompile Include="src\settings.c" />
     <ClCompile Include="third_party\imgui\imgui.cpp" />
     <ClCompile Include="third_party\imgui\imgui_draw.cpp" />
     <ClCompile Include="third_party\imgui\imgui_tables.cpp" />
@@ -124,6 +126,7 @@
     <ClInclude Include="inc\config.h" />
     <ClInclude Include="inc\crt_auto.h" />
     <ClInclude Include="inc\display_settings.h" />
+    <ClInclude Include="inc\settings.h" />
     <ClInclude Include="inc\ddsurface.h" />
     <ClInclude Include="inc\version.h" />
     <ClInclude Include="inc\versionhelpers.h" />

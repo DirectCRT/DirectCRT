@@ -1192,7 +1192,8 @@ static void ogl_render()
         {
             RECT rc;
 
-            if (overlay_status_visible() && real_GetClientRect(g_ddraw.hwnd, &rc) &&
+            /* overlay_ogl_draw knows whether there's an OSD to draw */
+            if (real_GetClientRect(g_ddraw.hwnd, &rc) &&
                 rc.right > 0 && rc.bottom - g_ddraw.render.opengl_y_align > 0)
             {
                 overlay_ogl_draw(rc.right, rc.bottom, rc.bottom - g_ddraw.render.opengl_y_align, glsl_version);

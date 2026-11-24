@@ -23,6 +23,7 @@
 #include "ddpalette.h"
 #include "palette.h"
 #include "vbeam.h"
+#include "overlay.h"
 
 
 BOOL WINAPI fake_GetCursorPos(LPPOINT lpPoint)
@@ -895,6 +896,10 @@ HDC WINAPI fake_BeginPaint(HWND hWnd, LPPAINTSTRUCT lpPaint)
 
 SHORT WINAPI fake_GetKeyState(int nVirtKey)
 {
+    /* The settings OSD has the keyboard */
+    if (overlay_menu_open())
+        return 0;
+
     if (g_config.windowed && g_ddraw.ref && g_ddraw.hwnd && !util_in_foreground())
     {
         return 0;
@@ -905,6 +910,9 @@ SHORT WINAPI fake_GetKeyState(int nVirtKey)
 
 SHORT WINAPI fake_GetAsyncKeyState(int vKey)
 {
+    if (overlay_menu_open())
+        return 0;
+
     if (g_config.windowed && g_ddraw.ref && g_ddraw.hwnd && !util_in_foreground())
     {
         return 0;

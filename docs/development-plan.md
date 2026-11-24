@@ -472,10 +472,12 @@ otherwise keep the no-shading trap. `original` has to be chosen.
      `d3dcompiler_47.dll`, which ImGui's Direct3D 11 backend needs, is
      delay-loaded and checked first; without it there's no OSD, not a crash.
    - Done: the status OSD, on Alt+F11 (`keystatusosd`). Basic: three lines,
-     the game's mode and the picture's size and scale, the shader and
-     renderer, the frame rate and frame time. Full: a table (game, screen,
-     picture, scale with double scanning and pixel doubling, shader and its
-     pixels per line, renderer and vsync, frame rate of the game's pictures
+     the game's mode and refresh rate and the picture's size and scale, the
+     shader and renderer, the frame rate and frame time. Full: a table (game,
+     screen, picture, scale with double scanning and pixel doubling, shader
+     and its pixels per line, renderer and vsync, the emulated refresh rate
+     and where it comes from next to the monitor's, what the vertical blank
+     follows (`maxgameticks`), frame rate of the game's pictures
      and of presents, average and slowest frame time, the crt-auto passes'
      GPU time) and a graph of the last 240 frame times. The numbers cover
      half a second each; the frame times are between the game's new
@@ -485,6 +487,31 @@ otherwise keep the no-shading trap. `original` has to be chosen.
      render thread wakes at least 4 times a second, so it updates while the
      game is waiting; GPU timing queries run only while it's shown (always
      in debug builds).
+   - Done: the settings OSD, on Alt+F12 (`keysettingsosd`). One table of
+     settings (`src/settings.c`: name, tab, kind, values, default, help,
+     whether it applies live) now writes the default `directcrt.ini`, its
+     comments included, and the OSD's tabs (Display, Picture, Colour,
+     Timing, Overlay, Other, Compatibility, Hotkeys). A row per setting:
+     a checkbox, a list, a slider (with "a number" next to named values), a
+     text field (with "other" next to named values) or a hotkey button that
+     takes the next key pressed. Below the rows, the help for the setting
+     under the mouse or keyboard focus, its ini line and default, and
+     whether it applies now or after a restart (also marked `*` in the row).
+     It writes to all games (`[directcrt]`) or to this game's section; in
+     the game's scope a setting the game has its own value for has a Reset
+     button, and in the global scope a note says the game overrides it.
+     Each change is written to `directcrt.ini` at once and applied as when
+     the file is saved (`WM_OVERLAY_MENU`, then `dd_reload_settings`).
+     While it's open the game keeps running and drawing but gets no keyboard
+     or mouse input: the window procedure and the keyboard hook queue it for
+     the OSD instead, `GetKeyState`, `GetAsyncKeyState` and DirectInput's
+     keyboard and mouse report nothing, the cursor is unlocked and shown,
+     and on closing it's locked again and the game gets the releases of keys
+     it saw go down. Esc or the hotkey closes it. Its text is 16 px times
+     the display scale (13 to a 30th of the picture's height), and the
+     status OSD uses the same size, and stays visible, while it's open.
+     Not yet: it shows only the settings' own names, not the legacy keys
+     some older ini files use.
    - Done: no GDI renderer. GDI can't draw the shaders or the overlay, and
      a picture without them isn't what DirectCRT is for. At the first
      `DirectDrawCreate` DirectCRT probes the renderers in order (Direct3D

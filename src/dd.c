@@ -486,6 +486,8 @@ void dd_set_refresh(DWORD game_hz)
 {
     DWORD hz = g_config.emulated_refresh ? g_config.emulated_refresh : game_hz;
 
+    g_ddraw.refresh_asked = game_hz;
+
     /* A game that doesn't ask, or asks for a rate no CRT had, gets 60 Hz */
     vbeam_set_rate(hz >= 24 && hz <= 240 ? hz : 60);
     TRACE("     emulated refresh %lu Hz (the game asked for %lu)\n", vbeam_rate(), game_hz);
@@ -585,15 +587,20 @@ static CRT_AUTO_DISPLAY dd_crt_auto_display()
     return display;
 }
 
-/* Live reload of the shader settings: called from a timer on the game's
- * window. When directcrt.ini has new ones, the picture is set up again with
- * them, as for Alt+Enter */
-void dd_poll_settings()
+/* Live reload of the settings: called from a timer on the game's window
+ * (now = FALSE), and when the settings OSD has written directcrt.ini
+ * (now = TRUE). When directcrt.ini has new shader settings, the picture is set
+ * up again with them, as for Alt+Enter */
+void dd_reload_settings(BOOL now)
 {
     CRT_AUTO_SETTINGS crt;
+    DWORD refresh = g_config.emulated_refresh;
 
-    if (!cfg_poll_crt_auto_settings(&crt))
+    if (!cfg_reload_settings(&crt, now))
         return;
+
+    if (g_config.emulated_refresh != refresh && g_ddraw.width)
+        dd_set_refresh(g_ddraw.refresh_asked);
 
     if (memcmp(&crt, &g_config.crt, sizeof(crt)) == 0)
     {
@@ -1378,7 +1385,7 @@ HRESULT dd_SetDisplayMode(DWORD dwWidth, DWORD dwHeight, DWORD dwBPP, DWORD dwFl
         SetThreadPriority(g_ddraw.render.thread, THREAD_PRIORITY_ABOVE_NORMAL);
     }
 
-    /* Live reload of the settings (dd_poll_settings) */
+    /* Live reload of the settings (dd_reload_settings) */
     SetTimer(g_ddraw.hwnd, IDT_TIMER_RELOAD_SETTINGS, 500, (TIMERPROC)NULL);
 
     if (dwFlags & SDM_MODE_SET_BY_GAME)

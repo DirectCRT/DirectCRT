@@ -69,6 +69,58 @@ void overlay_gpu_time(double ms);
 /* The status for a canvas (the window's client area or the screen) */
 void overlay_get_status(OVERLAY_STATUS* status, int canvas_width, int canvas_height);
 
+/* The display's scale (1 = 96 dpi) */
+float overlay_dpi_scale(void);
+
+/* overlay_menu.c: the settings OSD. While it's open the game keeps running,
+ * but its keyboard and mouse input goes to the OSD: the game's window
+ * procedure hands it over (overlay_menu_wndproc) and the render thread takes
+ * it (overlay_menu_events). The OSD writes directcrt.ini itself, and the game's
+ * thread applies the settings that apply at once */
+
+typedef enum OVERLAY_EVENT_TYPE
+{
+    OVERLAY_EVENT_MOUSE,  /* x, y */
+    OVERLAY_EVENT_BUTTON, /* button, down */
+    OVERLAY_EVENT_WHEEL,  /* x, y in notches */
+    OVERLAY_EVENT_KEY,    /* vk, down, ctrl, shift, alt */
+    OVERLAY_EVENT_CHAR    /* ch */
+} OVERLAY_EVENT_TYPE;
+
+typedef struct OVERLAY_EVENT
+{
+    OVERLAY_EVENT_TYPE type;
+    float x, y;           /* MOUSE: in the client area, 0 to 1 */
+    int button;           /* 0 left, 1 right, 2 middle, 3 and 4 the side buttons */
+    BOOL down;
+    int vk;               /* left and right shift, ctrl and alt told apart */
+    BOOL ctrl, shift, alt;
+    WCHAR ch;
+} OVERLAY_EVENT;
+
+/* The game's thread */
+void overlay_toggle_menu(void);
+void overlay_close_menu(void);
+BOOL overlay_menu_wndproc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam, LRESULT* result); /* TRUE = taken */
+BOOL overlay_menu_capturing(void); /* a hotkey is being set: the hotkeys are off */
+
+/* Any thread */
+BOOL overlay_menu_open(void);
+BOOL overlay_visible(void); /* the status OSD or the settings OSD */
+
+/* The render thread */
+int overlay_menu_events(OVERLAY_EVENT* events, int max);
+void overlay_menu_set_capturing(BOOL capturing);
+void overlay_menu_request_close(void);
+float overlay_menu_font_size(int canvas_height);
+
+/* directcrt.ini's values, by settings_get's index. game = the game's own
+ * section; *set = the section has the key (else the value is the default, or
+ * for the game's section the [directcrt] value) */
+const char* overlay_menu_value(int setting, BOOL game, BOOL* set);
+void overlay_menu_write(int setting, BOOL game, const char* value); /* NULL = remove the key */
+const char* overlay_menu_game(void); /* the game's section name */
+
 /* overlay.cpp: draw the OSD if it's shown. FALSE = it couldn't be drawn */
 
 BOOL overlay_d3d11_draw(

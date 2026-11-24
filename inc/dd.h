@@ -20,7 +20,7 @@ void dd_set_refresh(DWORD game_hz); /* the emulated display's rate, after a mode
 HRESULT dd_RestoreDisplayMode();
 HRESULT dd_SetCooperativeLevel(HWND hwnd, DWORD dwFlags);
 HRESULT dd_SetDisplayMode(DWORD dwWidth, DWORD dwHeight, DWORD dwBPP, DWORD dwFlags);
-void dd_poll_settings();
+void dd_reload_settings(BOOL now); /* live reload; now = without waiting for the file to settle */
 HRESULT dd_WaitForVerticalBlank(DWORD dwFlags, HANDLE hEvent);
 HRESULT dd_GetAvailableVidMem(LPDDSCAPS lpDDCaps, LPDWORD lpdwTotal, LPDWORD lpdwFree);
 HRESULT dd_TestCooperativeLevel();
@@ -99,6 +99,7 @@ typedef struct CNCDDRAW
     DWORD width;
     DWORD height;
     DWORD bpp;
+    DWORD refresh_asked; /* the rate the game asked for in SetDisplayMode(X); 0 = none */
     
     DEVMODE mode;
     struct IDirectDrawSurfaceImpl* primary;
