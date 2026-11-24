@@ -39,3 +39,6 @@ CRT_NEAREST                    RCDATA "third_party/dosbox-staging/resources/shad
 CRT_BILINEAR                   RCDATA "third_party/dosbox-staging/resources/shaders/interpolation/bilinear.glsl"
 CRT_PRESET_VGA_1440P           RCDATA "third_party/dosbox-staging/resources/shader-presets/crt/crt-hyllian/vga-1440p.preset"
 CRT_PRESET_VGA_4K              RCDATA "third_party/dosbox-staging/resources/shader-presets/crt/crt-hyllian/vga-4k.preset"
+
+/* The OSDs' font, loaded by src/overlay.cpp */
+OVERLAY_FONT RCDATA "third_party/fonts/source-sans-3/SourceSans3-Regular.ttf"

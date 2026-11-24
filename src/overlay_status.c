@@ -50,14 +50,23 @@ static struct
     int count;
 } g_stats;
 
-void overlay_toggle_status(void)
+void overlay_set_status(BOOL shown)
 {
-    if (InterlockedXor(&g_overlay_visible, 1) == 0)
+    if (InterlockedExchange(&g_overlay_visible, shown ? 1 : 0) == 0 && shown)
         InterlockedExchange(&g_overlay_reset, 1);
 
     /* Draw now, even if the game is waiting for input */
     if (g_ddraw.render.sem)
         ReleaseSemaphore(g_ddraw.render.sem, 1, NULL);
+}
+
+void overlay_toggle_status(void)
+{
+    BOOL shown = !overlay_status_visible();
+
+    overlay_set_status(shown);
+    cfg_save_status_osd(shown);
+    overlay_menu_values_changed();
 }
 
 BOOL overlay_status_visible(void)
@@ -340,6 +349,7 @@ void overlay_get_status(OVERLAY_STATUS* status, int canvas_width, int canvas_hei
     status->font_size = font;
     status->scale = font / 13.0f;
     status->corner = (OVERLAY_CORNER)g_config.status_osd_position;
+    status->opacity = g_config.status_osd_opacity / 100.0f;
 
     char scale[64];
     overlay_scale(scale, sizeof(scale));

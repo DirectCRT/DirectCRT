@@ -83,13 +83,16 @@ static void test_bool_and_remember(void)
     CHECK(!ds_parse_bool("2", &b) && b == 5);
     CHECK(!ds_parse_bool("", &b) && b == 5);
 
-    REMEMBER_WINDOW r = REMEMBER_WINDOW_GAME;
+    REMEMBER_WINDOW r = REMEMBER_WINDOW_ON;
 
     CHECK(ds_parse_remember_window("off", &r) && r == REMEMBER_WINDOW_OFF);
-    CHECK(ds_parse_remember_window("Global", &r) && r == REMEMBER_WINDOW_GLOBAL);
-    CHECK(ds_parse_remember_window("game", &r) && r == REMEMBER_WINDOW_GAME);
-    CHECK(!ds_parse_remember_window("1", &r) && r == REMEMBER_WINDOW_GAME);
-    CHECK_STR(ds_remember_window_name(REMEMBER_WINDOW_GLOBAL), "global");
+    CHECK(ds_parse_remember_window("On", &r) && r == REMEMBER_WINDOW_ON);
+    CHECK(ds_parse_remember_window("false", &r) && r == REMEMBER_WINDOW_OFF);
+    CHECK(ds_parse_remember_window("Global", &r) && r == REMEMBER_WINDOW_ON);
+    r = REMEMBER_WINDOW_OFF;
+    CHECK(ds_parse_remember_window("game", &r) && r == REMEMBER_WINDOW_ON);
+    CHECK(!ds_parse_remember_window("2", &r) && r == REMEMBER_WINDOW_ON);
+    CHECK_STR(ds_remember_window_name(REMEMBER_WINDOW_ON), "on");
 }
 
 static void test_window_size_parse(void)
@@ -300,8 +303,8 @@ static void test_legacy(void)
     CHECK(!ds_legacy_window_position(NULL, "100", buf, sizeof(buf)));
 
     CHECK_STR(ds_legacy_remember_window("0"), "off");
-    CHECK_STR(ds_legacy_remember_window("1"), "global");
-    CHECK_STR(ds_legacy_remember_window("2"), "game");
+    CHECK_STR(ds_legacy_remember_window("1"), "on");
+    CHECK_STR(ds_legacy_remember_window("2"), "on");
     CHECK_STR(ds_legacy_remember_window("3"), NULL);
     CHECK_STR(ds_legacy_remember_window(""), NULL);
     CHECK_STR(ds_legacy_remember_window(NULL), NULL);

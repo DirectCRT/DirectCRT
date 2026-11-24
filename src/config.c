@@ -9,6 +9,7 @@
 #include "dllmain.h"
 #include "ini.h"
 #include "settings.h"
+#include "overlay.h"
 #include "versionhelpers.h"
 
 static void cfg_init();
@@ -16,7 +17,6 @@ static void cfg_create_ini();
 static BOOL cfg_get_bool(LPCSTR key, BOOL default_value);
 static int cfg_get_int(LPCSTR key, int default_value);
 static DWORD cfg_get_string(LPCSTR key, LPCSTR default_value, LPSTR out_string, DWORD out_size);
-static DWORD cfg_get_game_section(LPSTR buf, DWORD size);
 static void cfg_load_crt_auto_settings(CRT_AUTO_SETTINGS* settings);
 static void cfg_load_display_settings();
 static void cfg_load_live_settings();
@@ -60,6 +60,7 @@ void cfg_load()
 
     /* emulated_refresh, remember_window, the status OSD and the hotkeys */
     cfg_load_live_settings();
+    overlay_set_status(g_config.status_osd);
 
     /* Compatibility settings */
 
@@ -118,8 +119,7 @@ void cfg_save()
         return;
 
     char buf[32];
-    char* section =
-        g_config.remember_window == REMEMBER_WINDOW_GLOBAL ? "directcrt" : g_config.process_file_name;
+    char* section = "directcrt";
 
     if (g_config.window_rect.right > 0 && g_config.window_rect.bottom > 0)
     {
@@ -137,6 +137,21 @@ void cfg_save()
 
     /* Alt+Enter's state isn't saved: it lasts until the game exits, so every
        start uses 'display' */
+
+    /* Our own change, not one to reload */
+    cfg_ini_stat(&g_ini_seen);
+}
+
+/* Alt+F11: the status OSD is shown or hidden the same way the next time the
+ * game starts */
+void cfg_save_status_osd(BOOL shown)
+{
+    g_config.status_osd = shown;
+
+    if (!g_config.ini_path[0])
+        return;
+
+    WritePrivateProfileStringA("directcrt", "status_osd", shown ? "on" : "off", g_config.ini_path);
 
     /* Our own change, not one to reload */
     cfg_ini_stat(&g_ini_seen);
@@ -184,7 +199,6 @@ BOOL cfg_reload_settings(CRT_AUTO_SETTINGS* settings, BOOL now)
     TRACE("directcrt.ini changed, reading the settings that apply at once again\n");
 
     ini_create(&g_config.ini, g_config.ini_path);
-    cfg_get_game_section(g_config.game_section, sizeof(g_config.game_section));
     cfg_load_crt_auto_settings(settings);
     cfg_load_live_settings();
     ini_free(&g_config.ini);
@@ -272,40 +286,14 @@ static void cfg_init()
     }
 
     ini_create(&g_config.ini, g_config.ini_path);
-    cfg_get_game_section(g_config.game_section, sizeof(g_config.game_section));
 
     TRACE("filename = %s\n", g_config.process_file_name);
-    TRACE("section  = %s\n", g_config.game_section[0] ? g_config.game_section : "directcrt");
 }
 
-/* The game's own section: [game] for game.exe */
-static DWORD cfg_get_game_section(LPSTR buf, DWORD size)
-{
-    if (!buf || size == 0)
-        return 0;
-
-    if (ini_section_exists(&g_config.ini, g_config.process_file_name))
-    {
-        strncpy(buf, g_config.process_file_name, size);
-        buf[size - 1] = 0;
-        return strlen(buf);
-    }
-
-    buf[0] = 0;
-
-    return 0;
-}
-
+/* Everything is in [directcrt]: the ini is the game's own, next to its
+ * ddraw.dll. Sections named after a game, as cnc-ddraw had, aren't read */
 static DWORD cfg_get_string(LPCSTR key, LPCSTR default_value, LPSTR buf, DWORD size)
 {
-    if (g_config.game_section[0])
-    {
-        DWORD s = ini_get_string(&g_config.ini, g_config.game_section, key, "", buf, size);
-
-        if (s > 0)
-            return s;
-    }
-
     return ini_get_string(&g_config.ini, "directcrt", key, default_value, buf, size);
 }
 
@@ -385,8 +373,7 @@ static BOOL cfg_legacy_integer_scaling(LPCSTR section, LPSTR buf, DWORD size)
     return cfg_copy("vertical", buf, size);
 }
 
-/* A setting that replaced old keys: in the game's section, the new key and
- * then the old ones, then the same in the global section */
+/* A setting that replaced old keys: the new key, then the old ones */
 static void cfg_get_new_or_old(
     LPCSTR key,
     LPCSTR default_value,
@@ -395,21 +382,13 @@ static void cfg_get_new_or_old(
     LPSTR buf,
     DWORD size)
 {
-    LPCSTR sections[] = { g_config.game_section, "directcrt" };
+    if (cfg_get_raw("directcrt", key, buf, size) > 0)
+        return;
 
-    for (int i = 0; i < 2; i++)
+    if (legacy && legacy("directcrt", buf, size))
     {
-        if (!sections[i][0])
-            continue;
-
-        if (cfg_get_raw(sections[i], key, buf, size) > 0)
-            return;
-
-        if (legacy && legacy(sections[i], buf, size))
-        {
-            TRACE("     [%s] has the old setting %s, read as %s=%s\n", sections[i], old_keys, key, buf);
-            return;
-        }
+        TRACE("     the old setting %s, read as %s=%s\n", old_keys, key, buf);
+        return;
     }
 
     cfg_copy(default_value, buf, size);
@@ -500,12 +479,16 @@ static void cfg_load_live_settings()
     }
     TRACE("remember_window=%s\n", ds_remember_window_name(g_config.remember_window));
 
+    GET_BOOL(g_config.status_osd, "status_osd", FALSE);
+
     static const char* const osd_sizes[] = { "small", "medium", "large" };
     static const char* const osd_details[] = { "basic", "full" };
     static const char* const osd_positions[] = { "top-left", "top-right", "bottom-left", "bottom-right" };
     g_config.status_osd_size = cfg_get_choice("status_osd_size", osd_sizes, 3, 1);
     g_config.status_osd_full = cfg_get_choice("status_osd_detail", osd_details, 2, 0) == 1;
     g_config.status_osd_position = cfg_get_choice("status_osd_position", osd_positions, 4, 0);
+    GET_INT(g_config.status_osd_opacity, "status_osd_opacity", 75);
+    g_config.status_osd_opacity = max(0, min(100, g_config.status_osd_opacity));
 
     GET_INT(g_config.hotkeys.toggle_fullscreen, "keytogglefullscreen", VK_RETURN);
     GET_INT(g_config.hotkeys.toggle_fullscreen2, "keytogglefullscreen2", 0);

@@ -38,13 +38,12 @@ Changes from cnc-ddraw so far:
   depth instead of a fixed 16-bit. `window_position`, `window_decorations`,
   `window_resizable` and `remember_window` replace `posX`, `posY`, `border`,
   `resizable` and `savesettings`. Old keys are still read.
-- Settings are in `directcrt.ini`, global section `[directcrt]`. The file is
-  created next to `ddraw.dll` the first time a game starts.
+- Settings are in `directcrt.ini`, section `[directcrt]`. The file is
+  created next to `ddraw.dll` the first time a game starts, so each game has
+  its own. Sections named after a game's executable aren't read.
 - cnc-ddraw's 280 built-in game profiles and the game-specific hacks they
   turned on (`tshack`, `armadahack`, ...) are gone, and so are
-  `min_font_size` and the C++Builder config tool. To change a setting for one
-  game, add a section named after its executable, without `.exe`: `[game]`
-  for `game.exe`.
+  `min_font_size` and the C++Builder config tool.
 - The mouse is released when the game releases DirectDraw.
   `unlockcursor_middleclick=true` adds a middle click as a way to release it.
 - Logs and crash dumps are named `directcrt-*.log` and `directcrt-*.dmp`.
@@ -62,10 +61,11 @@ or start the game with `WINEDLLOVERRIDES="ddraw=n,b"`.
 DirectCRT only handles DirectDraw: Direct3D games aren't supported. A game
 with several renderers needs its DirectDraw or "software" renderer selected.
 
-Games that need a compatibility setting have one in a section of their own;
-the end of `directcrt.ini` explains how. cnc-ddraw's
+A compatibility setting a game needs goes in its own `directcrt.ini`, next to
+its `ddraw.dll`. cnc-ddraw's
 [wiki](https://github.com/FunkyFr3sh/cnc-ddraw/wiki) lists the settings many
-games need (the global section is `[directcrt]` here, not `[ddraw]`).
+games need (the section is `[directcrt]` here, not `[ddraw]` or one named after
+the game).
 
 ### Hotkeys
 
@@ -122,3 +122,6 @@ code keeps its own licence:
 - Khronos OpenGL headers: MIT-style (`inc/glcorearb.h`, `inc/wglext.h`, `inc/KHR/`)
 - DOSBox Staging's shaders in `third_party/dosbox-staging/`: MIT, except
   `sharp.glsl` (GPL-2.0-or-later); see its README
+- Dear ImGui, for the OSDs: MIT (`third_party/imgui/LICENSE.txt`)
+- Source Sans 3, the OSDs' font: SIL Open Font License 1.1
+  (`third_party/fonts/source-sans-3/LICENSE.md`)

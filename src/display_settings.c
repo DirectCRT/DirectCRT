@@ -122,12 +122,13 @@ int ds_parse_remember_window(const char* value, REMEMBER_WINDOW* out)
     if (!copy_lower(s, value))
         return 0;
 
-    if (!strcmp(s, "off") || !strcmp(s, "false") || !strcmp(s, "no"))
-        *out = REMEMBER_WINDOW_OFF;
-    else if (!strcmp(s, "global"))
-        *out = REMEMBER_WINDOW_GLOBAL;
-    else if (!strcmp(s, "game"))
-        *out = REMEMBER_WINDOW_GAME;
+    int on;
+
+    /* global and game: before there was only [directcrt] */
+    if (!strcmp(s, "global") || !strcmp(s, "game"))
+        *out = REMEMBER_WINDOW_ON;
+    else if (ds_parse_bool(s, &on))
+        *out = on ? REMEMBER_WINDOW_ON : REMEMBER_WINDOW_OFF;
     else
         return 0;
 
@@ -139,8 +140,7 @@ const char* ds_remember_window_name(REMEMBER_WINDOW value)
     switch (value)
     {
     case REMEMBER_WINDOW_OFF: return "off";
-    case REMEMBER_WINDOW_GLOBAL: return "global";
-    case REMEMBER_WINDOW_GAME: return "game";
+    case REMEMBER_WINDOW_ON: return "on";
     default: return "?";
     }
 }
@@ -577,8 +577,8 @@ const char* ds_legacy_remember_window(const char* savesettings)
     switch (v)
     {
     case 0: return "off";
-    case 1: return "global";
-    case 2: return "game";
+    case 1: return "on";
+    case 2: return "on";
     default: return NULL;
     }
 }

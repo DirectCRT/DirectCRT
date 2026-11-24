@@ -7,6 +7,7 @@
    OSD shows it as it is */
 
 #define INI_TEXT(t) { SETTING_TEXT, NULL, NULL, t }
+#define OSD_HEADING(tab, label, help) { SETTING_HEADING, NULL, NULL, help, tab, label }
 
 #define T_DISPLAY "Display"
 #define T_PICTURE "Picture"
@@ -32,7 +33,7 @@ static const SETTING g_settings[] = {
         "; ### Optional settings ###\n"
         "; Use the following settings to adjust the look and feel to your liking\n"
         "; Where DOSBox Staging has the same setting, it has DOSBox's name and values\n"
-        "; Changes to the picture and colour settings (from 'shader' to 'blue_gain'), emulated_refresh, remember_window,\n"
+        "; Changes to the picture and colour settings (from 'shader' to 'black_level'), emulated_refresh, remember_window,\n"
         "; the status OSD and the hotkeys apply while the game runs, when this file is saved; others need a restart.\n"
         "; The settings OSD (Alt+F12) changes them while the game runs\n"
         "\n"
@@ -62,7 +63,9 @@ static const SETTING g_settings[] = {
     { SETTING_STRING, "window_position", "auto",
         "Where the window goes\n"
         "auto = centred on the screen, or where the game put its own window\n"
-        "X,Y = the top left corner in logical units; X,Ypx = in pixels; X,Y% = a percentage of the desktop (e.g. 10,5%)",
+        "X,Y = the top left corner in logical units\n"
+        "X,Ypx = in pixels\n"
+        "X,Y% = a percentage of the desktop (e.g. 10,5%)",
         T_DISPLAY, "Window position", "auto" },
 
     { SETTING_BOOL, "window_decorations", "on",
@@ -73,14 +76,16 @@ static const SETTING g_settings[] = {
         "Let the user resize and maximize the window",
         T_DISPLAY, "Resizable window", BOOL_ONOFF },
 
-    { SETTING_CHOICE, "remember_window", "off",
-        "Save the window's size and position when the game exits, for the next start\n"
-        "off = don't save; global = in the [directcrt] section; game = in the game's own section\n"
+    { SETTING_BOOL, "remember_window", "off",
+        "Save the window's size and position here when the game exits, for the next start\n"
         "Note: Alt+Enter's state isn't saved; every start uses 'display'",
-        T_DISPLAY, "Remember the window", "off|global|game", 0, 0, SETTING_LIVE },
+        T_DISPLAY, "Remember the window", BOOL_ONOFF, 0, 0, SETTING_LIVE },
 
     { SETTING_INT, "maxfps", "-1",
-        "Real rendering rate, -1 = screen rate, 0 = unlimited, n = cap\n"
+        "Real rendering rate\n"
+        "-1 = the screen's refresh rate\n"
+        "0 = unlimited\n"
+        "1-1000 = at most this many frames a second\n"
         "Note: Does not have an impact on the game speed, to limit your game speed use 'maxgameticks='",
         T_TIMING, "Rendering rate limit", "-1=screen rate|0=unlimited", 1, 1000 },
 
@@ -112,8 +117,8 @@ static const SETTING g_settings[] = {
         T_PICTURE, "Shader", "crt-auto|sharp|nearest|bilinear", 0, 0, SETTING_PICTURE },
 
     INI_TEXT(
-        "; The settings below have DOSBox Staging's names, values and defaults, so a DOSBox config's [render]\n"
-        "; values can be copied here. An invalid value gets the default. They apply with every shader\n"
+        "; The settings below have DOSBox Staging's names and values, and its defaults for VGA, so a DOSBox config's\n"
+        "; [render] values can be copied here ('auto' too). An invalid value gets the default. They apply with every shader\n"
         "\n"),
 
     { SETTING_CHOICE, "aspect", "auto",
@@ -127,14 +132,17 @@ static const SETTING g_settings[] = {
     { SETTING_CHOICE, "integer_scaling", "auto",
         "Keep the scaling factor a whole number, so the picture still fits in the viewport\n"
         "auto = with crt-auto: vertical, with 3.5x and 4.5x also allowed, and none above 5x; other shaders: off\n"
-        "vertical = whole numbers vertically; horizontal = whole numbers horizontally; off = fill the viewport",
+        "vertical = whole numbers vertically\n"
+        "horizontal = whole numbers horizontally\n"
+        "off = fill the viewport",
         T_PICTURE, "Integer scaling", "auto|vertical|horizontal|off", 0, 0, SETTING_PICTURE },
 
     { SETTING_STRING, "viewport", "fit",
         "The largest area the picture may use\n"
         "fit = the window or screen\n"
         "WxH = a size in logical units (e.g. 960x720; with display scaling at 150%, 1440x1080 pixels)\n"
-        "WxHpx = a size in pixels (e.g. 1440x1080px); N% = a percentage of the desktop (e.g. 80%)\n"
+        "WxHpx = a size in pixels (e.g. 1440x1080px)\n"
+        "N% = a percentage of the desktop (e.g. 80%)\n"
         "  These must fit on the desktop (otherwise 'fit' is used) and shrink to fit a smaller window\n"
         "relative H% V% = a 4:3 area fitted to the window, scaled by H and V (20% to 300%). It may go past the\n"
         "  window's edges, like a CRT's stretch controls. Use it with 'aspect=stretch' for other shapes",
@@ -142,12 +150,19 @@ static const SETTING g_settings[] = {
 
     { SETTING_BOOL, "image_adjustments", "on",
         "Colour adjustments, as on a CRT monitor; off = the game's raw colours",
-        T_COLOUR, "Colour adjustments", BOOL_ONOFF, 0, 0, SETTING_PICTURE },
+        T_COLOUR, "Colour adjustments", BOOL_ONOFF, 0, 0, SETTING_PICTURE, SETTING_GATE },
 
-    { SETTING_CHOICE, "crt_color_profile", "auto",
-        "CRT colour profile: auto (p22 for VGA), none, ebu, p22, smpte-c, philips, trinitron\n"
-        "Note: philips and trinitron are meant for 'color_temperature=6500' and a wide gamut (DCI-P3) display",
-        T_COLOUR, "CRT colour profile", "auto|none|ebu|p22|smpte-c|philips|trinitron", 0, 0, SETTING_PICTURE },
+    OSD_HEADING(T_COLOUR, "Monitor", "The emulated monitor: its phosphors and its knobs"),
+
+    { SETTING_CHOICE, "crt_color_profile", "p22",
+        "CRT colour profile: the colours of the emulated monitor's phosphors\n"
+        "none = the game's colours as they are\n"
+        "ebu = EBU, the European TV standard\n"
+        "p22 = P22, the phosphors of most VGA monitors (DOSBox's auto for VGA)\n"
+        "smpte-c = SMPTE C, the American TV standard\n"
+        "philips = a Philips monitor; meant for 'color_temperature=6500' and a wide gamut (DCI-P3) display\n"
+        "trinitron = a Sony Trinitron; meant for 'color_temperature=6500' and a wide gamut (DCI-P3) display",
+        T_COLOUR, "CRT colour profile", "none|ebu|p22|smpte-c|philips|trinitron", 0, 0, SETTING_PICTURE },
 
     { SETTING_INT, "brightness", "45",
         "Brightness (0 to 100), the monitor's black point; higher raises the blacks",
@@ -161,21 +176,12 @@ static const SETTING g_settings[] = {
         "Gamma (-50 to 50), on top of the emulated monitor's own",
         T_COLOUR, "Gamma", NULL, -50, 50, SETTING_PICTURE },
 
-    { SETTING_INT, "digital_contrast", "0",
-        "Digital contrast (-50 to 50), applied to the game's colours before the monitor",
-        T_COLOUR, "Digital contrast", NULL, -50, 50, SETTING_PICTURE },
+    OSD_HEADING(T_COLOUR, "Colour balance", "The monitor's white: its colour temperature and the gain of each colour"),
 
-    { SETTING_INT, "black_level", "auto",
-        "Black level raise (0 to 100), before brightness and contrast; auto = 0 for VGA",
-        T_COLOUR, "Black level", "auto", 0, 100, SETTING_PICTURE },
-
-    { SETTING_INT, "saturation", "0",
-        "Saturation (-50 to 50), applied to the game's colours",
-        T_COLOUR, "Saturation", NULL, -50, 50, SETTING_PICTURE },
-
-    { SETTING_INT, "color_temperature", "auto",
-        "Colour temperature in Kelvin (3000 to 10000); 6500 is neutral, lower is warmer; auto = 7800 for VGA",
-        T_COLOUR, "Colour temperature", "auto", 3000, 10000, SETTING_PICTURE },
+    { SETTING_INT, "color_temperature", "7800",
+        "Colour temperature in Kelvin (3000 to 10000); 6500 is neutral, lower is warmer.\n"
+        "  VGA monitors were bluish, about 7800 (DOSBox's auto for VGA)",
+        T_COLOUR, "Colour temperature", NULL, 3000, 10000, SETTING_PICTURE, 0, 100 },
 
     { SETTING_INT, "color_temperature_luma_preserve", "0",
         "Keep the brightness when changing the colour temperature (0 to 100); 0 is the most accurate",
@@ -183,13 +189,27 @@ static const SETTING g_settings[] = {
 
     { SETTING_INT, "red_gain", "100",
         "Red, green and blue gain (0 to 200); 100 = unchanged",
-        T_COLOUR, "Red gain", NULL, 0, 200, SETTING_PICTURE, SETTING_PACKED },
+        T_COLOUR, "RGB gain", NULL, 0, 200, SETTING_PICTURE, SETTING_PACKED },
 
     { SETTING_INT, "green_gain", "100", NULL,
-        T_COLOUR, "Green gain", NULL, 0, 200, SETTING_PICTURE, SETTING_PACKED },
+        T_COLOUR, "Green gain", NULL, 0, 200, SETTING_PICTURE, SETTING_PACKED | SETTING_JOINED },
 
     { SETTING_INT, "blue_gain", "100", NULL,
-        T_COLOUR, "Blue gain", NULL, 0, 200, SETTING_PICTURE },
+        T_COLOUR, "Blue gain", NULL, 0, 200, SETTING_PICTURE, SETTING_JOINED },
+
+    OSD_HEADING(T_COLOUR, "The game's colours", "Applied to the game's colours before the monitor"),
+
+    { SETTING_INT, "digital_contrast", "0",
+        "Digital contrast (-50 to 50), applied to the game's colours before the monitor",
+        T_COLOUR, "Digital contrast", NULL, -50, 50, SETTING_PICTURE },
+
+    { SETTING_INT, "saturation", "0",
+        "Saturation (-50 to 50), applied to the game's colours",
+        T_COLOUR, "Saturation", NULL, -50, 50, SETTING_PICTURE },
+
+    { SETTING_INT, "black_level", "0",
+        "Black level raise (0 to 100), before brightness and contrast (DOSBox's auto is 0 for VGA)",
+        T_COLOUR, "Black level", NULL, 0, 100, SETTING_PICTURE },
 
     { SETTING_CHOICE, "renderer", "auto",
         "Renderer\n"
@@ -210,19 +230,32 @@ static const SETTING g_settings[] = {
         "Where should screenshots be saved",
         T_OTHER, "Screenshot folder" },
 
+    { SETTING_BOOL, "status_osd", "off",
+        "The status OSD: the game's resolution, the size and scaling of the picture, the shader, the frame rate\n"
+        "and the frame times. Screenshots are without it\n"
+        "Alt+F11 (see 'keystatusosd') shows and hides it, and saves that here, so it's the same the next time\n"
+        "  the game starts",
+        T_OVERLAY, "Status OSD", BOOL_ONOFF, 0, 0, SETTING_LIVE },
+
     { SETTING_CHOICE, "status_osd_size", "medium",
-        "The status OSD, shown and hidden with Alt+F11 (see 'keystatusosd'): the game's resolution, the size\n"
-        "and scaling of the picture, the shader, the frame rate and the frame times. Screenshots are without it\n"
-        "small, medium, large",
+        "The size of the status OSD's text, times the display scale; at most a 22nd of the picture's height\n"
+        "small = 13 pixels\n"
+        "medium = 16 pixels\n"
+        "large = 20 pixels",
         T_OVERLAY, "Status OSD size", "small|medium|large", 0, 0, SETTING_LIVE },
 
     { SETTING_CHOICE, "status_osd_detail", "basic",
-        "basic = three lines; full = everything, with a graph of the frame times",
+        "basic = three lines\n"
+        "full = everything, with a graph of the frame times",
         T_OVERLAY, "Status OSD detail", "basic|full", 0, 0, SETTING_LIVE },
 
     { SETTING_CHOICE, "status_osd_position", "top-left",
-        "top-left, top-right, bottom-left, bottom-right",
+        "The corner of the screen or window the status OSD is in",
         T_OVERLAY, "Status OSD position", "top-left|top-right|bottom-left|bottom-right", 0, 0, SETTING_LIVE },
+
+    { SETTING_INT, "status_osd_opacity", "75",
+        "How opaque the status OSD's background is, in percent (0 to 100); the text always stays solid",
+        T_OVERLAY, "Status OSD opacity", NULL, 0, 100, SETTING_LIVE, 0, 5 },
 
     INI_TEXT(
         "\n"
@@ -237,8 +270,11 @@ static const SETTING g_settings[] = {
         T_COMPAT, "Hide activation messages", BOOL_TF },
 
     { SETTING_INT, "maxgameticks", "0",
-        "Max game ticks per second, possible values: -1 = disabled, -2 = your monitor's vertical blank,\n"
-        "  0 = the emulated display's vertical blank (see 'emulated_refresh'), 1-1000 = custom game speed\n"
+        "Max game ticks per second\n"
+        "0 = the emulated display's vertical blank (see 'emulated_refresh')\n"
+        "-2 = your monitor's vertical blank\n"
+        "-1 = disabled\n"
+        "1-1000 = custom game speed\n"
         "Note: With 0, a flip is shown at the next vertical blank, and drawing into the picture still on screen waits for it\n"
         "Note: Can be used to slow down a too fast running game, fix flickering or too fast animations\n"
         "Note: Usually one of the following values will work: 60 / 30 / 25 / 20 / 15 (lower value = slower game speed)",
@@ -246,11 +282,20 @@ static const SETTING g_settings[] = {
         "0=the emulated vertical blank|-2=your monitor's vertical blank|-1=disabled", 1, 1000 },
 
     { SETTING_CHOICE, "limiter_type", "0",
-        "Method that should be used to limit game ticks (maxgameticks=): 0 = Automatic, 1 = TestCooperativeLevel, 2 = BltFast, 3 = Unlock, 4 = PeekMessage",
+        "Method that should be used to limit game ticks (maxgameticks=)\n"
+        "0 = Automatic\n"
+        "1 = TestCooperativeLevel\n"
+        "2 = BltFast\n"
+        "3 = Unlock\n"
+        "4 = PeekMessage",
         T_TIMING, "Game speed method", "0=Automatic|1=TestCooperativeLevel|2=BltFast|3=Unlock|4=PeekMessage" },
 
     { SETTING_INT, "minfps", "0",
-        "Force minimum FPS, possible values: 0 = disabled, -1 = use 'maxfps=' value, -2 = same as -1 but force full redraw, 1-1000 = custom FPS\n"
+        "Force minimum FPS\n"
+        "0 = disabled\n"
+        "-1 = use the 'maxfps' value\n"
+        "-2 = same as -1 but force full redraw\n"
+        "1-1000 = custom FPS\n"
         "Note: Set this to a low value such as 5 or 10 if some parts of the game are not being displayed (e.g. menus or loading screens)",
         T_TIMING, "Minimum frame rate", "0=disabled|-1=the rendering rate limit|-2=the limit, full redraw", 1, 1000 },
 
@@ -265,13 +310,19 @@ static const SETTING g_settings[] = {
         T_COMPAT, "One CPU core", BOOL_TF },
 
     { SETTING_CHOICE, "resolutions", "0",
-        "Available display resolutions, possible values: 0 = Small list, 1 = Very small list, 2 = Full list\n"
-        "Note: Set this to 2 if your chosen resolution is not working or does not show up in the list\n"
-        "Note: Set this to 1 if the game is crashing on startup",
+        "Available display resolutions\n"
+        "0 = Small list\n"
+        "1 = Very small list; try it if the game is crashing on startup\n"
+        "2 = Full list; try it if your chosen resolution is not working or does not show up in the list",
         T_COMPAT, "Display modes offered", "0=Small list|1=Very small list|2=Full list" },
 
     { SETTING_CHOICE, "fixchilds", "2",
-        "Child window handling, possible values: 0 = Disabled, 1 = Display top left, 2 = Display top left + repaint, 3 = Hide, 4 = Display top left + hide\n"
+        "Child window handling\n"
+        "0 = Disabled\n"
+        "1 = Display top left\n"
+        "2 = Display top left + repaint\n"
+        "3 = Hide\n"
+        "4 = Display top left + hide\n"
         "Note: Disables upscaling if a child window was detected (to ensure the game is fully playable, may look weird though)",
         T_COMPAT, "Child windows",
         "0=Disabled|1=Display top left|2=Display top left + repaint|3=Hide|4=Display top left + hide" },
@@ -282,7 +333,8 @@ static const SETTING g_settings[] = {
 
     { SETTING_CHOICE, "windowed_bpp", "0",
         "Bit depth of the screen for games that run in a window (normal cooperative level)\n"
-        "Possible values: 0 = the desktop's, as Windows' own DirectDraw does (32 today), 16 = 16-bit\n"
+        "0 = the desktop's, as Windows' own DirectDraw does (32 today)\n"
+        "16 = 16-bit\n"
         "Note: Set this to 16 if a windowed game shows garbled colours",
         T_COMPAT, "Bit depth in a window", "0=the desktop's|16=16-bit" },
 
@@ -361,16 +413,6 @@ static const SETTING g_settings[] = {
         "Note: While it's open the game keeps running, but it gets no keyboard or mouse input",
         T_KEYS, "Settings OSD: Alt +", NULL, 0, 0, SETTING_LIVE },
 
-    INI_TEXT(
-        "\n"
-        "\n"
-        "; ### Settings for one game ###\n"
-        "; A section named after a game's executable, without '.exe', overrides the settings above for that game.\n"
-        "; Any setting can go in it. For example, for game.exe:\n"
-        ";\n"
-        "; [game]\n"
-        "; maxgameticks=60\n"
-        "\n"),
 };
 
 int settings_count(void)
@@ -447,6 +489,126 @@ int settings_choice(const SETTING* s, int i, char* value, size_t value_size, cha
     return TRUE;
 }
 
+int settings_help_line(const char** cursor, char* buf, size_t size)
+{
+    const char* p = cursor ? *cursor : NULL;
+
+    if (!p || !*p || size == 0)
+        return FALSE;
+
+    size_t len = 0;
+    buf[0] = 0;
+
+    do
+    {
+        const char* end = strchr(p, '\n');
+        size_t n = end ? (size_t)(end - p) : strlen(p);
+        const char* from = p;
+
+        /* "  more" goes on with " more" */
+        if (len > 0)
+        {
+            from++;
+            n--;
+        }
+
+        size_t copy = n < size - 1 - len ? n : size - 1 - len;
+        memcpy(buf + len, from, copy);
+        len += copy;
+        buf[len] = 0;
+
+        p = end ? end + 1 : from + n;
+    } while (p[0] == ' ' && p[1] == ' ');
+
+    *cursor = p;
+    return TRUE;
+}
+
+/* Is value one of "a, b" (the part of a help line before " = ")? */
+static int settings_in_list(const char* list, size_t list_len, const char* value)
+{
+    size_t value_len = strlen(value);
+    const char* p = list;
+    const char* end = list + list_len;
+
+    while (p < end)
+    {
+        const char* comma = memchr(p, ',', end - p);
+        const char* item_end = comma ? comma : end;
+
+        while (p < item_end && *p == ' ')
+            p++;
+
+        if ((size_t)(item_end - p) == value_len && _strnicmp(p, value, value_len) == 0)
+            return TRUE;
+
+        p = comma ? comma + 1 : end;
+    }
+
+    return FALSE;
+}
+
+int settings_choice_help(const SETTING* s, const char* value, char* buf, size_t size)
+{
+    if (!s || !s->help || size == 0)
+        return FALSE;
+
+    char line[1024];
+    const char* cursor = s->help;
+    size_t len = 0;
+    buf[0] = 0;
+
+    while (settings_help_line(&cursor, line, sizeof(line)))
+    {
+        const char* eq = strstr(line, " = ");
+
+        if (!eq)
+            continue;
+
+        size_t left = eq - line;
+        const char* text = NULL;
+
+        if (value)
+        {
+            if (settings_in_list(line, left, value))
+                text = eq + 3;
+        }
+        else if (left <= 20)
+        {
+            /* A format such as "WxH" or "24-240", not one of the choices */
+            int named = FALSE;
+            char v[64], l[64];
+
+            for (int i = 0; !named && settings_choice(s, i, v, sizeof(v), l, sizeof(l)); i++)
+                named = settings_in_list(line, left, v);
+
+            if (!named)
+                text = line;
+        }
+
+        if (!text)
+            continue;
+
+        size_t n = strlen(text);
+
+        if (len + n + 2 > size)
+            break;
+
+        if (len > 0)
+            buf[len++] = '\n';
+
+        /* "auto = what the game asks for" -> "What the game asks for" */
+        memcpy(buf + len, text, n + 1);
+
+        if (value && buf[len] >= 'a' && buf[len] <= 'z')
+            buf[len] = (char)(buf[len] - 'a' + 'A');
+
+        len += n;
+    }
+
+    return len > 0;
+}
+
 void settings_write_ini(FILE* fh)
 {
     for (int i = 0; i < settings_count(); i++)
@@ -458,6 +620,9 @@ void settings_write_ini(FILE* fh)
             fputs(s->help, fh);
             continue;
         }
+
+        if (s->kind == SETTING_HEADING)
+            continue;
 
         for (const char* line = s->help; line && *line;)
         {

@@ -44,8 +44,7 @@ typedef struct WINDOW_POSITION
 typedef enum REMEMBER_WINDOW
 {
     REMEMBER_WINDOW_OFF = 0,
-    REMEMBER_WINDOW_GLOBAL,
-    REMEMBER_WINDOW_GAME,
+    REMEMBER_WINDOW_ON,
 } REMEMBER_WINDOW;
 
 /* How a window or a fullscreen picture is shown, as cnc-ddraw's
@@ -120,7 +119,7 @@ int ds_legacy_window_size(const char* width, const char* height, char* buf, int 
 /* posX and posY -> window_position=X,Ypx or auto (-32000), into buf */
 int ds_legacy_window_position(const char* pos_x, const char* pos_y, char* buf, int buf_size);
 
-/* savesettings=0/1/2 -> remember_window */
+/* savesettings=0/1/2 -> remember_window (off, on, on) */
 const char* ds_legacy_remember_window(const char* savesettings);
 
 /* cnc-ddraw's shader names and paths -> shader. A new value is returned

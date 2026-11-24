@@ -37,6 +37,7 @@ typedef struct OVERLAY_STATUS
     OVERLAY_CORNER corner;
     float font_size;          /* in pixels */
     float scale;              /* for spacing: font_size / 13 */
+    float opacity;            /* the background's, 0 to 1 */
 
     int rows;
     struct
@@ -53,7 +54,8 @@ typedef struct OVERLAY_STATUS
 
 /* overlay_status.c */
 
-void overlay_toggle_status(void); /* the hotkey: show or hide, any thread */
+void overlay_toggle_status(void); /* the hotkey: show or hide and save it; the game's thread */
+void overlay_set_status(BOOL shown); /* any thread */
 BOOL overlay_status_visible(void);
 
 /* How long the render thread may wait for the game: while the OSD is shown it
@@ -114,12 +116,11 @@ void overlay_menu_set_capturing(BOOL capturing);
 void overlay_menu_request_close(void);
 float overlay_menu_font_size(int canvas_height);
 
-/* directcrt.ini's values, by settings_get's index. game = the game's own
- * section; *set = the section has the key (else the value is the default, or
- * for the game's section the [directcrt] value) */
-const char* overlay_menu_value(int setting, BOOL game, BOOL* set);
-void overlay_menu_write(int setting, BOOL game, const char* value); /* NULL = remove the key */
-const char* overlay_menu_game(void); /* the game's section name */
+/* directcrt.ini's values, by settings_get's index; *set = the ini has the
+ * key (else the value is the default) */
+const char* overlay_menu_value(int setting, BOOL* set);
+void overlay_menu_write(int setting, const char* value); /* NULL = remove the key */
+void overlay_menu_values_changed(void); /* any thread: directcrt.ini was written elsewhere */
 
 /* overlay.cpp: draw the OSD if it's shown. FALSE = it couldn't be drawn */
 

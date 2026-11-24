@@ -37,8 +37,8 @@ static int g_queue_count;
 
 typedef struct MENU_VALUE
 {
-    char value[2][MENU_VALUE_SIZE]; /* [directcrt], the game's */
-    BOOL set[2];
+    char value[MENU_VALUE_SIZE];
+    BOOL set;
 } MENU_VALUE;
 
 static MENU_VALUE* g_values;
@@ -368,16 +368,6 @@ float overlay_menu_font_size(int canvas_height)
     return floorf(size);
 }
 
-const char* overlay_menu_game(void)
-{
-    return g_config.process_file_name;
-}
-
-static const char* menu_section(BOOL game)
-{
-    return game ? g_config.process_file_name : "directcrt";
-}
-
 static void menu_load(void)
 {
     if (!g_values)
@@ -396,23 +386,20 @@ static void menu_load(void)
         if (!s->key)
             continue;
 
-        for (int game = 0; game < 2; game++)
-        {
-            char* buf = g_values[i].value[game];
-            ini_get_string(&ini, menu_section(game), s->key, "\x01", buf, MENU_VALUE_SIZE);
+        char* buf = g_values[i].value;
+        ini_get_string(&ini, "directcrt", s->key, "\x01", buf, MENU_VALUE_SIZE);
 
-            /* An empty value is as good as none, as in config.c */
-            g_values[i].set[game] = buf[0] && !(buf[0] == '\x01' && buf[1] == 0);
+        /* An empty value is as good as none, as in config.c */
+        g_values[i].set = buf[0] && !(buf[0] == '\x01' && buf[1] == 0);
 
-            if (!g_values[i].set[game])
-                buf[0] = 0;
-        }
+        if (!g_values[i].set)
+            buf[0] = 0;
     }
 
     ini_free(&ini);
 }
 
-const char* overlay_menu_value(int setting, BOOL game, BOOL* set)
+const char* overlay_menu_value(int setting, BOOL* set)
 {
     const SETTING* s = settings_get(setting);
 
@@ -431,31 +418,32 @@ const char* overlay_menu_value(int setting, BOOL game, BOOL* set)
     MENU_VALUE* v = &g_values[setting];
 
     if (set)
-        *set = v->set[game ? 1 : 0];
+        *set = v->set;
 
-    if (game && v->set[1])
-        return v->value[1];
-
-    return v->set[0] ? v->value[0] : s->value;
+    return v->set ? v->value : s->value;
 }
 
-void overlay_menu_write(int setting, BOOL game, const char* value)
+void overlay_menu_values_changed(void)
+{
+    InterlockedExchange(&g_values_stale, 1);
+}
+
+void overlay_menu_write(int setting, const char* value)
 {
     const SETTING* s = settings_get(setting);
 
     if (!s || !s->key || !g_config.ini_path[0])
         return;
 
-    WritePrivateProfileStringA(menu_section(game), s->key, value, g_config.ini_path);
+    WritePrivateProfileStringA("directcrt", s->key, value, g_config.ini_path);
 
     if (g_values)
     {
         MENU_VALUE* v = &g_values[setting];
-        int i = game ? 1 : 0;
 
-        v->set[i] = value != NULL;
-        strncpy(v->value[i], value ? value : "", MENU_VALUE_SIZE - 1);
-        v->value[i][MENU_VALUE_SIZE - 1] = 0;
+        v->set = value != NULL;
+        strncpy(v->value, value ? value : "", MENU_VALUE_SIZE - 1);
+        v->value[MENU_VALUE_SIZE - 1] = 0;
     }
 
     /* The game's thread applies it */

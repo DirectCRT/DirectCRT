@@ -18,7 +18,6 @@ typedef struct CNCDDRAWCONFIG
     char dll_file_name[MAX_PATH];
     char process_file_ext[MAX_PATH];
     char dll_file_ext[MAX_PATH];
-    char game_section[MAX_PATH];
     INIFILE ini;
 
     /* Optional settings */
@@ -38,9 +37,11 @@ typedef struct CNCDDRAWCONFIG
     BOOL devmode;
     int anti_aliased_fonts_min_size;
     char screenshot_dir[MAX_PATH];
+    BOOL status_osd;          /* shown when the game starts; Alt+F11 saves it */
     int status_osd_size;      /* 0 small, 1 medium, 2 large */
     BOOL status_osd_full;     /* status_osd_detail=full */
     int status_osd_position;  /* OVERLAY_CORNER */
+    int status_osd_opacity;   /* the background's, in percent */
 
     /* Set at runtime from 'display' and Alt+Enter: windowed=1 fullscreen=0 is
        a window, 0/1 fullscreen at the desktop resolution, 0/0 a mode switch
@@ -105,6 +106,7 @@ extern CNCDDRAWCONFIG g_config;
 
 void cfg_load();
 void cfg_save();
+void cfg_save_status_osd(BOOL shown);
 BOOL cfg_reload_settings(CRT_AUTO_SETTINGS* settings, BOOL now);
 
 #endif

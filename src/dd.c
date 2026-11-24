@@ -20,6 +20,7 @@
 #include "directinput.h"
 #include "opengl_utils.h"
 #include "vbeam.h"
+#include "overlay.h"
 
 
 CNCDDRAW g_ddraw;
@@ -595,9 +596,13 @@ void dd_reload_settings(BOOL now)
 {
     CRT_AUTO_SETTINGS crt;
     DWORD refresh = g_config.emulated_refresh;
+    BOOL status_osd = g_config.status_osd;
 
     if (!cfg_reload_settings(&crt, now))
         return;
+
+    if (g_config.status_osd != status_osd)
+        overlay_set_status(g_config.status_osd);
 
     if (g_config.emulated_refresh != refresh && g_ddraw.width)
         dd_set_refresh(g_ddraw.refresh_asked);

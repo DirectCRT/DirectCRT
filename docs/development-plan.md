@@ -26,7 +26,7 @@ Not goals:
 | Licence | GPL-2.0-or-later. cnc-ddraw's MIT code keeps its notice. | We port DOSBox Staging's GPL C++ logic and its GPL `sharp` shader. |
 | Host systems | Windows 10 and 11, Wine, Proton. | The shaders need a modern GPU; machines that run XP natively already have CRTs. |
 | Renderer | Direct3D 11. DOSBox's GLSL shaders are translated to HLSL and compiled at build time. No GDI renderer: where neither Direct3D 11 nor OpenGL works, DirectCRT steps aside for Windows' own DirectDraw. The prototype's OpenGL renderer stays too, for crt-auto only. | Best supported API on Windows (low-latency presentation, VRR, HDR later); runs well under Wine and Proton through DXVK. Precompiled shaders avoid Wine's `d3dcompiler` replacement. OpenGL runs DOSBox's GLSL unmodified, so it's the reference for the translated shaders, and a shaded fallback where Direct3D 11 runs badly (Wine without DXVK, broken drivers). It gets the overlay, but not the features that depend on Direct3D 11 (HDR, low-latency presentation). |
-| Settings | DOSBox Staging's setting names and meanings (`viewport`, `aspect`, `integer_scaling`, `crt_color_profile`, `color_temperature`, `black_level`, ...). One central settings file plus per-game overrides; a `directcrt.ini` in the game folder takes priority. | DOSBox users already know them; their help texts can be adapted. |
+| Settings | DOSBox Staging's setting names and meanings (`viewport`, `aspect`, `integer_scaling`, `crt_color_profile`, `color_temperature`, `black_level`, ...). One `directcrt.ini` per game, next to its `ddraw.dll`, with one section, `[directcrt]`; no per-game sections. | DOSBox users already know them; their help texts can be adapted. |
 | User interface | No desktop app. All settings are in an on-screen overlay drawn by Dear ImGui inside the DLL. Installing is copying `ddraw.dll` into the game folder (a zip and a README; a small installer later if needed, not Qt). | CRT settings are judged by eye, so they're best changed live on the real game picture. Works wherever the DLL works, including Wine, Proton and a Steam Deck in Game Mode. Saves a second program, Qt and its deployment. Dear ImGui is MIT licensed; DuckStation uses it the same way (DuckStation is CC BY-NC-ND 4.0: take ideas only, no code, icons or text). |
 
 ## What crt-auto does
@@ -87,7 +87,7 @@ What we take:
    - **Status OSD**, on its own hotkey: game resolution, output size, scale
      factor, active shader tier, FPS, frame times. Configurable size and
      verbosity.
-   - **Full OSD**, on another hotkey: every setting, global or for this game,
+   - **Full OSD**, on another hotkey: every setting,
      with help texts adapted from DOSBox's, applied live (settings that need a
      restart say so). Mouse, keyboard and gamepad (XInput, for a Steam Deck).
      While it's open the game gets no input: the cursor is released and shown,
@@ -111,7 +111,7 @@ What we take:
 | Area | Verdict |
 |---|---|
 | DirectDraw and Direct3D stub objects, IAMMediaStream, WinAPI/GDI/WinG hooks, DirectInput hook | Keep |
-| About 280 per-game profiles in `src/config.c` | Removed in phase 3: they filled `directcrt.ini` with sections nobody reads. A section named after a game's executable still overrides any setting for that game |
+| About 280 per-game profiles in `src/config.c` | Removed in phase 3: they filled `directcrt.ini` with sections nobody reads. Sections named after a game's executable were kept until the settings OSD, then dropped: the ini is already the game's own |
 | Compatibility settings (`nonexclusive`, `singlecpu`, `fixchilds`, `guard_lines`, `fake_mode`, `win_version`, `hook`, ...) | Keep, on an advanced page |
 | Game-specific hacks (`armadahack`, `tshack`, ...) | Removed in phase 3 with the profiles, which were the only thing that set them. The fixes cnc-ddraw applies by itself (Battle.net dialogs, StarCraft's and Red Alert's cursor, Age of Empires II's text boxes, Claw) stay |
 | Window modes, Alt+Enter, saved window position, `toggle_borderless`, `toggle_upscaled` | Done in phase 3: replaced with `display` and the `window_*` settings (see [Display settings](#display-settings)). Windowed games keep the desktop's bit depth (32-bit) from phase 1; `windowed_bpp=16` brings the old 16-bit back |
@@ -161,7 +161,7 @@ window_size=default     ; default (= medium), small, medium, large, unscaled, Wx
 window_position=auto    ; auto, X,Y, X,Ypx, X,Y%
 window_decorations=on
 window_resizable=on
-remember_window=off     ; off, global, game
+remember_window=off     ; off, on
 shader=crt-auto         ; crt-auto, sharp, nearest, bilinear
 aspect=auto
 integer_scaling=auto
@@ -233,8 +233,7 @@ black borders in the window, as in DOSBox.
     those games are shown 1:1, as now.
 - **The user can resize the window,** smaller than the game too, as now.
   `remember_window` saves its size and position when the game exits, for both
-  kinds of game, in the global section or the game's. Alt+Enter's state still
-  isn't saved.
+  kinds of game. Alt+Enter's state still isn't saved.
 - **`window_position`:** `auto` centres the window, on the game's own window
   or on the screen. It replaces `posX`, `posY` and `center_window`; when the
   game changes resolution, the window keeps its centre.
@@ -277,7 +276,7 @@ generated `directcrt.ini` only has the new keys.
 | Other `shader` values (Bicubic, Lanczos, xBR, shader files) | `shader=crt-auto` |
 | `border`, `resizable` | `window_decorations`, `window_resizable` |
 | `posX`, `posY` | `window_position=X,Ypx` (`-32000`: `auto`) |
-| `savesettings=0`, `1`, `2` | `remember_window=off`, `global`, `game` |
+| `savesettings=0`, `1`, `2` | `remember_window=off`, `on`, `on` |
 | `renderer=openglcore`, `direct3d9`, `direct3d9on12` | `renderer=auto` |
 
 Old keys never give `original`. `windowed=false` with `fullscreen=false` was a
@@ -367,6 +366,11 @@ otherwise keep the no-shading trap. `original` has to be chosen.
      each GPU path's filter rounding leaks up to 4/255 (OpenGL) or 9/255
      (Direct3D 11) of a neighbouring line into fine 1-pixel patterns. DOSBox
      itself has more of it than DirectCRT's OpenGL renderer.
+   - A deliberate difference from DOSBox: the defaults are what DOSBox's
+     `auto` picks for VGA, written out: `crt_color_profile=p22`,
+     `black_level=0` and `color_temperature=7800`. `auto` is still read,
+     and means the same. That makes the colour temperature and the black
+     level plain sliders in the settings OSD.
    - A deliberate difference from DOSBox: `aspect=auto` shows only the low
      resolution VGA modes (up to 720 wide, below 480 lines, no wider than
      16:10, such as 320x200 and 640x400) at 4:3. Every other mode has square
@@ -417,9 +421,10 @@ otherwise keep the no-shading trap. `original` has to be chosen.
    - Done: the sweep of features that don't serve DirectCRT's goal. The
      built-in game profiles, the game-specific hacks they set,
      `min_font_size`, the Windows 7 workaround, the C++Builder config tool
-     and the list of games with profiles are gone. A game's own section is
-     only `[game]` now (cnc-ddraw also read `[game/wine]`, `[game/2]` to
-     `[game/9]` and `checkfile`, which only the profiles used).
+     and the list of games with profiles are gone. A game's own section was
+     only `[game]` then (cnc-ddraw also read `[game/wine]`, `[game/2]` to
+     `[game/9]` and `checkfile`, which only the profiles used); with the
+     settings OSD, game sections went too (see phase 4).
    - Done: ddtest as a regression test. `--ddraw 1|2|4|7` picks the
      interface (`DirectDrawCreate` plus `QueryInterface`, `DDSURFACEDESC`
      before version 4), `--present vblank` waits for the vertical blank and
@@ -479,11 +484,14 @@ otherwise keep the no-shading trap. `original` has to be chosen.
      and where it comes from next to the monitor's, what the vertical blank
      follows (`maxgameticks`), frame rate of the game's pictures
      and of presents, average and slowest frame time, the crt-auto passes'
-     GPU time) and a graph of the last 240 frame times. The numbers cover
+     GPU time) and a graph of the last 240 frame times. The hotkey saves
+     whether it's shown (`status_osd`), so it's
+     back the next time the game starts. The numbers cover
      half a second each; the frame times are between the game's new
      pictures, not presents. `status_osd_size` (13, 16 or 20 px, times the
      display scale, at most a 22nd of the picture's height),
-     `status_osd_detail` and `status_osd_position`. While it's shown the
+     `status_osd_detail`, `status_osd_position` and `status_osd_opacity`
+     (the background's, 75% by default; the text stays solid). While it's shown the
      render thread wakes at least 4 times a second, so it updates while the
      game is waiting; GPU timing queries run only while it's shown (always
      in debug builds).
@@ -492,14 +500,28 @@ otherwise keep the no-shading trap. `original` has to be chosen.
      whether it applies live) now writes the default `directcrt.ini`, its
      comments included, and the OSD's tabs (Display, Picture, Colour,
      Timing, Overlay, Other, Compatibility, Hotkeys). A row per setting:
-     a checkbox, a list, a slider (with "a number" next to named values), a
+     a checkbox, radio buttons for a fixed set of values, a slider and a
+     box to type the number in (with "a number" next to named values), a
      text field (with "other" next to named values) or a hotkey button that
-     takes the next key pressed. Below the rows, the help for the setting
-     under the mouse or keyboard focus, its ini line and default, and
-     whether it applies now or after a restart (also marked `*` in the row).
-     It writes to all games (`[directcrt]`) or to this game's section; in
-     the game's scope a setting the game has its own value for has a Reset
-     button, and in the global scope a note says the game overrides it.
+     takes the next key pressed. A slider can move in steps (100 K for the
+     colour temperature, 5% for the status OSD's opacity: the nearest step
+     while it's dragged, the next one with the keyboard); a number typed in
+     needn't be on one. Settings can share a row (the red, green and blue
+     gain, each slider in its colour), and headings split a tab into groups
+     (the Colour tab: Monitor, Colour balance, the game's colours), with
+     a tooltip of their own. With `image_adjustments` off, the rest of the
+     Colour tab is greyed out. A
+     tooltip under the mouse or keyboard focus gives the help: on a radio
+     button, that value's own line of the help (the help is written one
+     value per line, `value = text`); on the row's label or a slider, the
+     whole help. Under it, the ini line, the default and whether it applies
+     now or after a restart (also marked `*` in the row).
+     It writes to `[directcrt]`, the only section: the ini is the game's
+     own, next to its `ddraw.dll`, so there's no choice between all games
+     and this one (sections named after a game, as in cnc-ddraw, aren't
+     read any more: a value there hid a change made in the OSD).
+     Every row has a reset button (a circular arrow; dim when it's already
+     the default) that writes the default; its tooltip says which.
      Each change is written to `directcrt.ini` at once and applied as when
      the file is saved (`WM_OVERLAY_MENU`, then `dd_reload_settings`).
      While it's open the game keeps running and drawing but gets no keyboard
@@ -507,9 +529,12 @@ otherwise keep the no-shading trap. `original` has to be chosen.
      the OSD instead, `GetKeyState`, `GetAsyncKeyState` and DirectInput's
      keyboard and mouse report nothing, the cursor is unlocked and shown,
      and on closing it's locked again and the game gets the releases of keys
-     it saw go down. Esc or the hotkey closes it. Its text is 16 px times
-     the display scale (13 to a 30th of the picture's height), and the
-     status OSD uses the same size, and stays visible, while it's open.
+     it saw go down. Esc or the hotkey closes it. Both OSDs are in Source
+     Sans 3 (`third_party/fonts`, built in as a resource; Adobe's unmodified
+     TTF, so its Reserved Font Name stays), rasterised 1.2 times the asked
+     size, since its size counts accents and descenders. Its text is 16 px times
+     the display scale (13 to a 30th of the picture's height); the status
+     OSD keeps its own size, and stays visible, while it's open.
      Not yet: it shows only the settings' own names, not the legacy keys
      some older ini files use.
    - Done: no GDI renderer. GDI can't draw the shaders or the overlay, and

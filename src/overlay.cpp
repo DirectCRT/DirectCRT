@@ -7,6 +7,7 @@
 
 #include <windows.h>
 #include <d3d11.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -28,7 +29,10 @@ enum OVERLAY_BACKEND
 };
 
 static ImGuiContext* g_ctx;
+extern "C" HMODULE g_ddraw_module;
+
 static ImFont* g_font;
+#define OVERLAY_FONT_SCALE 1.2f
 static ImGuiStyle g_base_style;
 static float g_style_scale;
 static LARGE_INTEGER g_last_frame;
@@ -51,8 +55,27 @@ static void overlay_init_context()
     io.LogFilename = NULL;
     io.ConfigFlags |= ImGuiConfigFlags_NoMouseCursorChange;
 
-    /* ProggyForever, scalable, with monospaced digits */
-    g_font = io.Fonts->AddFontDefaultVector();
+    /* Source Sans 3 (third_party/fonts), built in; ImGui's own if it isn't there */
+    HRSRC res = FindResourceA(g_ddraw_module, "OVERLAY_FONT", MAKEINTRESOURCEA(10) /* RT_RCDATA */);
+    HGLOBAL mem = res ? LoadResource(g_ddraw_module, res) : NULL;
+    void* data = mem ? LockResource(mem) : NULL;
+    DWORD size = res ? SizeofResource(g_ddraw_module, res) : 0;
+
+    g_font = NULL;
+
+    if (data && size)
+    {
+        ImFontConfig cfg;
+        cfg.FontDataOwnedByAtlas = false; /* the DLL's own memory */
+
+        /* Its size counts the accents above and the tails below; scaled up,
+         * its letters are about as tall as ImGui's own font's */
+        cfg.ExtraSizeScale = OVERLAY_FONT_SCALE;
+        g_font = io.Fonts->AddFontFromMemoryTTF(data, (int)size, 13.0f, &cfg);
+    }
+
+    if (!g_font)
+        g_font = io.Fonts->AddFontDefaultVector();
 
     ImGui::StyleColorsDark();
     ImGuiStyle& style = ImGui::GetStyle();
@@ -75,7 +98,7 @@ static void overlay_draw_status(const OVERLAY_STATUS& status, int width, int can
         ImGuiCond_Always,
         ImVec2(right ? 1.0f : 0.0f, bottom ? 1.0f : 0.0f));
 
-    ImGui::SetNextWindowBgAlpha(0.75f);
+    ImGui::SetNextWindowBgAlpha(status.opacity);
 
     ImGuiWindowFlags flags =
         ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoInputs |
@@ -115,6 +138,11 @@ static void overlay_draw_status(const OVERLAY_STATUS& status, int width, int can
             _snprintf(scale, sizeof(scale) - 1, "0-%.0f ms", status.graph_max_ms);
             scale[sizeof(scale) - 1] = 0;
 
+            /* the graph's ground fades with the window's */
+            ImVec4 ground = ImGui::GetStyleColorVec4(ImGuiCol_FrameBg);
+            ground.w *= status.opacity;
+            ImGui::PushStyleColor(ImGuiCol_FrameBg, ground);
+
             ImGui::PlotLines(
                 "##frames",
                 status.frame_ms,
@@ -124,6 +152,8 @@ static void overlay_draw_status(const OVERLAY_STATUS& status, int width, int can
                 0.0f,
                 status.graph_max_ms,
                 ImVec2(graph_width, 48.0f * status.scale));
+
+            ImGui::PopStyleColor();
         }
     }
 
@@ -135,12 +165,12 @@ static void overlay_draw_status(const OVERLAY_STATUS& status, int width, int can
 #define MENU_TEXT 264
 
 static bool g_menu_drawn;      /* the settings OSD was in the last frame */
-static bool g_scope_game;      /* editing the game's own section */
-static int g_help = -1;        /* the setting the help pane is about */
 static int g_capture = -1;     /* the hotkey being set */
 static bool g_capture_seen;    /* its button was drawn this frame */
 static int g_slider = -1;      /* the slider being dragged, and its value */
 static int g_slider_value;
+static int g_number = -1;      /* the number box being typed in, and its number */
+static int g_number_value;
 static int g_text = -1;        /* the text being edited, and its text */
 static char g_text_value[MENU_TEXT];
 static int g_custom = -1;      /* the text setting whose "Other" was picked */
@@ -158,6 +188,7 @@ static void menu_reset(void)
 {
     menu_capture(-1);
     g_slider = -1;
+    g_number = -1;
     g_text = -1;
     g_custom = -1;
 }
@@ -277,7 +308,7 @@ static void menu_capture_key(const OVERLAY_EVENT* e)
     _snprintf(value, sizeof(value) - 1, "0x%02X", vk & 0xFF);
     value[sizeof(value) - 1] = 0;
 
-    overlay_menu_write(g_capture, g_scope_game, value);
+    overlay_menu_write(g_capture, value);
     menu_capture(-1);
 }
 
@@ -403,16 +434,6 @@ static void menu_key_name(int vk, char* buf, size_t size)
     buf[size - 1] = 0;
 }
 
-/* The help pane follows the mouse, or the keyboard's focus */
-static void menu_hover(int setting)
-{
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem) ||
-        (ImGui::GetIO().NavVisible && ImGui::IsItemFocused()))
-    {
-        g_help = setting;
-    }
-}
-
 static int menu_find_choice(const SETTING* s, const char* value, char* label, size_t label_size)
 {
     char v[MENU_TEXT], l[MENU_TEXT];
@@ -434,60 +455,112 @@ static int menu_find_choice(const SETTING* s, const char* value, char* label, si
     return -1;
 }
 
-/* A combo of the setting's choices, and "other" (when not NULL) after them.
- * Returns the choice picked: -1 = none, -2 = other */
-static int menu_choice_combo(const SETTING* s, const char* value, const char* other, bool other_selected)
+#define MENU_WHOLE -1 /* the tooltip is about the setting, not one of its choices */
+#define MENU_OTHER -2 /* a value of its own: "A number" or "Other" */
+
+/* The setting's help in a tooltip, when the item before it is under the mouse
+ * or has the keyboard's focus; for a choice, only that choice's lines of it */
+static void menu_tooltip(int setting, int choice)
 {
-    char preview[MENU_TEXT];
-    int current = menu_find_choice(s, value, preview, sizeof(preview));
+    if (!ImGui::BeginItemTooltip())
+        return;
 
-    if (current < 0 || other_selected)
-    {
-        strncpy(preview, other ? other : value, sizeof(preview) - 1);
-        preview[sizeof(preview) - 1] = 0;
-        current = -2;
-    }
+    const SETTING* s = settings_get(setting);
+    char text[2048];
+    bool own = false;
 
-    int picked = -1;
-
-    if (ImGui::BeginCombo("##choice", preview))
+    if (choice != MENU_WHOLE)
     {
         char v[MENU_TEXT], l[MENU_TEXT];
 
-        for (int i = 0; settings_choice(s, i, v, sizeof(v), l, sizeof(l)); i++)
+        if (choice == MENU_OTHER)
+            own = settings_choice_help(s, NULL, text, sizeof(text)) != 0;
+        else if (settings_choice(s, choice, v, sizeof(v), l, sizeof(l)))
+            own = settings_choice_help(s, v, text, sizeof(text)) != 0;
+    }
+
+    ImGui::PushTextWrapPos(ImGui::GetFontSize() * 34.0f);
+    ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.5f, 1.0f), "%s", s->label ? s->label : s->key);
+
+    if (own)
+    {
+        ImGui::TextUnformatted(text);
+    }
+    else
+    {
+        /* A setting sharing a row (the green and blue gains) has the help of the row's first */
+        const SETTING* help = s;
+
+        for (int i = setting; !help->help && (help->flags & SETTING_JOINED) && i > 0;)
+            help = settings_get(--i);
+
+        const char* cursor = help->help ? help->help : "";
+
+        while (settings_help_line(&cursor, text, sizeof(text)))
+            ImGui::TextUnformatted(text);
+    }
+
+    ImGui::Spacing();
+
+    const char* apply =
+        s->apply == SETTING_LIVE ? "Takes effect at once" :
+        s->apply == SETTING_PICTURE ? "Takes effect at once; the picture is set up again" :
+        "Takes effect when the game starts again";
+
+    ImGui::TextDisabled("%s=%s (default: %s). %s", s->key, overlay_menu_value(setting, NULL), s->value, apply);
+    ImGui::PopTextWrapPos();
+    ImGui::EndTooltip();
+}
+
+/* Radio buttons for the setting's choices, as many to a line as fit, and
+ * 'other' after them when it isn't NULL. current = the choice that's on, or
+ * MENU_OTHER. Returns the one clicked: -1 = none, MENU_OTHER = other */
+static int menu_radios(int setting, const SETTING* s, int current, const char* other)
+{
+    const ImGuiStyle& style = ImGui::GetStyle();
+    float right = ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x;
+    int picked = -1;
+    char v[MENU_TEXT], l[MENU_TEXT];
+
+    for (int i = 0;; i++)
+    {
+        bool is_other = !settings_choice(s, i, v, sizeof(v), l, sizeof(l));
+
+        if (is_other && !other)
+            break;
+
+        const char* label = is_other ? other : l;
+
+        if (i > 0)
         {
-            ImGui::PushID(i);
+            float w = ImGui::GetFrameHeight() + style.ItemInnerSpacing.x + ImGui::CalcTextSize(label, NULL, true).x;
 
-            if (ImGui::Selectable(l, current == i))
-                picked = i;
-
-            if (current == i)
-                ImGui::SetItemDefaultFocus();
-
-            ImGui::PopID();
+            if (ImGui::GetItemRectMax().x + style.ItemSpacing.x * 2 + w <= right)
+                ImGui::SameLine(0.0f, style.ItemSpacing.x * 2);
         }
 
-        if (other)
-        {
-            if (ImGui::Selectable(other, current == -2))
-                picked = -2;
+        ImGui::PushID(i);
 
-            if (current == -2)
-                ImGui::SetItemDefaultFocus();
-        }
+        if (ImGui::RadioButton(label, current == (is_other ? MENU_OTHER : i)))
+            picked = is_other ? MENU_OTHER : i;
 
-        ImGui::EndCombo();
+        menu_tooltip(setting, is_other ? MENU_OTHER : i);
+        ImGui::PopID();
+
+        if (is_other)
+            break;
     }
 
     return picked;
 }
 
-static void menu_write_choice(int setting, const SETTING* s, int choice)
+/* Writes choice i, if it isn't the value already */
+static void menu_write_choice(int setting, const SETTING* s, int choice, const char* value)
 {
     char v[MENU_TEXT], l[MENU_TEXT];
 
-    if (settings_choice(s, choice, v, sizeof(v), l, sizeof(l)))
-        overlay_menu_write(setting, g_scope_game, v);
+    if (settings_choice(s, choice, v, sizeof(v), l, sizeof(l)) && strcmp(v, value))
+        overlay_menu_write(setting, v);
 }
 
 static void menu_widget_bool(int setting, const SETTING* s, const char* value)
@@ -500,19 +573,23 @@ static void menu_widget_bool(int setting, const SETTING* s, const char* value)
     bool checked = ds_parse_bool(value, &parsed) && parsed;
 
     if (ImGui::Checkbox("##bool", &checked))
-        overlay_menu_write(setting, g_scope_game, checked ? on : off);
+        overlay_menu_write(setting, checked ? on : off);
 
-    menu_hover(setting);
+    menu_tooltip(setting, MENU_WHOLE);
 }
 
 static void menu_widget_choice(int setting, const SETTING* s, const char* value)
 {
-    ImGui::SetNextItemWidth(-FLT_MIN);
-    int picked = menu_choice_combo(s, value, NULL, false);
-    menu_hover(setting);
+    /* A value the OSD doesn't name (DOSBox's "auto" for the colour profile) is the default */
+    int current = menu_find_choice(s, value, NULL, 0);
+
+    if (current < 0)
+        current = menu_find_choice(s, s->value, NULL, 0);
+
+    int picked = menu_radios(setting, s, current, NULL);
 
     if (picked >= 0)
-        menu_write_choice(setting, s, picked);
+        menu_write_choice(setting, s, picked, value);
 }
 
 static bool menu_is_number(const char* value)
@@ -522,90 +599,197 @@ static bool menu_is_number(const char* value)
     return end != value && *end == 0;
 }
 
-static void menu_widget_int(int setting, const SETTING* s, const char* value)
+static int menu_clamp(const SETTING* s, int v)
 {
-    bool named = s->choices && menu_find_choice(s, value, NULL, 0) >= 0;
+    return v < s->min ? s->min : v > s->max ? s->max : v;
+}
 
+/* v rounded down to a multiple of step */
+static int menu_floor(int v, int step)
+{
+    return v >= 0 ? v / step * step : -((-v + step - 1) / step * step);
+}
+
+/* A slider's value moved to its step: the nearest while it's dragged, the
+ * next one on in the way it moved with the keyboard */
+static int menu_snap(int v, int old, int step, bool dragged)
+{
+    if (step <= 1)
+        return v;
+
+    if (dragged)
+        return menu_floor(v + step / 2, step);
+
+    return v > old ? -menu_floor(-v, step) : menu_floor(v, step);
+}
+
+static void menu_write_int(int setting, const char* value, int v)
+{
+    char buf[16];
+    _snprintf(buf, sizeof(buf) - 1, "%d", v);
+    buf[sizeof(buf) - 1] = 0;
+
+    if (strcmp(buf, value))
+        overlay_menu_write(setting, buf);
+}
+
+/* The colour of a slider for one colour (the RGB gains), or NULL */
+static const ImVec4* menu_tint(const SETTING* s)
+{
+    static const struct
+    {
+        const char* key;
+        ImVec4 color;
+    } tints[] = {
+        { "red_gain", ImVec4(0.86f, 0.30f, 0.30f, 1.0f) },
+        { "green_gain", ImVec4(0.35f, 0.75f, 0.38f, 1.0f) },
+        { "blue_gain", ImVec4(0.40f, 0.56f, 0.96f, 1.0f) },
+    };
+
+    for (size_t i = 0; i < sizeof(tints) / sizeof(tints[0]); i++)
+    {
+        if (!strcmp(s->key, tints[i].key))
+            return &tints[i].color;
+    }
+
+    return NULL;
+}
+
+/* A slider and a box to type the number in, 'width' wide together. The slider
+ * moves in the setting's steps; a number typed in needn't be one */
+static void menu_widget_int(int setting, const SETTING* s, const char* value, float width)
+{
     if (s->choices)
     {
-        ImGui::SetNextItemWidth(named ? -FLT_MIN : ImGui::GetContentRegionAvail().x * 0.4f);
-        int picked = menu_choice_combo(s, value, "A number", false);
-        menu_hover(setting);
+        bool named = menu_find_choice(s, value, NULL, 0) >= 0 && g_custom != setting;
+        int picked = menu_radios(setting, s, named ? menu_find_choice(s, value, NULL, 0) : MENU_OTHER, "A number");
 
         if (picked >= 0)
         {
-            menu_write_choice(setting, s, picked);
-        }
-        else if (picked == -2 && named)
-        {
-            int n = s->min <= 60 && 60 <= s->max ? 60 : (s->min + s->max) / 2;
-            char buf[16];
-            _snprintf(buf, sizeof(buf) - 1, "%d", n);
-            buf[sizeof(buf) - 1] = 0;
-            overlay_menu_write(setting, g_scope_game, buf);
-        }
-
-        if (named)
+            g_custom = -1;
+            menu_write_choice(setting, s, picked, value);
             return;
+        }
 
-        ImGui::SameLine();
+        /* The slider shows; the value is written when it's moved */
+        if (picked == MENU_OTHER)
+            g_custom = setting;
+        else if (named)
+            return;
     }
 
-    int v = g_slider == setting ? g_slider_value : (int)strtol(value, NULL, 0);
+    int v;
 
-    if (!menu_is_number(value) && g_slider != setting)
-        v = s->min;
+    if (g_slider == setting)
+        v = g_slider_value;
+    else if (menu_is_number(value))
+        v = (int)strtol(value, NULL, 0);
+    else if (menu_is_number(s->value))
+        v = (int)strtol(s->value, NULL, 0); /* "auto" (as in DOSBox) is the default */
+    else
+        v = s->min <= 60 && 60 <= s->max ? 60 : (s->min + s->max) / 2;
 
-    ImGui::SetNextItemWidth(-FLT_MIN);
+    v = menu_clamp(s, v);
 
-    if (ImGui::SliderInt("##int", &v, s->min, s->max, "%d", ImGuiSliderFlags_AlwaysClamp))
+    const ImGuiStyle& style = ImGui::GetStyle();
+    char lo[16], hi[16];
+    _snprintf(lo, sizeof(lo) - 1, "%d", s->min);
+    _snprintf(hi, sizeof(hi) - 1, "%d", s->max);
+    lo[sizeof(lo) - 1] = hi[sizeof(hi) - 1] = 0;
+
+    /* The box fits the longest number in the range, and the cursor */
+    float lo_width = ImGui::CalcTextSize(lo).x;
+    float hi_width = ImGui::CalcTextSize(hi).x;
+    float box = (lo_width > hi_width ? lo_width : hi_width) + ImGui::CalcTextSize("0").x + style.FramePadding.x * 2;
+
+    if (width > ImGui::GetContentRegionAvail().x)
+        width = ImGui::GetContentRegionAvail().x;
+
+    float slider = width - box - style.ItemInnerSpacing.x;
+
+    if (slider < ImGui::GetFrameHeight())
+        slider = ImGui::GetFrameHeight();
+
+    const ImVec4* tint = menu_tint(s);
+
+    if (tint)
+    {
+        ImVec4 c = *tint;
+        ImGui::PushStyleColor(ImGuiCol_SliderGrab, c);
+        ImGui::PushStyleColor(ImGuiCol_SliderGrabActive, ImVec4(c.x * 0.5f + 0.5f, c.y * 0.5f + 0.5f, c.z * 0.5f + 0.5f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(c.x, c.y, c.z, 0.22f));
+        ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, ImVec4(c.x, c.y, c.z, 0.32f));
+        ImGui::PushStyleColor(ImGuiCol_FrameBgActive, ImVec4(c.x, c.y, c.z, 0.42f));
+    }
+
+    int old = v;
+    ImGui::SetNextItemWidth(slider);
+
+    if (ImGui::SliderInt("##int", &v, s->min, s->max, "", ImGuiSliderFlags_AlwaysClamp | ImGuiSliderFlags_NoInput))
     {
         g_slider = setting;
-        g_slider_value = v;
+        g_slider_value = menu_clamp(s, menu_snap(v, old, s->step, ImGui::IsMouseDown(ImGuiMouseButton_Left)));
+        v = g_slider_value;
     }
 
-    menu_hover(setting);
+    if (tint)
+        ImGui::PopStyleColor(5);
+
+    menu_tooltip(setting, s->choices ? MENU_OTHER : MENU_WHOLE);
 
     /* Written when it's let go: a picture setting sets the picture up again */
     if (ImGui::IsItemDeactivated() && g_slider == setting)
     {
-        char buf[16];
-        _snprintf(buf, sizeof(buf) - 1, "%d", g_slider_value);
-        buf[sizeof(buf) - 1] = 0;
-
-        if (strcmp(buf, value))
-            overlay_menu_write(setting, g_scope_game, buf);
-
+        menu_write_int(setting, value, g_slider_value);
         g_slider = -1;
+    }
+
+    ImGui::SameLine(0.0f, style.ItemInnerSpacing.x);
+    ImGui::SetNextItemWidth(box);
+
+    /* While it's typed in, ImGui keeps the text; the number is written when it's left */
+    int n = v;
+
+    if (ImGui::InputInt("##number", &n, 0, 0))
+    {
+        g_number = setting;
+        g_number_value = n;
+    }
+
+    menu_tooltip(setting, s->choices ? MENU_OTHER : MENU_WHOLE);
+
+    if (ImGui::IsItemDeactivated() && g_number == setting)
+    {
+        if (ImGui::IsItemDeactivatedAfterEdit())
+            menu_write_int(setting, value, menu_clamp(s, g_number_value));
+
+        g_number = -1;
     }
 }
 
 static void menu_widget_string(int setting, const SETTING* s, const char* value)
 {
-    bool named = s->choices && menu_find_choice(s, value, NULL, 0) >= 0;
-    bool typing = !named || g_custom == setting;
-
     if (s->choices)
     {
-        ImGui::SetNextItemWidth(typing ? ImGui::GetContentRegionAvail().x * 0.4f : -FLT_MIN);
-        int picked = menu_choice_combo(s, value, "Other", g_custom == setting);
-        menu_hover(setting);
+        bool named = menu_find_choice(s, value, NULL, 0) >= 0 && g_custom != setting;
+        int picked = menu_radios(setting, s, named ? menu_find_choice(s, value, NULL, 0) : MENU_OTHER, "Other");
 
         if (picked >= 0)
         {
             g_custom = -1;
-            menu_write_choice(setting, s, picked);
+            menu_write_choice(setting, s, picked, value);
+            return;
         }
-        else if (picked == -2)
+
+        if (picked == MENU_OTHER && named)
         {
             g_custom = setting;
             g_custom_focus = true;
         }
-
-        if (!typing && picked != -2)
+        else if (named)
+        {
             return;
-
-        ImGui::SameLine();
+        }
     }
 
     char buf[MENU_TEXT];
@@ -620,7 +804,7 @@ static void menu_widget_string(int setting, const SETTING* s, const char* value)
 
     ImGui::SetNextItemWidth(-FLT_MIN);
     ImGui::InputText("##text", buf, sizeof(buf));
-    menu_hover(setting);
+    menu_tooltip(setting, s->choices ? MENU_OTHER : MENU_WHOLE);
 
     if (ImGui::IsItemActive())
     {
@@ -643,8 +827,8 @@ static void menu_widget_string(int setting, const SETTING* s, const char* value)
 
         if (ImGui::IsItemDeactivatedAfterEdit() && strcmp(start, value))
         {
-            /* Nothing = the default, or for the game the value for all games */
-            overlay_menu_write(setting, g_scope_game, start[0] ? start : NULL);
+            /* Nothing = the default */
+            overlay_menu_write(setting, start[0] ? start : NULL);
             g_custom = -1;
         }
     }
@@ -678,7 +862,7 @@ static void menu_widget_key(int setting, const SETTING* s, const char* value)
     if (capturing)
         ImGui::PopStyleColor();
 
-    menu_hover(setting);
+    menu_tooltip(setting, MENU_WHOLE);
     ImGui::SameLine();
 
     if (ImGui::Button("None##clear"))
@@ -686,12 +870,146 @@ static void menu_widget_key(int setting, const SETTING* s, const char* value)
         if (capturing)
             menu_capture(-1);
 
-        overlay_menu_write(setting, g_scope_game, "0x00");
+        overlay_menu_write(setting, "0x00");
     }
 
-    menu_hover(setting);
+    menu_tooltip(setting, MENU_WHOLE);
 }
 
+/* Whether two values of a setting are the same: as numbers, as on/off, or as text */
+static bool menu_same(const SETTING* s, const char* a, const char* b)
+{
+    int x = 0, y = 0;
+
+    if (s->kind == SETTING_BOOL && ds_parse_bool(a, &x) && ds_parse_bool(b, &y))
+        return !x == !y;
+
+    if (menu_is_number(a) && menu_is_number(b))
+        return strtol(a, NULL, 0) == strtol(b, NULL, 0);
+
+    return _stricmp(a, b) == 0;
+}
+
+/* The setting has a value other than its default */
+static bool menu_changed(int setting)
+{
+    const SETTING* s = settings_get(setting);
+    return !menu_same(s, overlay_menu_value(setting, NULL), s->value);
+}
+
+/* Adds a value to a list of them, as the OSD shows it */
+static void menu_append_value(char* buf, size_t size, const SETTING* s, const char* value)
+{
+    char text[MENU_TEXT];
+
+    if (s->kind == SETTING_KEY)
+    {
+        menu_key_name((int)strtol(value, NULL, 0), text, sizeof(text));
+        value = text;
+    }
+    else if (s->choices && menu_find_choice(s, value, text, sizeof(text)) >= 0)
+    {
+        value = text;
+    }
+
+    size_t len = strlen(buf);
+
+    if (len + 1 < size)
+    {
+        _snprintf(buf + len, size - len - 1, "%s%s", len ? ", " : "", value);
+        buf[size - 1] = 0;
+    }
+}
+
+/* A button with a circular arrow on it, a frame high; dim when it's disabled */
+static bool menu_reset_icon(bool enabled)
+{
+    float h = ImGui::GetFrameHeight();
+
+    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+    bool clicked = ImGui::Button("##reset", ImVec2(h, h));
+    ImGui::PopStyleColor();
+
+    ImVec2 a = ImGui::GetItemRectMin();
+    ImVec2 b = ImGui::GetItemRectMax();
+    ImVec2 c((a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f);
+    float r = h * 0.26f;
+    float thickness = h * 0.085f > 1.0f ? h * 0.085f : 1.0f;
+    ImU32 color = ImGui::GetColorU32(enabled ? ImGuiCol_Text : ImGuiCol_TextDisabled);
+    ImDrawList* draw = ImGui::GetWindowDrawList();
+
+    /* Clockwise on the screen from the upper right to the upper left, with
+     * the head at the start, pointing back: an arrow going anticlockwise */
+    const float pi = 3.14159265f;
+    float start = -0.30f * pi;
+    draw->PathArcTo(c, r, start, 1.25f * pi, 24);
+    draw->PathStroke(color, thickness);
+
+    float cs = cosf(start), sn = sinf(start);
+    ImVec2 p(c.x + r * cs, c.y + r * sn);
+    ImVec2 d(sn, -cs); /* along the arc, backwards */
+    float k = h * 0.16f;
+
+    draw->AddTriangleFilled(
+        ImVec2(p.x + d.x * k, p.y + d.y * k),
+        ImVec2(p.x - d.x * k * 0.3f + cs * k, p.y - d.y * k * 0.3f + sn * k),
+        ImVec2(p.x - d.x * k * 0.3f - cs * k, p.y - d.y * k * 0.3f - sn * k),
+        color);
+
+    return clicked;
+}
+
+/* The reset button of a row: settings first to first + count - 1 */
+static void menu_reset_button(int first, int count)
+{
+    bool changed = false;
+    char values[MENU_TEXT * 2] = "";
+
+    for (int m = first; m < first + count; m++)
+    {
+        changed = changed || menu_changed(m);
+        menu_append_value(values, sizeof(values), settings_get(m), settings_get(m)->value);
+    }
+
+    ImGui::BeginDisabled(!changed);
+
+    if (menu_reset_icon(changed))
+    {
+        for (int m = first; m < first + count; m++)
+        {
+            if (g_custom == m)
+                g_custom = -1;
+
+            if (g_capture == m)
+                menu_capture(-1);
+
+            if (menu_changed(m))
+                overlay_menu_write(m, settings_get(m)->value);
+        }
+    }
+
+    ImGui::EndDisabled();
+    ImGui::SetItemTooltip(changed ? "Reset to the default (%s)" : "This is the default (%s)", values);
+}
+
+static bool menu_begin_table(int n, float label_width, float mark_width)
+{
+    char id[32];
+    _snprintf(id, sizeof(id) - 1, "##settings%d", n);
+    id[sizeof(id) - 1] = 0;
+
+    if (!ImGui::BeginTable(id, 4, ImGuiTableFlags_RowBg | ImGuiTableFlags_PadOuterX))
+        return false;
+
+    ImGui::TableSetupColumn("label", ImGuiTableColumnFlags_WidthFixed, label_width);
+    ImGui::TableSetupColumn("value", ImGuiTableColumnFlags_WidthStretch);
+    ImGui::TableSetupColumn("reset", ImGuiTableColumnFlags_WidthFixed, ImGui::GetFrameHeight());
+    ImGui::TableSetupColumn("mark", ImGuiTableColumnFlags_WidthFixed, mark_width);
+    return true;
+}
+
+/* A tab's rows: a table of them between its headings. A setting marked
+ * SETTING_JOINED shares the row of the one before */
 static void menu_rows(const char* tab)
 {
     float label_width = 0;
@@ -700,7 +1018,7 @@ static void menu_rows(const char* tab)
     {
         const SETTING* s = settings_get(i);
 
-        if (s->tab && !strcmp(s->tab, tab) && s->label)
+        if (s->key && s->tab && !strcmp(s->tab, tab) && s->label && !(s->flags & SETTING_JOINED))
         {
             float w = ImGui::CalcTextSize(s->label).x;
 
@@ -710,27 +1028,46 @@ static void menu_rows(const char* tab)
     }
 
     const ImGuiStyle& style = ImGui::GetStyle();
-    float mark_width =
-        ImGui::CalcTextSize("Reset").x + style.FramePadding.x * 2 + style.ItemSpacing.x + ImGui::CalcTextSize("*").x;
+    float mark_width = ImGui::CalcTextSize("*").x;
 
-    if (!ImGui::BeginTable("##settings", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_PadOuterX))
-        return;
-
-    ImGui::TableSetupColumn("label", ImGuiTableColumnFlags_WidthFixed, label_width);
-    ImGui::TableSetupColumn("value", ImGuiTableColumnFlags_WidthStretch);
-    ImGui::TableSetupColumn("mark", ImGuiTableColumnFlags_WidthFixed, mark_width);
+    int tables = 0;
+    bool open = false;
+    bool gated = false; /* a SETTING_GATE before is off */
 
     for (int i = 0; i < settings_count(); i++)
     {
         const SETTING* s = settings_get(i);
 
-        if (!s->key || !s->tab || strcmp(s->tab, tab))
+        if (!s->tab || strcmp(s->tab, tab))
             continue;
 
-        BOOL set = FALSE;
-        char value[MENU_TEXT];
-        strncpy(value, overlay_menu_value(i, g_scope_game, &set), sizeof(value) - 1);
-        value[sizeof(value) - 1] = 0;
+        if (s->kind == SETTING_HEADING)
+        {
+            if (open)
+            {
+                ImGui::EndTable();
+                open = false;
+            }
+
+            ImGui::Spacing();
+            ImGui::SeparatorText(s->label);
+
+            if (s->help)
+                ImGui::SetItemTooltip("%s", s->help);
+
+            continue;
+        }
+
+        if (!s->key || (s->flags & SETTING_JOINED))
+            continue;
+
+        if (!open && !(open = menu_begin_table(tables++, label_width, mark_width)))
+            return;
+
+        int count = 1;
+
+        while (i + count < settings_count() && (settings_get(i + count)->flags & SETTING_JOINED))
+            count++;
 
         ImGui::TableNextRow();
         ImGui::PushID(i);
@@ -738,147 +1075,73 @@ static void menu_rows(const char* tab)
         ImGui::TableNextColumn();
         ImGui::AlignTextToFramePadding();
         ImGui::TextUnformatted(s->label ? s->label : s->key);
-        menu_hover(i);
+        menu_tooltip(i, MENU_WHOLE);
 
         ImGui::TableNextColumn();
 
-        switch (s->kind)
+        float width = ImGui::GetContentRegionAvail().x;
+        width = (width - style.ItemSpacing.x * (count - 1)) / count;
+
+        ImGui::BeginDisabled(gated);
+
+        for (int m = i; m < i + count; m++)
         {
-        case SETTING_BOOL: menu_widget_bool(i, s, value); break;
-        case SETTING_CHOICE: menu_widget_choice(i, s, value); break;
-        case SETTING_INT: menu_widget_int(i, s, value); break;
-        case SETTING_STRING: menu_widget_string(i, s, value); break;
-        case SETTING_KEY: menu_widget_key(i, s, value); break;
-        default: break;
+            const SETTING* ms = settings_get(m);
+            char value[MENU_TEXT];
+            strncpy(value, overlay_menu_value(m, NULL), sizeof(value) - 1);
+            value[sizeof(value) - 1] = 0;
+
+            if (m > i)
+                ImGui::SameLine(0.0f, style.ItemSpacing.x);
+
+            ImGui::PushID(m);
+
+            switch (ms->kind)
+            {
+            case SETTING_BOOL: menu_widget_bool(m, ms, value); break;
+            case SETTING_CHOICE: menu_widget_choice(m, ms, value); break;
+            case SETTING_INT: menu_widget_int(m, ms, value, width); break;
+            case SETTING_STRING: menu_widget_string(m, ms, value); break;
+            case SETTING_KEY: menu_widget_key(m, ms, value); break;
+            default: break;
+            }
+
+            ImGui::PopID();
+
+            if (ms->flags & SETTING_GATE)
+            {
+                int on = 0;
+                gated = !(ds_parse_bool(value, &on) && on);
+            }
         }
+
+        ImGui::EndDisabled();
 
         ImGui::TableNextColumn();
+        menu_reset_button(i, count);
 
-        if (g_scope_game)
-        {
-            if (set)
-            {
-                if (ImGui::SmallButton("Reset"))
-                    overlay_menu_write(i, TRUE, NULL);
-
-                if (ImGui::IsItemHovered())
-                    ImGui::SetTooltip("This game has its own value. Reset: use the value for all games");
-
-                ImGui::SameLine();
-            }
-        }
-        else
-        {
-            BOOL game_set = FALSE;
-            const char* game_value = overlay_menu_value(i, TRUE, &game_set);
-
-            if (game_set)
-            {
-                ImGui::AlignTextToFramePadding();
-                ImGui::TextDisabled("game");
-
-                if (ImGui::IsItemHovered())
-                    ImGui::SetTooltip("%s has its own value: %s", overlay_menu_game(), game_value);
-
-                ImGui::SameLine();
-            }
-        }
+        ImGui::TableNextColumn();
 
         if (s->apply == SETTING_RESTART)
         {
             ImGui::AlignTextToFramePadding();
             ImGui::TextDisabled("*");
-
-            if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("Takes effect when the game starts again");
+            ImGui::SetItemTooltip("Takes effect when the game starts again");
         }
 
         ImGui::PopID();
+        i += count - 1;
     }
 
-    ImGui::EndTable();
-}
-
-static void menu_help(void)
-{
-    const SETTING* s = g_help >= 0 ? settings_get(g_help) : NULL;
-
-    if (!s || !s->key)
-    {
-        char close[96];
-        int i = settings_index("keysettingsosd");
-        menu_key_name(i >= 0 ? (int)strtol(overlay_menu_value(i, TRUE, NULL), NULL, 0) : 0, close, sizeof(close));
-
-        ImGui::TextWrapped(
-            "Point at a setting to see what it does. The settings are saved in directcrt.ini, for all games or "
-            "for this game alone (in its own section, over the ones for all games).");
-        ImGui::TextWrapped("* = takes effect when the game starts again; the rest take effect at once.");
-        ImGui::TextWrapped("Esc or Alt + %s closes the settings. The game gets no keyboard or mouse input while they're open.", close);
-        return;
-    }
-
-    ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.5f, 1.0f), "%s", s->label ? s->label : s->key);
-
-    /* The help's lines; one starting with two spaces goes on with the one before */
-    if (s->help)
-    {
-        char line[2048];
-        size_t len = 0;
-        const char* p = s->help;
-
-        while (*p)
-        {
-            const char* end = strchr(p, '\n');
-            size_t n = end ? (size_t)(end - p) : strlen(p);
-            bool more = n >= 2 && p[0] == ' ' && p[1] == ' ';
-
-            if (!more && len > 0)
-            {
-                line[len] = 0;
-                ImGui::TextWrapped("%s", line);
-                len = 0;
-            }
-
-            const char* from = more ? p + 1 : p;
-            size_t count = more ? n - 1 : n;
-
-            if (len == 0 && more)
-            {
-                from++;
-                count--;
-            }
-
-            if (len + count >= sizeof(line))
-                count = sizeof(line) - 1 - len;
-
-            memcpy(line + len, from, count);
-            len += count;
-
-            p = end ? end + 1 : p + n;
-        }
-
-        if (len > 0)
-        {
-            line[len] = 0;
-            ImGui::TextWrapped("%s", line);
-        }
-    }
-
-    ImGui::Spacing();
-
-    const char* apply =
-        s->apply == SETTING_LIVE ? "Takes effect at once" :
-        s->apply == SETTING_PICTURE ? "Takes effect at once; the picture is set up again" :
-        "Takes effect when the game starts again";
-
-    ImGui::TextDisabled("%s=%s (default: %s). %s", s->key, overlay_menu_value(g_help, g_scope_game, NULL), s->value, apply);
+    if (open)
+        ImGui::EndTable();
 }
 
 static void menu_draw(int width, int canvas_height, float font_size, float scale)
 {
     float margin = 16.0f * scale;
-    float w = 64.0f * font_size;
-    float h = 38.0f * font_size;
+    float w = 50.0f * font_size;
+    float h = 36.0f * font_size;
 
     if (w > width - 2 * margin)
         w = width - 2 * margin;
@@ -909,30 +1172,19 @@ static void menu_draw(int width, int canvas_height, float font_size, float scale
             open = false;
         }
 
-        ImGui::AlignTextToFramePadding();
-        ImGui::TextUnformatted("Settings for");
-        ImGui::SameLine();
+        char close[96];
+        int key = settings_index("keysettingsosd");
+        menu_key_name(key >= 0 ? (int)strtol(overlay_menu_value(key, NULL), NULL, 0) : 0, close, sizeof(close));
 
-        if (ImGui::RadioButton("all games", !g_scope_game) && g_scope_game)
-        {
-            g_scope_game = false;
-            menu_reset();
-        }
+        char footer[256];
+        _snprintf(
+            footer, sizeof(footer) - 1,
+            "Point at a setting or a choice for help. * = takes effect when the game starts again. "
+            "Esc or Alt + %s closes this; the game gets no input while it's open.", close);
+        footer[sizeof(footer) - 1] = 0;
 
-        ImGui::SameLine();
-
-        char game[MAX_PATH + 32];
-        _snprintf(game, sizeof(game) - 1, "this game (%s)", overlay_menu_game());
-        game[sizeof(game) - 1] = 0;
-
-        if (ImGui::RadioButton(game, g_scope_game) && !g_scope_game)
-        {
-            g_scope_game = true;
-            menu_reset();
-        }
-
-        float help_height =
-            ImGui::GetTextLineHeightWithSpacing() * 7 + ImGui::GetStyle().WindowPadding.y * 2;
+        float footer_height =
+            ImGui::CalcTextSize(footer, NULL, false, ImGui::GetContentRegionAvail().x).y + ImGui::GetStyle().ItemSpacing.y;
 
         if (ImGui::BeginTabBar("##tabs"))
         {
@@ -940,16 +1192,7 @@ static void menu_draw(int width, int canvas_height, float font_size, float scale
             {
                 if (ImGui::BeginTabItem(settings_tab(t)))
                 {
-                    /* The help is about this tab's settings */
-                    static int shown_tab = -1;
-
-                    if (t != shown_tab)
-                    {
-                        shown_tab = t;
-                        g_help = -1;
-                    }
-
-                    if (ImGui::BeginChild("##rows", ImVec2(0, -(help_height + ImGui::GetStyle().ItemSpacing.y))))
+                    if (ImGui::BeginChild("##rows", ImVec2(0, -footer_height)))
                         menu_rows(settings_tab(t));
 
                     ImGui::EndChild();
@@ -960,10 +1203,9 @@ static void menu_draw(int width, int canvas_height, float font_size, float scale
             ImGui::EndTabBar();
         }
 
-        if (ImGui::BeginChild("##help", ImVec2(0, 0), ImGuiChildFlags_Borders))
-            menu_help();
-
-        ImGui::EndChild();
+        ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+        ImGui::TextWrapped("%s", footer);
+        ImGui::PopStyleColor();
     }
 
     ImGui::End();
@@ -980,6 +1222,31 @@ static void menu_draw(int width, int canvas_height, float font_size, float scale
 
 /* One ImGui frame with the OSDs in it; the renderer backend's NewFrame comes
  * first and its RenderDrawData after */
+/* The style at a scale (the font's size / 13); the two OSDs can have different ones */
+static void overlay_use_style(float scale)
+{
+    static ImGuiStyle styles[2];
+    static float scales[2];
+    static int next;
+
+    int i = scales[0] == scale ? 0 : scales[1] == scale ? 1 : -1;
+
+    if (i < 0)
+    {
+        i = next;
+        next ^= 1;
+        styles[i] = g_base_style;
+        styles[i].ScaleAllSizes(scale);
+        scales[i] = scale;
+    }
+
+    if (g_style_scale != scale)
+    {
+        ImGui::GetStyle() = styles[i];
+        g_style_scale = scale;
+    }
+}
+
 static void overlay_build_frame(int width, int height, int canvas_height)
 {
     bool menu = overlay_menu_open() != 0;
@@ -990,17 +1257,9 @@ static void overlay_build_frame(int width, int height, int canvas_height)
     if (status_shown)
         overlay_get_status(&status, width, canvas_height);
 
-    float font_size = status_shown ? status.font_size : 13.0f;
-    float scale = status_shown ? status.scale : 1.0f;
-
-    /* Both in the settings OSD's size while it's open */
-    if (menu)
-    {
-        font_size = overlay_menu_font_size(canvas_height);
-        scale = font_size / 13.0f;
-        status.font_size = font_size;
-        status.scale = scale;
-    }
+    /* Each in its own size */
+    float menu_font = menu ? overlay_menu_font_size(canvas_height) : 13.0f;
+    float menu_scale = menu_font / 13.0f;
 
     ImGuiIO& io = ImGui::GetIO();
     io.DisplaySize = ImVec2((float)width, (float)height);
@@ -1012,14 +1271,6 @@ static void overlay_build_frame(int width, int height, int canvas_height)
     float dt = g_last_frame.QuadPart ? (float)((double)(now.QuadPart - g_last_frame.QuadPart) / freq.QuadPart) : 0.0f;
     io.DeltaTime = dt > 0.0001f ? dt : 1.0f / 60.0f;
     g_last_frame = now;
-
-    if (scale != g_style_scale)
-    {
-        ImGuiStyle& style = ImGui::GetStyle();
-        style = g_base_style;
-        style.ScaleAllSizes(scale);
-        g_style_scale = scale;
-    }
 
     if (menu)
     {
@@ -1045,18 +1296,28 @@ static void overlay_build_frame(int width, int height, int canvas_height)
         io.MouseDrawCursor = false;
     }
 
+    /* The menu's style for the frame (and the mouse cursor ImGui draws) */
+    overlay_use_style(menu ? menu_scale : status_shown ? status.scale : 1.0f);
     ImGui::NewFrame();
-    ImGui::PushFont(g_font, font_size);
 
     if (status_shown)
+    {
+        overlay_use_style(status.scale);
+        ImGui::PushFont(g_font, status.font_size);
         overlay_draw_status(status, width, canvas_height);
+        ImGui::PopFont();
+    }
 
     if (menu)
-        menu_draw(width, canvas_height, font_size, scale);
+    {
+        overlay_use_style(menu_scale);
+        ImGui::PushFont(g_font, menu_font);
+        menu_draw(width, canvas_height, menu_font, menu_scale);
+        ImGui::PopFont();
+    }
 
     g_menu_drawn = menu;
 
-    ImGui::PopFont();
     ImGui::Render();
 }
 
