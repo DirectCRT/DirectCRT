@@ -23,6 +23,7 @@
 #include "ddtest.h"
 #include "resource.h"
 
+#include <commctrl.h>
 #include <commdlg.h>
 #include <math.h>
 #include <windowsx.h>
@@ -35,6 +36,7 @@
 /* Current-looking controls (and drop-down hint text) from Common Controls 6 */
 #pragma comment(linker, "/manifestdependency:\"type='win32' name='Microsoft.Windows.Common-Controls' " \
                         "version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
+#pragma comment(lib, "comctl32.lib")
 
 #ifndef CB_SETCUEBANNER
 #define CB_SETCUEBANNER 0x1703
@@ -150,7 +152,7 @@ static struct
     HWND panel, display;
     HWND cb_res, ed_width, ed_height, rb_bpp[BPP_COUNT], ed_refresh, ed_fps;
     HWND rb_ddraw[DDRAW_COUNT], rb_present[PRESENT_COUNT], cb_pattern, chk_info, chk_mouse;
-    HWND ed_image, cb_modes, st_status, lb_dll, st_dll;
+    HWND ed_image, cb_modes, sb_status, lb_dll, st_dll;
     HWND bt_browse, bt_imgsize, bt_query, bt_run, bt_stop;
     HWND lb_size, lb_x, lb_bpp, lb_refresh, lb_hz, lb_fps, lb_fps_unit;
     HWND lb_ddraw, lb_present, lb_pattern, lb_image, st_image_note, lb_modes;
@@ -1944,7 +1946,8 @@ static void create_controls(void)
     g.bt_run = add_control("BUTTON", "Run", WS_TABSTOP | BS_DEFPUSHBUTTON, ID_RUN);
     g.bt_stop = add_control("BUTTON", "Stop", button, ID_STOP);
 
-    g.st_status = add_control("STATIC", "", SS_LEFT | SS_NOPREFIX | SS_SUNKEN, ID_STATUS);
+    /* The state, and on the right whatever went wrong; placed by layout_controls */
+    g.sb_status = add_control(STATUSCLASSNAMEA, "", SBARS_TOOLTIPS | CCS_NOPARENTALIGN | CCS_NORESIZE, ID_STATUS);
 }
 
 static int text_w(HDC dc, const char* s)
@@ -2106,12 +2109,12 @@ static SIZE layout_controls(void)
     int big_w = btn_w + S(16), big_h = ch + S(6);
     place(g.bt_run, fx, y, big_w, big_h);
     place(g.bt_stop, fx + big_w + gap, y, big_w, big_h);
-    y += big_h + S(14);
+    y += big_h + margin;
 
-    /* State and the last error; either may wrap */
-    int status_h = line * 4 + S(6);
-    place(g.st_status, margin, y, full_w, status_h);
-    y += status_h + margin;
+    /* The status bar across the bottom */
+    int status_h = line + S(8);
+    place(g.sb_status, 0, y, fx + field_w + margin, status_h);
+    y += status_h;
 
     SelectObject(dc, old_font);
     ReleaseDC(g.panel, dc);
@@ -2279,7 +2282,7 @@ static BOOL read_panel(Settings* s)
 
 static void update_status(void)
 {
-    if (!g.st_status || !IsWindow(g.st_status))
+    if (!g.sb_status || !IsWindow(g.sb_status))
         return;
 
     /* Run while stopped, Stop while running */
@@ -2288,33 +2291,68 @@ static void update_status(void)
     if (IsWindowEnabled(g.bt_stop) != g.running)
         EnableWindow(g.bt_stop, g.running);
 
-    char state[512];
+    /* The state on the left; on the right the last error, or the self-check's failure */
+    char state[256];
+    char problem[sizeof(g.error) + sizeof(g.check_msg) + 64] = "";
     if (g.running)
     {
-        int n = _snprintf(state, sizeof(state) - 1, "Running: %d x %d, %d-bit, %s, %s - %.1f fps",
+        int n = _snprintf(state, sizeof(state) - 1, "  Running: %d x %d, %d-bit, %s, %s - %.1f fps",
                           g.cur.width, g.cur.height, g.cur.bpp, PRESENT_DESC[g.cur.present],
                           ddraw_name(g.cur.ddraw), g.fps);
-        if (n > 0 && g.cur.pattern == PAT_BLITS && g.check_frames)
-        {
-            if (g.check_failed)
-                _snprintf(state + n, sizeof(state) - 1 - n, "\r\nSelf-check failed in %u of %u frames: %s",
-                          g.check_failed, g.check_frames, g.check_msg);
-            else
-                _snprintf(state + n, sizeof(state) - 1 - n, " - self-check passed");
-        }
+        if (n > 0 && g.cur.pattern == PAT_BLITS && g.check_frames && !g.check_failed)
+            _snprintf(state + n, sizeof(state) - 1 - n, " - self-check passed");
     }
     else
-        _snprintf(state, sizeof(state) - 1, "Stopped");
+        _snprintf(state, sizeof(state) - 1, "  Stopped");
     state[sizeof(state) - 1] = '\0';
 
-    char text[1500];
-    _snprintf(text, sizeof(text) - 1, "%s\r\n%s%s", state, g.error[0] ? "Last error: " : "", g.error);
-    text[sizeof(text) - 1] = '\0';
+    if (g.error[0])
+        _snprintf(problem, sizeof(problem) - 1, "  Error: %s", g.error);
+    else if (g.running && g.cur.pattern == PAT_BLITS && g.check_failed)
+        _snprintf(problem, sizeof(problem) - 1, "  Self-check failed in %u of %u frames: %s",
+                  g.check_failed, g.check_frames, g.check_msg);
+    problem[sizeof(problem) - 1] = '\0';
 
-    char old[1500];
-    GetWindowTextA(g.st_status, old, sizeof(old));
-    if (strcmp(old, text) != 0)
-        SetWindowTextA(g.st_status, text);
+    /* One part for the state alone, two with a problem: the state as wide as its text.
+       The texts start with two spaces: a status bar puts its text against the edge. */
+    int parts[2] = { -1, -1 };
+    int count = 1;
+    if (problem[0])
+    {
+        HDC dc = GetDC(g.sb_status);
+        HGDIOBJ old_font = SelectObject(dc, g.font);
+        SIZE sz;
+        GetTextExtentPoint32A(dc, state, (int)strlen(state), &sz);
+        SelectObject(dc, old_font);
+        ReleaseDC(g.sb_status, dc);
+
+        RECT rc;
+        GetClientRect(g.sb_status, &rc);
+        parts[0] = sz.cx + MulDiv(24, g.dpi, 96);
+        if (parts[0] > rc.right * 2 / 3)
+            parts[0] = rc.right * 2 / 3;
+        count = 2;
+    }
+
+    int old_parts[2] = { 0, 0 };
+    int old_count = (int)SendMessageA(g.sb_status, SB_GETPARTS, 2, (LPARAM)old_parts);
+    if (old_count != count || old_parts[0] != parts[0])
+        SendMessageA(g.sb_status, SB_SETPARTS, count, (LPARAM)parts);
+
+    char old[sizeof(problem)];
+    const char* texts[2] = { state, problem };
+    for (int i = 0; i < count; i++)
+    {
+        old[0] = '\0';
+        if (LOWORD(SendMessageA(g.sb_status, SB_GETTEXTLENGTHA, i, 0)) < sizeof(old))
+            SendMessageA(g.sb_status, SB_GETTEXTA, i, (LPARAM)old);
+        if (old_count != count || strcmp(old, texts[i]) != 0)
+        {
+            SendMessageA(g.sb_status, SB_SETTEXTA, i, (LPARAM)texts[i]);
+            /* Shown when the text doesn't fit */
+            SendMessageA(g.sb_status, SB_SETTIPTEXTA, i, (LPARAM)texts[i]);
+        }
+    }
 
     const char* dll = g.ddraw_path[0] ? g.ddraw_path : "(not loaded)";
     GetWindowTextA(g.st_dll, old, sizeof(old));
@@ -2964,6 +3002,9 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
 
     g.inst = inst;
     CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+
+    INITCOMMONCONTROLSEX icc = { sizeof(icc), ICC_BAR_CLASSES };
+    InitCommonControlsEx(&icc);
     timeBeginPeriod(1);
     QueryPerformanceFrequency(&g.qpf);
 

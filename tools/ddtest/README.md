@@ -7,8 +7,8 @@ result, which makes it a regression test for DirectDraw itself (see
 [Regression test](#regression-test)).
 
 It loads whichever `ddraw.dll` Windows finds first: the one next to `ddtest.exe`,
-otherwise Windows' own. The status line and the in-picture info text show which
-one is in use. Building the solution puts `ddtest.exe` in `bin\<Configuration>\`
+otherwise Windows' own. The panel's first row and the in-picture info text show
+which one is in use. Building the solution puts `ddtest.exe` in `bin\<Configuration>\`
 next to the freshly built `ddraw.dll`. To compare with Windows' own DirectDraw,
 copy `ddtest.exe` to a folder on its own.
 
