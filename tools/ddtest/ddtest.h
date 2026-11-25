@@ -64,13 +64,24 @@ void pattern_draw(int id, Canvas* c, const PatternContext* ctx);
 /* Palette fade: the brightness for a frame, 0 (black) to 256 (full) */
 int fade_level(uint32_t frame);
 
+/* The blits pattern's copies of the sprite; all but BLITS_STRETCH use its
+   source colour key */
+enum
+{
+    BLITS_BLT,            /* Blt, at its size */
+    BLITS_BLTFAST,        /* BltFast */
+    BLITS_STRETCH_MIRROR, /* Blt, 2x and mirrored both ways */
+    BLITS_STRETCH,        /* Blt, 3x wide and 2x tall */
+    BLITS_COPIES
+};
+
 /* The blits pattern: where each DirectDraw operation goes in a w x h mode */
 typedef struct BlitsLayout
 {
     RECT fill[4];          /* Blt with DDBLT_COLORFILL, in fill_color */
     uint32_t fill_color[4];
-    RECT key_area[2];      /* the sprite is blitted with a source colour key: [0] Blt, [1] BltFast */
-    POINT sprite_pos[2];   /* where it goes this frame */
+    RECT key_area[2];      /* the sprite's panels, on a checkerboard: [0] Blt, [1] BltFast */
+    RECT copy[BLITS_COPIES]; /* where each copy of the sprite goes this frame */
     int sprite_size;
     RECT gdi_area;         /* GDI text, TextOut through the surface's GetDC */
     int text_height;
@@ -80,6 +91,7 @@ typedef struct BlitsLayout
 #define BLITS_LINES 2               /* lines of GDI text */
 void blits_layout(int w, int h, uint32_t frame, BlitsLayout* l);
 uint32_t blits_sprite_pixel(int x, int y, int size); /* BLITS_KEY where it's transparent */
+uint32_t blits_copy_pixel(int copy, int x, int y, int size); /* the sprite's pixel at x, y of that copy */
 void blits_text(int line, uint32_t frame, char* buf, int len);
 
 /* 8-bit palette: a 6x6x6 colour cube (indices 0-215) plus 40 greys (216-255) */
