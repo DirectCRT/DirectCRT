@@ -1081,7 +1081,10 @@ static void check_fail(const char* fmt, ...)
 }
 
 /* An off-screen surface in the target's format with the source colour key
-   set. It's drawn every frame, which also tests locking a second surface. */
+   set. It's drawn every frame, which also tests locking a second surface.
+   It's in system memory: Windows' own DirectDraw then stretches it in
+   software, exactly; graphics drivers stretch video memory to video memory
+   unevenly, and some ignore mirroring. */
 static BOOL prepare_sprite(int size)
 {
     HRESULT hr;
@@ -1098,7 +1101,7 @@ static BOOL prepare_sprite(int size)
         ZeroMemory(&sd, sizeof(sd));
         sd.dwSize = dd_desc_size();
         sd.dwFlags = DDSD_CAPS | DDSD_WIDTH | DDSD_HEIGHT | DDSD_PIXELFORMAT;
-        sd.ddsCaps.dwCaps = DDSCAPS_OFFSCREENPLAIN;
+        sd.ddsCaps.dwCaps = DDSCAPS_OFFSCREENPLAIN | DDSCAPS_SYSTEMMEMORY;
         sd.dwWidth = sd.dwHeight = (DWORD)size;
         sd.ddpfPixelFormat = g.pf;
 
@@ -1145,10 +1148,10 @@ static BOOL rect_inside(const RECT* r, int w, int h)
     return r->left >= 0 && r->top >= 0 && r->right <= w && r->bottom <= h && r->left < r->right && r->top < r->bottom;
 }
 
-/* Colour fills, the sprite with Blt and BltFast and a source colour key,
-   then GDI text, all on the frame the canvas was written to. Then the
-   surface is read back: the fills and the sprites must be exact (the key
-   letting the canvas through), the text only white on black. */
+/* Colour fills, the sprite with Blt and BltFast and a source colour key and
+   stretched with Blt, then GDI text, all on the frame the canvas was written
+   to. Then the surface is read back: the fills and the sprites must be exact
+   (the key letting the canvas through), the text only white on black. */
 static void blits_draw_and_check(LPDIRECTDRAWSURFACE7 target)
 {
     BlitsLayout l;
@@ -1175,35 +1178,38 @@ static void blits_draw_and_check(LPDIRECTDRAWSURFACE7 target)
             check_fail("Blt (colour fill) failed: %s", dderr_name(hr));
     }
 
-    RECT sprite_rect[2];
-    BOOL sprite_drawn[2] = { FALSE, FALSE };
-    for (int i = 0; i < 2; i++)
-    {
-        sprite_rect[i].left = l.sprite_pos[i].x;
-        sprite_rect[i].top = l.sprite_pos[i].y;
-        sprite_rect[i].right = l.sprite_pos[i].x + l.sprite_size;
-        sprite_rect[i].bottom = l.sprite_pos[i].y + l.sprite_size;
-    }
+    static const char* copy_names[BLITS_COPIES] = {
+        "Blt (source colour key)", "BltFast (source colour key)",
+        "Blt (stretched, mirrored, source colour key)", "Blt (stretched)",
+    };
+    BOOL copy_drawn[BLITS_COPIES] = { FALSE };
 
     if (prepare_sprite(l.sprite_size))
     {
-        if (rect_inside(&sprite_rect[0], w, h))
+        for (int i = 0; i < BLITS_COPIES; i++)
         {
-            hr = IDirectDrawSurface7_Blt(target, &sprite_rect[0], g.sprite, NULL, DDBLT_KEYSRC | DDBLT_WAIT, NULL);
-            lost |= hr == DDERR_SURFACELOST;
-            if (FAILED(hr))
-                check_fail("Blt (source colour key) failed: %s", dderr_name(hr));
-            sprite_drawn[0] = SUCCEEDED(hr);
-        }
+            RECT* r = &l.copy[i];
+            if (!rect_inside(r, w, h))
+                continue;
 
-        if (rect_inside(&sprite_rect[1], w, h))
-        {
-            hr = IDirectDrawSurface7_BltFast(target, (DWORD)sprite_rect[1].left, (DWORD)sprite_rect[1].top, g.sprite,
-                                             NULL, DDBLTFAST_SRCCOLORKEY | DDBLTFAST_WAIT);
+            DDBLTFX fx;
+            ZeroMemory(&fx, sizeof(fx));
+            fx.dwSize = sizeof(fx);
+            fx.dwDDFX = DDBLTFX_MIRRORLEFTRIGHT | DDBLTFX_MIRRORUPDOWN;
+
+            if (i == BLITS_BLTFAST)
+                hr = IDirectDrawSurface7_BltFast(target, (DWORD)r->left, (DWORD)r->top, g.sprite, NULL,
+                                                 DDBLTFAST_SRCCOLORKEY | DDBLTFAST_WAIT);
+            else if (i == BLITS_STRETCH_MIRROR)
+                hr = IDirectDrawSurface7_Blt(target, r, g.sprite, NULL, DDBLT_KEYSRC | DDBLT_DDFX | DDBLT_WAIT, &fx);
+            else
+                hr = IDirectDrawSurface7_Blt(target, r, g.sprite, NULL,
+                                             (i == BLITS_BLT ? DDBLT_KEYSRC : 0) | DDBLT_WAIT, NULL);
+
             lost |= hr == DDERR_SURFACELOST;
             if (FAILED(hr))
-                check_fail("BltFast (source colour key) failed: %s", dderr_name(hr));
-            sprite_drawn[1] = SUCCEEDED(hr);
+                check_fail("%s failed: %s", copy_names[i], dderr_name(hr));
+            copy_drawn[i] = SUCCEEDED(hr);
         }
     }
 
@@ -1295,24 +1301,25 @@ static void blits_draw_and_check(LPDIRECTDRAWSURFACE7 target)
                 }
         }
 
-        for (int i = 0; i < 2 && !g.check_frame_failed; i++)
+        for (int i = 0; i < BLITS_COPIES && !g.check_frame_failed; i++)
         {
-            if (!sprite_drawn[i])
+            if (!copy_drawn[i])
                 continue;
 
-            for (int sy = 0; sy < l.sprite_size && !g.check_frame_failed; sy++)
-                for (int sx = 0; sx < l.sprite_size; sx++)
+            const RECT* r = &l.copy[i];
+            for (int y = r->top; y < r->bottom && !g.check_frame_failed; y++)
+                for (int x = r->left; x < r->right; x++)
                 {
-                    int x = sprite_rect[i].left + sx, y = sprite_rect[i].top + sy;
-                    uint32_t sp = blits_sprite_pixel(sx, sy, l.sprite_size);
-                    uint32_t want = sp == BLITS_KEY ? canvas_value(x, y) : surface_value(sp);
+                    uint32_t sp = blits_copy_pixel(i, x - r->left, y - r->top, l.sprite_size);
+                    BOOL through = sp == BLITS_KEY && i != BLITS_STRETCH;
+                    uint32_t want = through ? canvas_value(x, y) : surface_value(sp);
                     uint32_t v = read_value(base, pitch, x, y);
 
                     if (!same_colour(v, want))
                     {
-                        check_fail("%s: pixel %d, %d is %s, should be %s (%s)", i ? "BltFast" : "Blt", x, y,
+                        check_fail("%s: pixel %d, %d is %s, should be %s (%s)", copy_names[i], x, y,
                                    value_text(v, a, sizeof(a)), value_text(want, b, sizeof(b)),
-                                   sp == BLITS_KEY ? "the colour key lets the background through" : "the sprite");
+                                   through ? "the colour key lets the background through" : "the sprite");
                         break;
                     }
                 }

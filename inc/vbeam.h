@@ -50,4 +50,7 @@ BOOL vbeam_flip_pending(void);
    into that buffer waits for the flip, as on hardware. */
 void vbeam_wait_flip_shown(void);
 
+/* Closes the calling thread's timer (DLL_THREAD_DETACH) */
+void vbeam_thread_exit(void);
+
 #endif

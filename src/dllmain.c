@@ -15,6 +15,7 @@
 #include "delay_imports.h"
 #include "keyboard.h"
 #include "vbeam.h"
+#include "blt.h"
 
 
 /* export for cncnet cnc games */
@@ -193,6 +194,14 @@ BOOL WINAPI DllMain(HANDLE hDll, DWORD dwReason, LPVOID lpReserved)
         {
             util_set_thread_affinity(GetCurrentThreadId());
         }
+
+        break;
+    }
+    case DLL_THREAD_DETACH:
+    {
+        vbeam_thread_exit();
+        blt_thread_exit();
+        break;
     }
     }
 

@@ -862,7 +862,8 @@ static void pat_fade(Canvas* c, const PatternContext* ctx)
 
 /* Four panels below a band for the info text: colour fills, a sprite
    blitted with Blt and a source colour key, the same with BltFast, and GDI
-   text. Every colour is in the 8-bit palette. */
+   text; under the sprites, Blt stretches it. Every colour is in the 8-bit
+   palette. */
 void blits_layout(int w, int h, uint32_t frame, BlitsLayout* l)
 {
     static const uint32_t fills[4] = { COL(255, 0, 0), COL(0, 255, 0), COL(0, 0, 255), WHITE };
@@ -904,23 +905,36 @@ void blits_layout(int w, int h, uint32_t frame, BlitsLayout* l)
         l->fill_color[i] = fills[i];
     }
 
-    /* The sprite moves back and forth, the two copies out of step */
+    /* The sprite moves back and forth along the top of its panel, the Blt
+       and BltFast copies out of step */
     int ch = content[1].bottom - content[1].top;
     cw = content[1].right - content[1].left;
-    int size = ch < cw / 2 ? ch : cw / 2;
+    int size = ch / 3 < cw / 4 ? ch / 3 : cw / 4;
     l->sprite_size = size < 4 ? 4 : size;
+    int s = l->sprite_size;
 
     for (int i = 0; i < 2; i++)
     {
         RECT* a = &content[1 + i];
         l->key_area[i] = *a;
 
-        int range = (a->right - a->left) - l->sprite_size;
+        int range = (a->right - a->left) - s;
         int speed = (a->right - a->left) / 120 > 1 ? (a->right - a->left) / 120 : 1;
         int t = (int)(frame * (uint32_t)speed) + (i ? range : 0);
+        int x = a->left + (range > 0 ? triangle(t, range) : 0);
 
-        l->sprite_pos[i].x = a->left + (range > 0 ? triangle(t, range) : 0);
-        l->sprite_pos[i].y = a->top + ((a->bottom - a->top) - l->sprite_size) / 2;
+        SetRect(&l->copy[BLITS_BLT + i], x, a->top, x + s, a->top + s);
+    }
+
+    /* Under them, the stretched copies: whole multiples of its size, so any
+       DirectDraw picks the same source pixels */
+    for (int i = 0; i < 2; i++)
+    {
+        RECT* a = &content[1 + i];
+        int sw = s * (i ? 3 : 2), sh = s * 2;
+        int x = a->left + ((a->right - a->left) - sw) / 2;
+
+        SetRect(&l->copy[BLITS_STRETCH_MIRROR + i], x, a->bottom - sh, x + sw, a->bottom);
     }
 
     l->gdi_area = content[3];
@@ -931,17 +945,27 @@ void blits_layout(int w, int h, uint32_t frame, BlitsLayout* l)
         l->text_height = 8;
 }
 
-/* A yellow disc with a blue square in it, on the key colour */
+/* A yellow disc with a blue square in its top left, on the key colour: off
+   centre, so a wrong mirroring shows */
 uint32_t blits_sprite_pixel(int x, int y, int size)
 {
     double r = size / 2.0;
     double dx = x + 0.5 - r, dy = y + 0.5 - r;
 
-    if (x >= size / 3 && x < size - size / 3 && y >= size / 3 && y < size - size / 3)
+    if (x >= size / 6 && x < size / 2 && y >= size / 6 && y < size / 2)
         return COL(0, 0, 255);
     if (dx * dx + dy * dy <= r * r)
         return COL(255, 255, 0);
     return BLITS_KEY;
+}
+
+uint32_t blits_copy_pixel(int copy, int x, int y, int size)
+{
+    if (copy == BLITS_STRETCH_MIRROR)
+        return blits_sprite_pixel(size - 1 - x / 2, size - 1 - y / 2, size);
+    if (copy == BLITS_STRETCH)
+        return blits_sprite_pixel(x / 3, y / 2, size);
+    return blits_sprite_pixel(x, y, size);
 }
 
 void blits_text(int line, uint32_t frame, char* buf, int len)
@@ -956,7 +980,7 @@ void blits_text(int line, uint32_t frame, char* buf, int len)
 static void pat_blits(Canvas* c, const PatternContext* ctx)
 {
     static const char* titles[4] = {
-        "Blt colour fill", "Blt, source colour key", "BltFast, source colour key", "GDI text (GetDC)",
+        "Blt colour fill", "Blt, colour key; stretch, mirror", "BltFast, colour key; Blt stretch", "GDI text (GetDC)",
     };
 
     int w = c->w, h = c->h;
@@ -999,14 +1023,18 @@ static void pat_blits(Canvas* c, const PatternContext* ctx)
     for (int i = 0; i < 4; i++)
         cv_rect(c, l.fill[i].left, l.fill[i].top, l.fill[i].right, l.fill[i].bottom, l.fill_color[i]);
 
-    for (int i = 0; i < 2; i++)
-        for (int y = 0; y < l.sprite_size; y++)
-            for (int x = 0; x < l.sprite_size; x++)
+    for (int i = 0; i < BLITS_COPIES; i++)
+    {
+        const RECT* r = &l.copy[i];
+
+        for (int y = r->top; y < r->bottom; y++)
+            for (int x = r->left; x < r->right; x++)
             {
-                uint32_t p = blits_sprite_pixel(x, y, l.sprite_size);
-                if (p != BLITS_KEY)
-                    cv_put(c, l.sprite_pos[i].x + x, l.sprite_pos[i].y + y, p);
+                uint32_t p = blits_copy_pixel(i, x - r->left, y - r->top, l.sprite_size);
+                if (p != BLITS_KEY || i == BLITS_STRETCH)
+                    cv_put(c, x, y, p);
             }
+    }
 
     for (int i = 0; i < BLITS_LINES; i++)
     {
