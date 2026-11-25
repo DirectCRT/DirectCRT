@@ -42,6 +42,7 @@ static float g_pinned_scroll;
 static int g_capture = -1;     /* the hotkey being set */
 static int g_slider = -1;      /* the slider being dragged, and its value */
 static int g_slider_value;
+static DWORD g_slider_written_ms;
 static int g_number = -1;      /* the number box being typed in, and its number */
 static int g_number_value;
 static int g_text = -1;        /* the text being edited, and its text */
@@ -1119,11 +1120,18 @@ static void menu_number(int setting, const SETTING* s, float F)
 
     ImGui::PopStyleColor(tint ? 5 : 2);
 
-    /* Written when it's let go: a picture setting sets the picture up again */
-    if (ImGui::IsItemDeactivated() && g_slider == setting)
+    /* Written while it's dragged, so what it changes follows, and when it's
+     * let go; a SETTING_SLOW one only then */
+    bool released = ImGui::IsItemDeactivated();
+
+    if (g_slider == setting &&
+        (released || (!(s->flags & SETTING_SLOW) && GetTickCount() - g_slider_written_ms >= MENU_DRAG_WRITE_MS)))
     {
         menu_write_int(setting, value, g_slider_value);
-        g_slider = -1;
+        g_slider_written_ms = GetTickCount();
+
+        if (released)
+            g_slider = -1;
     }
 
     ImGui::SameLine();

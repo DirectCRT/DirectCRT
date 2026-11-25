@@ -100,7 +100,7 @@ static const SETTING g_settings[] = {
         "0 = unlimited\n"
         "1-1000 = at most this many frames a second\n"
         "Note: Does not have an impact on the game speed, to limit your game speed use 'maxgameticks='",
-        T_TIMING, "Rendering rate limit", "-1=screen rate|0=unlimited", 1, 1000, SETTING_LIVE, .icon = ICON_SPEED },
+        T_TIMING, "Rendering rate limit", "-1=screen rate|0=unlimited", 1, 1000, SETTING_LIVE, SETTING_SLOW, .icon = ICON_SPEED },
 
     { SETTING_BOOL, "vsync", "false",
         "Vertical synchronization, enable if you get tearing\n"
@@ -330,7 +330,7 @@ static const SETTING g_settings[] = {
         "-2 = same as -1 but force full redraw\n"
         "1-1000 = custom FPS\n"
         "Note: Set this to a low value such as 5 or 10 if some parts of the game are not being displayed (e.g. menus or loading screens)",
-        T_TIMING, "Minimum frame rate", "0=disabled|-1=the rendering rate limit|-2=the limit, full redraw", 1, 1000, SETTING_LIVE, .icon = ICON_HOURGLASS_BOTTOM },
+        T_TIMING, "Minimum frame rate", "0=disabled|-1=the rendering rate limit|-2=the limit, full redraw", 1, 1000, SETTING_LIVE, SETTING_SLOW, .icon = ICON_HOURGLASS_BOTTOM },
 
     { SETTING_BOOL, "nonexclusive", "true",
         "Disable fullscreen-exclusive mode for the opengl renderer\n"

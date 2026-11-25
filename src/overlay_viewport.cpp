@@ -20,10 +20,6 @@ extern "C" {
 #include "settings.h"
 }
 
-/* While a slider or the picture is dragged, how often it's written: the
- * picture follows, without setting it up again every frame */
-#define DRAG_WRITE_MS 40
-
 static DWORD g_slider_written_ms;
 
 /* A viewport's kind, as crt_auto.c reads it, and its numbers: the size, or
@@ -198,7 +194,7 @@ void menu_viewport(int setting, const SETTING* s, float F)
             write_mode = mode;
             wa = n;
         }
-        else if (live >= 0 && GetTickCount() - g_slider_written_ms >= DRAG_WRITE_MS)
+        else if (live >= 0 && GetTickCount() - g_slider_written_ms >= MENU_DRAG_WRITE_MS)
         {
             write_mode = mode;
             wa = live;
@@ -233,7 +229,7 @@ void menu_viewport(int setting, const SETTING* s, float F)
 
         int drag = live_h >= 0 ? live_h : live_v;
 
-        if (write_mode < 0 && drag >= 0 && GetTickCount() - g_slider_written_ms >= DRAG_WRITE_MS)
+        if (write_mode < 0 && drag >= 0 && GetTickCount() - g_slider_written_ms >= MENU_DRAG_WRITE_MS)
         {
             write_mode = mode;
             wa = linked || live_h >= 0 ? drag : a;
@@ -448,7 +444,7 @@ void menu_pan_draw(int width, int canvas_height, float F)
         if (!ImGui::IsMouseDown(ImGuiMouseButton_Left))
             g_pan_dragging = false;
 
-        if (g_pan_unwritten && (!g_pan_dragging || GetTickCount() - g_pan_written_ms >= DRAG_WRITE_MS))
+        if (g_pan_unwritten && (!g_pan_dragging || GetTickCount() - g_pan_written_ms >= MENU_DRAG_WRITE_MS))
             pan_write();
     }
 

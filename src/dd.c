@@ -871,7 +871,7 @@ void dd_reload_settings(BOOL now)
     /* Only when another one would run: OpenGL can wait (dd_opengl_waits) */
     BOOL renderer_changed = _stricmp(old.renderer, g_config.renderer) != 0 &&
         (!g_ddraw.renderer || dd_next_renderer() != g_ddraw.renderer);
-    /* What the render thread starts with */
+    /* What the render thread starts with; the numbers are SETTING_SLOW in settings.c */
     BOOL render_changed = old.maxfps != g_config.maxfps || old.vsync != g_config.vsync ||
         old.adjmouse != g_config.adjmouse || old.minfps != g_config.minfps;
     BOOL picture_changed = memcmp(&crt, &g_config.crt, sizeof(crt)) != 0 || window_changed ||

@@ -8,6 +8,10 @@ extern "C" {
 #include "settings.h"
 }
 
+/* While a slider or the picture is dragged, how often it's written: the
+ * picture follows, without being set up again every frame */
+#define MENU_DRAG_WRITE_MS 40
+
 /* The frame's keyboard and mouse, from overlay_menu.c's queue */
 void menu_input(int width, int canvas_height);
 

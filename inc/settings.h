@@ -34,6 +34,8 @@ typedef enum SETTING_APPLY
 #define SETTING_COMMENTED 2 /* written commented out (";key=value") */
 #define SETTING_JOINED    4 /* the OSD shows it on the row of the setting before */
 #define SETTING_GATE      8 /* SETTING_BOOL: while it's off, the OSD greys out the rest of its tab */
+#define SETTING_SLOW     16 /* applying it stops the renderer a while (dd.c's render_changed):
+                               the OSD's slider writes it when it's let go, not while it's dragged */
 
 typedef struct SETTING
 {
