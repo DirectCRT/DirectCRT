@@ -66,5 +66,5 @@ or (at your option) any later version. It's a fork of cnc-ddraw by
 FunkyFr3sh, and the code that comes from cnc-ddraw is also available
 under its original MIT licence. The scaling, colour and CRT shading are
 ported from DOSBox Staging (GPL-2.0-or-later). DirectCRT-LICENSE.txt
-has these licences and those of the third-party code and fonts in
-ddraw.dll.
+has the copyrights, these licences and those of the third-party code
+and fonts in ddraw.dll, and a link to this build's source code.

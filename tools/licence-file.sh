@@ -39,7 +39,37 @@ third-party code and fonts built into ddraw.dll keep their own licences
 8. Source Sans 3, the OSDs' font: SIL Open Font License 1.1
 9. Material Icons, the OSDs' icons: Apache License 2.0
 10. ddtest's test photo: CC BY-SA 4.0
+
+
+COPYRIGHT
+
+DirectCRT: Copyright (c) 2026 Vedran Vekić
+
+cnc-ddraw, which DirectCRT is a fork of:
 EOF
+    grep -h "^Copyright" LICENSE-cnc-ddraw.txt
+    cat <<'EOF'
+
+The scaling, the colour and crt-auto, ported from DOSBox Staging
+(GPL-2.0-or-later, as in 1):
+Copyright (c) 2019-2026 The DOSBox Staging Team
+Copyright (c) 2002-2021 The DOSBox Team
+
+DOSBox Staging's shaders:
+EOF
+    grep -h "SPDX-FileCopyrightText" "$shaders"/*/*.glsl |
+        sed -E 's#^// SPDX-FileCopyrightText: +#Copyright (c) #' | sort -u
+    cat <<'EOF'
+
+The third-party code, the fonts and the photo: in their sections below.
+
+
+SOURCE CODE
+
+EOF
+    ref="$(git describe --tags --exact-match --match='v[0-9]*' --exclude='v*.*.*.*' 2>/dev/null || git rev-parse HEAD)"
+    echo "The source code of this build:"
+    echo "https://github.com/DirectCRT/DirectCRT/tree/$ref"
 
     section "1. DirectCRT: GNU General Public License, version 2 or later"
     cat LICENSE
