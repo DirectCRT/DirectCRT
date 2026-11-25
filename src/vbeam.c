@@ -10,6 +10,11 @@ static CRITICAL_SECTION g_cs; /* g_flip_due; held only to read or set it, never 
 static volatile LONG g_high_res = -1; /* whether high-resolution timers work; -1 = not tried yet */
 static LONGLONG g_flip_due; /* when the pending flip is shown; 0 if none */
 
+/* Each waiting thread's own timer, so threads can wait at once; made at its
+   first wait, not every frame, and closed by vbeam_thread_exit */
+static __declspec(thread) HANDLE g_timer;
+static __declspec(thread) BOOL g_timer_tried;
+
 LONGLONG vbeam_next_begin(LONGLONG t, LONGLONG period, LONGLONG active)
 {
     if (t < active)
@@ -88,9 +93,8 @@ static LONGLONG now(void)
     return c.QuadPart - g_origin;
 }
 
-/* A timer of the waiting thread's own, so threads can wait at once. A
-   high-resolution timer wakes within about half a millisecond; Windows before
-   10 1803 refuses the flag, and then an ordinary timer is used */
+/* A high-resolution timer wakes within about half a millisecond; Windows
+   before 10 1803 refuses the flag, and then an ordinary timer is used */
 static HANDLE create_timer(void)
 {
     typedef HANDLE (WINAPI *CREATETIMEREXW)(LPSECURITY_ATTRIBUTES, LPCWSTR, DWORD, DWORD);
@@ -116,9 +120,6 @@ static HANDLE create_timer(void)
 /* Never returns before t. Call without g_cs held */
 static void wait_until(LONGLONG t)
 {
-    HANDLE h = NULL;
-    BOOL tried = FALSE;
-
     for (;;)
     {
         LONGLONG left = t - now();
@@ -128,20 +129,20 @@ static void wait_until(LONGLONG t)
 
         LONGLONG left_100ns = left * 10000000 / g_freq;
 
-        if (left_100ns > 2000 && !tried)
+        if (left_100ns > 2000 && !g_timer_tried)
         {
-            h = create_timer();
-            tried = TRUE;
+            g_timer = create_timer();
+            g_timer_tried = TRUE;
         }
 
-        if (left_100ns > 2000 && h)
+        if (left_100ns > 2000 && g_timer)
         {
             LARGE_INTEGER due = { 0 };
             due.QuadPart = -left_100ns;
 
-            if (SetWaitableTimer(h, &due, 0, NULL, NULL, FALSE))
+            if (SetWaitableTimer(g_timer, &due, 0, NULL, NULL, FALSE))
             {
-                WaitForSingleObject(h, (DWORD)(left_100ns / 10000) + 5);
+                WaitForSingleObject(g_timer, (DWORD)(left_100ns / 10000) + 5);
                 continue;
             }
         }
@@ -151,9 +152,15 @@ static void wait_until(LONGLONG t)
         else
             SwitchToThread();
     }
+}
 
-    if (h)
-        CloseHandle(h);
+void vbeam_thread_exit(void)
+{
+    if (g_timer)
+        CloseHandle(g_timer);
+
+    g_timer = NULL;
+    g_timer_tried = FALSE;
 }
 
 static LONGLONG flip_due(void)

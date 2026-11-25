@@ -193,6 +193,13 @@ BOOL WINAPI DllMain(HANDLE hDll, DWORD dwReason, LPVOID lpReserved)
         {
             util_set_thread_affinity(GetCurrentThreadId());
         }
+
+        break;
+    }
+    case DLL_THREAD_DETACH:
+    {
+        vbeam_thread_exit();
+        break;
     }
     }
 
