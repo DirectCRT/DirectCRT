@@ -1,6 +1,7 @@
 #include <windows.h>
 #include <intrin.h>
 #include <stdlib.h>
+#include <string.h>
 #include "debug.h"
 #include "blt.h"
 
@@ -816,11 +817,27 @@ void blt_bgr888_to_bgra8888(
     for (int y = 0; y < dst_h; y++)
     {
         unsigned int* d = (unsigned int*)((unsigned char*)dst + dst_p * (y + dst_y)) + dst_x;
-        unsigned char* s = src + src_p * (y + src_y) + src_x * 3;
+        const unsigned char* s = src + src_p * (y + src_y) + src_x * 3;
+        int x = 0;
 
-        for (int x = 0; x < dst_w; x++, s += 3)
+        /* Four pixels from three dwords, not twelve byte loads */
+        for (; x + 4 <= dst_w; x += 4, s += 12)
         {
-            *d++ = 0xFF000000 | blt_get24(s);
+            unsigned int a, b, c;
+
+            memcpy(&a, s, 4);
+            memcpy(&b, s + 4, 4);
+            memcpy(&c, s + 8, 4);
+
+            d[x] = 0xFF000000 | a;
+            d[x + 1] = 0xFF000000 | (a >> 24) | (b << 8);
+            d[x + 2] = 0xFF000000 | (b >> 16) | (c << 16);
+            d[x + 3] = 0xFF000000 | (c >> 8);
+        }
+
+        for (; x < dst_w; x++, s += 3)
+        {
+            d[x] = 0xFF000000 | blt_get24(s);
         }
     }
 }
