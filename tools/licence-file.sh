@@ -26,7 +26,7 @@ DirectCRT as a whole is licensed under the GNU General Public License,
 version 2 or (at your option) any later version (1). The code that comes
 from cnc-ddraw is also available under its original MIT licence (2). The
 third-party code and fonts built into ddraw.dll keep their own licences
-(3 to 9).
+(3 to 9), and so does the photo built into ddtest.exe (10).
 
 1. DirectCRT: GNU General Public License, version 2 or later
 2. cnc-ddraw: MIT
@@ -38,6 +38,7 @@ third-party code and fonts built into ddraw.dll keep their own licences
 7. Khronos OpenGL headers: MIT-style
 8. Source Sans 3, the OSDs' font: SIL Open Font License 1.1
 9. Material Icons, the OSDs' icons: Apache License 2.0
+10. ddtest's test photo: CC BY-SA 4.0
 EOF
 
     section "1. DirectCRT: GNU General Public License, version 2 or later"
@@ -74,4 +75,7 @@ EOF
 
     section "9. Material Icons, the OSDs' icons: Apache License 2.0"
     cat third_party/fonts/material-icons/LICENSE
+
+    section "10. ddtest's test photo: CC BY-SA 4.0"
+    cat tools/ddtest/testimage-LICENSE.txt
 } > "$1"

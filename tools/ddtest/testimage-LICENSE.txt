@@ -1,0 +1,7 @@
+testimage.png, the landscape photo built into ddtest.exe
+
+© 2026 Vedran Vekić
+
+This photo is licensed under the Creative Commons Attribution-ShareAlike
+4.0 International License (CC BY-SA 4.0). To view a copy of this
+licence, visit https://creativecommons.org/licenses/by-sa/4.0/

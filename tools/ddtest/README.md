@@ -166,3 +166,10 @@ The fullscreen runs take over the screen, about 40 seconds for the whole
 table (three minutes with `-Full`); leave the mouse and keyboard alone. A frame whose surfaces were lost
 (for example just after a mode switch) isn't checked, so a run can check a
 few frames fewer than it ran.
+
+## Licence
+
+ddtest is part of DirectCRT and under its licence, the GPL v2 or later. The
+test image's photo, `testimage.png`, is © 2026 Vedran Vekić and licensed under
+[CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/); see
+`testimage-LICENSE.txt`.
