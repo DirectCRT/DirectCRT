@@ -353,27 +353,111 @@ static const SETTING g_settings[] = {
 
     INI_TEXT(
         "\n"
-        "; Undocumented compatibility settings - These will probably not solve your problem, you should rather focus on the settings above\n"),
+        "; Advanced compatibility settings: they rarely help, try the ones above first\n"
+        "\n"),
 
-    { SETTING_BOOL, "fix_alt_key_stuck", "false", NULL, NULL, NULL, BOOL_TF, 0, 0, SETTING_RESTART, .flags = SETTING_PACKED },
-    { SETTING_BOOL, "game_handles_close", "false", NULL, NULL, NULL, BOOL_TF, 0, 0, SETTING_RESTART, .flags = SETTING_PACKED },
-    { SETTING_BOOL, "fix_not_responding", "false", NULL, NULL, NULL, BOOL_TF, 0, 0, SETTING_RESTART, .flags = SETTING_PACKED },
-    { SETTING_BOOL, "no_compat_warning", "false", NULL, NULL, NULL, BOOL_TF, 0, 0, SETTING_RESTART, .flags = SETTING_PACKED },
-    { SETTING_INT, "guard_lines", "200", NULL, NULL, NULL, NULL, 0, 10000, SETTING_RESTART, .flags = SETTING_PACKED },
-    { SETTING_INT, "max_resolutions", "0", NULL, NULL, NULL, NULL, 0, 10000, SETTING_RESTART, .flags = SETTING_PACKED },
-    { SETTING_BOOL, "lock_surfaces", "false", NULL, NULL, NULL, BOOL_TF, 0, 0, SETTING_RESTART, .flags = SETTING_PACKED },
-    { SETTING_BOOL, "flipclear", "false", NULL, NULL, NULL, BOOL_TF, 0, 0, SETTING_RESTART, .flags = SETTING_PACKED },
-    { SETTING_BOOL, "rgb555", "false", NULL, NULL, NULL, BOOL_TF, 0, 0, SETTING_RESTART, .flags = SETTING_PACKED },
-    { SETTING_BOOL, "no_dinput_hook", "false", NULL, NULL, NULL, BOOL_TF, 0, 0, SETTING_RESTART, .flags = SETTING_PACKED },
-    { SETTING_BOOL, "center_cursor_fix", "false", NULL, NULL, NULL, BOOL_TF, 0, 0, SETTING_RESTART, .flags = SETTING_PACKED },
-    { SETTING_STRING, "fake_mode", "640x480x32", NULL, NULL, NULL, NULL, 0, 0, SETTING_RESTART, .flags = SETTING_PACKED | SETTING_COMMENTED },
-    { SETTING_BOOL, "lock_mouse_top_left", "false", NULL, NULL, NULL, BOOL_TF, 0, 0, SETTING_RESTART, .flags = SETTING_PACKED },
-    { SETTING_STRING, "win_version", "95", NULL, NULL, NULL, NULL, 0, 0, SETTING_RESTART, .flags = SETTING_PACKED | SETTING_COMMENTED },
-    { SETTING_INT, "hook", "4", NULL, NULL, NULL, NULL, 0, 4, SETTING_RESTART, .flags = SETTING_PACKED },
-    { SETTING_BOOL, "limit_gdi_handles", "false", NULL, NULL, NULL, BOOL_TF, 0, 0, SETTING_RESTART, .flags = SETTING_PACKED },
-    { SETTING_BOOL, "remove_menu", "false", NULL, NULL, NULL, BOOL_TF, 0, 0, SETTING_RESTART, .flags = SETTING_PACKED },
-    { SETTING_INT, "refresh_rate", "0", NULL, NULL, NULL, NULL, 0, 1000, SETTING_RESTART, .flags = SETTING_PACKED },
-    { SETTING_BOOL, "terminate_process", "false", NULL, NULL, NULL, BOOL_TF, 0, 0, SETTING_RESTART, .flags = SETTING_PACKED },
+    OSD_HEADING(T_COMPAT, "Advanced", "These rarely help: try the settings above first"),
+
+    { SETTING_BOOL, "fix_alt_key_stuck", "false",
+        "Release the Alt key when the game gets the focus back\n"
+        "Note: For games that act as if Alt is still held down after Alt+Tab",
+        T_COMPAT, "Release Alt after Alt+Tab", BOOL_TF, .icon = ICON_KEYBOARD },
+
+    { SETTING_BOOL, "game_handles_close", "false",
+        "Closing the window (its X button, Alt+F4) goes to the game, instead of ending it at once\n"
+        "Note: For games that ask before quitting, or save when they're closed",
+        T_COMPAT, "The game handles closing", BOOL_TF, .icon = ICON_CLOSE },
+
+    { SETTING_BOOL, "fix_not_responding", "false",
+        "Keep Windows from marking the window \"Not Responding\" while the game is busy drawing:\n"
+        "  when the game hasn't read its messages for a second, they're read when it blits or locks a surface",
+        T_COMPAT, "Fix \"Not Responding\"", BOOL_TF, .icon = ICON_HOURGLASS_BOTTOM },
+
+    { SETTING_BOOL, "no_compat_warning", "false",
+        "Don't warn when Windows' compatibility modes are set for the game's executable",
+        T_COMPAT, "No compatibility mode warning", BOOL_TF, .icon = ICON_VISIBILITY_OFF },
+
+    { SETTING_INT, "guard_lines", "200",
+        "Spare lines under each surface, so a game that draws past a surface's bottom doesn't crash",
+        T_COMPAT, "Guard lines under surfaces", NULL, 0, 10000, .icon = ICON_LAYERS },
+
+    { SETTING_INT, "max_resolutions", "0",
+        "The most display modes the game is offered\n"
+        "0 = all of them\n"
+        "Note: For games that crash with a long list of modes",
+        T_COMPAT, "Most display modes offered", "0=all of them", 1, 10000, .icon = ICON_VIEW_LIST },
+
+    { SETTING_BOOL, "lock_surfaces", "false",
+        "The game's picture isn't read while the game is drawing into it\n"
+        "Note: For games that show half-drawn frames; it can slow the game down",
+        T_COMPAT, "Wait for the game's drawing", BOOL_TF, .icon = ICON_LOCK_OPEN },
+
+    { SETTING_BOOL, "flipclear", "false",
+        "Clear the back buffer to black after each flip\n"
+        "Note: For games that leave pieces of old pictures behind",
+        T_COMPAT, "Clear after each flip", BOOL_TF, .icon = ICON_FILTER_NONE },
+
+    { SETTING_BOOL, "rgb555", "false",
+        "16-bit colour is RGB555 (5 bits of green) instead of RGB565\n"
+        "Note: For 16-bit games whose colours are wrong (a green or purple tint)",
+        T_COMPAT, "16-bit colour as RGB555", BOOL_TF, .icon = ICON_PALETTE },
+
+    { SETTING_BOOL, "no_dinput_hook", "false",
+        "Don't hook DirectInput\n"
+        "Note: Without the hook, a game's exclusive DirectInput mouse and keyboard stay exclusive, so the cursor\n"
+        "  can't leave the window, and the game gets their input while the settings OSD is open",
+        T_COMPAT, "Don't hook DirectInput", BOOL_TF, .icon = ICON_MOUSE },
+
+    { SETTING_BOOL, "center_cursor_fix", "false",
+        "Scale the cursor so it can be in the exact middle of the screen\n"
+        "Note: For games that need it there (Worms 2, Atlantis)",
+        T_COMPAT, "Cursor in the exact middle", BOOL_TF, .icon = ICON_CENTER_FOCUS_STRONG },
+
+    { SETTING_STRING, "fake_mode", "",
+        "A display mode for games that only run in a window, so they're scaled like a fullscreen game\n"
+        "WxHxBPP = this mode, for example 640x480x16\n"
+        "Note: Empty = off",
+        T_COMPAT, "Mode for windowed games", "=off", .icon = ICON_PHOTO_SIZE_SELECT_LARGE },
+
+    { SETTING_BOOL, "lock_mouse_top_left", "false",
+        "The cursor isn't moved with the picture: the game's (0,0) is the window's top left corner\n"
+        "Note: For games that draw into a child window of their own",
+        T_COMPAT, "Cursor from the top left", BOOL_TF, .icon = ICON_MOUSE },
+
+    { SETTING_CHOICE, "win_version", "",
+        "The Windows version the game is told it runs on\n"
+        "Note: For games that refuse to run on a newer Windows",
+        T_COMPAT, "Windows version", "=the real one|95|98|nt4=NT 4|2000|xp=XP", .icon = ICON_DESKTOP_WINDOWS },
+
+    { SETTING_CHOICE, "hook", "4",
+        "Where DirectCRT hooks the Windows functions the game calls (its window, the cursor, ...)\n"
+        "0 = nowhere\n"
+        "1 = the game's executable\n"
+        "2 = everywhere, with Detours\n"
+        "3 = the game's executable, the DLLs in its folder, and the system's video and sound DLLs\n"
+        "4 = 3, without the functions the game looks up itself while ddraw.dll may be unloaded\n"
+        "Note: Try 2 or 1 if the window, the cursor or videos misbehave",
+        T_COMPAT, "Hooks", "0=nowhere|1=the executable|2=everywhere|3=the game's folder|4=automatic", .icon = ICON_BUILD },
+
+    { SETTING_BOOL, "limit_gdi_handles", "false",
+        "Only surfaces the size of the screen (and Claw's 128x128 ones) get a GDI device context\n"
+        "Note: For games that make so many surfaces they run out of GDI handles",
+        T_COMPAT, "Limit GDI handles", BOOL_TF, .icon = ICON_MEMORY },
+
+    { SETTING_BOOL, "remove_menu", "false",
+        "Remove the game's menu bar when it runs in a window",
+        T_COMPAT, "No menu bar", BOOL_TF, .icon = ICON_WEB_ASSET },
+
+    { SETTING_INT, "refresh_rate", "0",
+        "The monitor's refresh rate when DirectCRT switches its mode (display=original)\n"
+        "0 = the monitor's default\n"
+        "Note: The game's refresh rate is 'emulated_refresh'",
+        T_COMPAT, "Monitor rate (original)", "0=the default", 1, 1000, .icon = ICON_SYNC },
+
+    { SETTING_BOOL, "terminate_process", "false",
+        "When the window is closed, end the game at once, without the rest of its shutdown\n"
+        "Note: For games that hang or crash when they quit",
+        T_COMPAT, "End at once when closed", BOOL_TF, .icon = ICON_RESTART_ALT },
 
     INI_TEXT(
         "\n"

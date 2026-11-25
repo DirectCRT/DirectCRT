@@ -114,7 +114,7 @@ What we take:
 |---|---|
 | DirectDraw and Direct3D stub objects, IAMMediaStream, WinAPI/GDI/WinG hooks, DirectInput hook | Keep |
 | About 280 per-game profiles in `src/config.c` | Removed in phase 3: they filled `directcrt.ini` with sections nobody reads. Sections named after a game's executable were kept until the settings OSD, then dropped: the ini is already the game's own |
-| Compatibility settings (`nonexclusive`, `singlecpu`, `fixchilds`, `guard_lines`, `fake_mode`, `win_version`, `hook`, ...) | Keep, on an advanced page |
+| Compatibility settings (`nonexclusive`, `singlecpu`, `fixchilds`, `guard_lines`, `fake_mode`, `win_version`, `hook`, ...) | Done: kept, in the settings OSD's Compatibility group; the ones cnc-ddraw left undocumented are under its Advanced heading, with help written from the code |
 | Game-specific hacks (`armadahack`, `tshack`, ...) | Removed in phase 3 with the profiles, which were the only thing that set them. The fixes cnc-ddraw applies by itself (Battle.net dialogs, StarCraft's and Red Alert's cursor, Age of Empires II's text boxes, Claw) stay |
 | Window modes, Alt+Enter, saved window position, `toggle_borderless`, `toggle_upscaled` | Done in phase 3: replaced with `display` and the `window_*` settings (see [Display settings](#display-settings)). Windowed games keep the desktop's bit depth (32-bit) from phase 1; `windowed_bpp=16` brings the old 16-bit back |
 | Display modes: 8, 16, 24 and 32-bit | Done: 24-bit added (Direct3D 11 converts to 32-bit on upload, OpenGL takes it as is); some games use it |
