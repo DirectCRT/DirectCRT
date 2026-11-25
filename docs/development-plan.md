@@ -1,6 +1,7 @@
 # DirectCRT development plan
 
-Status: phase 3 started (the display settings are done), as of 23 November 2026.
+Status: phase 4 under way (the status and settings OSDs are done; safe mode,
+the first-start toast and the tour aren't), as of 25 November 2026.
 
 ## Goal
 
@@ -116,7 +117,7 @@ What we take:
 | Compatibility settings (`nonexclusive`, `singlecpu`, `fixchilds`, `guard_lines`, `fake_mode`, `win_version`, `hook`, ...) | Keep, on an advanced page |
 | Game-specific hacks (`armadahack`, `tshack`, ...) | Removed in phase 3 with the profiles, which were the only thing that set them. The fixes cnc-ddraw applies by itself (Battle.net dialogs, StarCraft's and Red Alert's cursor, Age of Empires II's text boxes, Claw) stay |
 | Window modes, Alt+Enter, saved window position, `toggle_borderless`, `toggle_upscaled` | Done in phase 3: replaced with `display` and the `window_*` settings (see [Display settings](#display-settings)). Windowed games keep the desktop's bit depth (32-bit) from phase 1; `windowed_bpp=16` brings the old 16-bit back |
-| Display modes: 8, 16, 24 and 32-bit | Done: 24-bit added (Direct3D 11 converts to 32-bit on upload, OpenGL and GDI take it as is); some games use it |
+| Display modes: 8, 16, 24 and 32-bit | Done: 24-bit added (Direct3D 11 converts to 32-bit on upload, OpenGL takes it as is); some games use it |
 | Plain "Fullscreen", which switches the monitor to the game's own resolution | Keep as `display=original`, opt-in, with help text saying the monitor gets the game's resolution and there's no CRT shading |
 | Frame limiter and VSync (`maxfps`, `limiter_type`, `maxgameticks`, `minfps`, `vsync`) | Keep |
 | Mouse (`adjmouse`, cursor-unlock hotkeys, cursor fixes) | Keep, driven by the new scaling code |
@@ -271,7 +272,8 @@ table.)
 
 ### Old settings
 
-An old key is read when its new one isn't set, with a line in the log. The
+An old key is read when its new one isn't set, with a line in the debug
+builds' log. The
 generated `directcrt.ini` only has the new keys.
 
 | Old | New |
@@ -423,8 +425,8 @@ otherwise keep the no-shading trap. `original` has to be chosen.
    the C++Builder config tool (`config/`).
    - Done: the display settings, as described above, with unit tests
      (`tests/test_display_settings.c`) and the old keys translated. Every
-     renderer uses crt-auto's layout and pipeline; `renderer=gdi` scales
-     with nearest neighbour into the same viewport. A mode switch that fails
+     renderer uses crt-auto's layout and pipeline (GDI's, with nearest
+     neighbour, until it was removed in phase 4). A mode switch that fails
      falls back to borderless fullscreen. The game profiles for ctp2, Jazz2,
      Jazz2_NonPlus and KKNDgame only set removed keys and are gone.
      Battle.net's dialogs are shown 1:1. Alt+Page Down makes the window fill
@@ -458,16 +460,16 @@ otherwise keep the no-shading trap. `original` has to be chosen.
      in a 24-bit mode, or with `resolutions=full`, so other games' mode
      lists don't change. Blits, colour fills and colour keys work on
      3-byte pixels; Direct3D 11 converts to BGRA on upload, OpenGL uploads
-     `GL_BGR`, GDI draws the DIB as is, and screenshots save it. The picture
-     matches 32-bit on all three renderers, and `regress.ps1` now covers
+     `GL_BGR`, and screenshots save it. The picture matches 32-bit on both
+     renderers, and `regress.ps1` now covers
      24-bit too (68 runs). Later cut to 32 runs of 20 frames by default:
      only IDirectDraw7 gets the full matrix, and `-Full` keeps all 68.
    - Done: screenshots. The key saves two PNGs of the same frame:
      `<game>_<time>_raw.png`, the game's own surface (8-bit with its
      palette), and `<game>_<time>_crt.png`, the finished frame as shown,
      at the window's or screen's size. The render thread takes both, reading
-     the frame back before it's presented (a staging texture, `glReadPixels`,
-     or a copy of the window for GDI), and a worker thread encodes them so
+     the frame back before it's presented (a staging texture or
+     `glReadPixels`), and a worker thread encodes them so
      a 4K PNG doesn't stall the game. The key wakes the render thread, so it
      works while the game isn't drawing. The shaded shots from Direct3D 11
      and OpenGL are the same to within 1 in 99.99% of pixels; the rest is
@@ -519,7 +521,7 @@ otherwise keep the no-shading trap. `original` has to be chosen.
      whether it applies live) now writes the default `directcrt.ini`, its
      comments included, and the OSD's groups (Display, Picture, Colour,
      Timing, Overlay, Other, Compatibility, Hotkeys). It's a panel down
-     the left of the screen (42% of the width, within 34 to 52 times the
+     the left of the screen (32% of the width, within 27 to 40 times the
      text size): a header naming the group in view, with the groups'
      icons to jump to them (a line under the icon glides along), a footer
      of keys, and one scrolling list of every setting, group after group.

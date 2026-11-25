@@ -48,10 +48,11 @@ DirectDraw reports the graphics card's real modes.
 
 Every run starts like a new game: a new test window, and `ddraw.dll` is loaded
 again (it's unloaded when a run stops), so it reads its settings again and
-forgets anything changed at runtime, such as Alt+Enter. Edits to `directcrt.ini`
-take effect on the next Run, except crt-auto's settings (`aspect`, `viewport`,
-`integer_scaling` and the colour settings), which apply during the run, within
-a second of saving the file.
+forgets anything changed at runtime, such as Alt+Enter. Most edits to
+`directcrt.ini` (the display, window, renderer, shader, picture, colour, frame
+rate, OSD and hotkey settings) apply during the run, within a second of saving
+the file. The rest take effect on the next Run; the settings OSD marks them as
+needing a restart.
 
 In the test window: **Esc** stops (and returns to the panel, which matters in
 exclusive fullscreen), **Left/Right** change the pattern, **Ctrl+arrows** move an
@@ -96,7 +97,7 @@ All patterns are generated for the current size.
 | Grey and colour ramps | gamma, banding, near-black detail |
 | Grid (16 x 12 cells) | geometry and cropping: the outermost pixels are a red border; cells are square on a 4:3 screen |
 | Pixel patterns | single-pixel checkerboards and lines: scanlines, phosphor masks, moire, integer scaling |
-| Geometry / aspect ratio | circles that should look round. The pixels are square (1:1), 1280 x 1024 included, except for fullscreen low resolution VGA modes (up to 720 wide, below 480 lines, no wider than 16:10, such as 320 x 200 and 640 x 400), which are drawn for a 4:3 screen with tall pixels, as games of the time were. That's crt-auto's `aspect=auto` rule. A blue square-pixel circle shows when the pixels aren't square. If they still look oval, the picture is being stretched (in DirectCRT, `maintas=false`) |
+| Geometry / aspect ratio | circles that should look round. The pixels are square (1:1), 1280 x 1024 included, except for fullscreen low resolution VGA modes (up to 720 wide, below 480 lines, no wider than 16:10, such as 320 x 200 and 640 x 400), which are drawn for a 4:3 screen with tall pixels, as games of the time were. That's crt-auto's `aspect=auto` rule. A blue square-pixel circle shows when the pixels aren't square. If they still look oval, the picture is being stretched (in DirectCRT, `aspect=stretch`) |
 | Dither patterns | checkerboard and ordered dithers next to the colour they should blend to |
 | Text | small to large text, coloured text, 80 and 40 columns across the screen |
 | Motion | sweeping bar and line, bouncing square, frame counter: tearing, VSync, frame pacing |
