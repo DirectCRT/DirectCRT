@@ -164,8 +164,7 @@ static const SETTING g_settings[] = {
     { SETTING_STRING, "viewport_offset", "0% 0%",
         "Moves the picture from where the viewport puts it, like a CRT's position controls\n"
         "H% V% = by percentages of the picture's width and height (-50% to 50%; e.g. 1.5% -2%), right and down\n"
-        "  for positive values. In the settings OSD, 'Move the picture' moves it with the arrow keys\n"
-        "This is DirectCRT's own setting; DOSBox Staging doesn't have it",
+        "  for positive values. In the settings OSD, 'Move the picture' moves it with the arrow keys",
         T_PICTURE, "Position", "0% 0%=Centred", 0, 0, SETTING_PICTURE, .icon = ICON_OPEN_WITH },
 
     { SETTING_CHOICE, "color_space", "srgb",
