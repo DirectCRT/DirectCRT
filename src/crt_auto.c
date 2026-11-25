@@ -180,15 +180,12 @@ static RECTF restricted_viewport(const CRT_VIEWPORT* v, const CRT_AUTO_DISPLAY* 
     switch (v->mode)
     {
     case CRT_VIEWPORT_RELATIVE:
-    {
-        /* A 4:3 box fitted to the canvas, then scaled; it can be larger
-         * than the canvas */
-        RECTF box = { 0, 0, 4, 3 };
-        box = scale_size_to_fit(box, canvas.w, canvas.h);
-        box.w *= v->width;
-        box.h *= v->height;
-        return box;
-    }
+        /* DOSBox's N% (GFX_LogicalToPixels(GFX_GetDesktopSize()).ScaleSize),
+         * with its own fraction each way. Not kept within the canvas: past
+         * 100% it goes past the screen's edges, like a CRT's size controls */
+        vp.w = desktop_logical(d->desktop_width, d->scale) * d->scale * v->width;
+        vp.h = desktop_logical(d->desktop_height, d->scale) * d->scale * v->height;
+        return vp;
 
     case CRT_VIEWPORT_LIMIT:
         /* GFX_LogicalToPixels */
@@ -199,12 +196,6 @@ static RECTF restricted_viewport(const CRT_VIEWPORT* v, const CRT_AUTO_DISPLAY* 
     case CRT_VIEWPORT_LIMIT_PX:
         vp.w = v->width;
         vp.h = v->height;
-        break;
-
-    case CRT_VIEWPORT_DESKTOP:
-        /* GFX_LogicalToPixels(GFX_GetDesktopSize()).ScaleSize(scale) */
-        vp.w = desktop_logical(d->desktop_width, d->scale) * d->scale * v->width;
-        vp.h = desktop_logical(d->desktop_height, d->scale) * d->scale * v->height;
         break;
 
     default:
@@ -816,7 +807,7 @@ int crt_auto_parse_viewport(const char* v, CRT_VIEWPORT* out)
         w /= 100.0f;
         h /= 100.0f;
 
-        if (w < 0.2f || w > 3.0f || h < 0.2f || h > 3.0f)
+        if (w < 0.1f || w > 3.0f || h < 0.1f || h > 3.0f)
             return 0;
 
         vp.mode = CRT_VIEWPORT_RELATIVE;
@@ -829,13 +820,7 @@ int crt_auto_parse_viewport(const char* v, CRT_VIEWPORT* out)
     }
     else if (!parse_size(v, &vp))
     {
-        float p;
-        if (!parse_percent(v, strlen(v), &p) || p < 1.0f || p > 100.0f)
-            return 0;
-
-        vp.mode = CRT_VIEWPORT_DESKTOP;
-        vp.width = p / 100.0f;
-        vp.height = p / 100.0f;
+        return 0;
     }
 
     *out = vp;

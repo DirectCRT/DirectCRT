@@ -97,16 +97,16 @@ typedef enum CRT_VIEWPORT_MODE
     CRT_VIEWPORT_FIT = 0,      /* viewport = fit: the whole canvas */
     CRT_VIEWPORT_LIMIT,        /* viewport = WxH: at most this size, in logical units */
     CRT_VIEWPORT_LIMIT_PX,     /* viewport = WxHpx: at most this size, in pixels */
-    CRT_VIEWPORT_DESKTOP,      /* viewport = N%: at most N% of the desktop */
-    CRT_VIEWPORT_RELATIVE      /* viewport = relative H% V%: a 4:3 box in the canvas, scaled */
+    CRT_VIEWPORT_RELATIVE,     /* viewport = relative H% V%: H% and V% of the desktop's size */
+    CRT_VIEWPORT_COUNT
 } CRT_VIEWPORT_MODE;
 
 typedef struct CRT_VIEWPORT
 {
     CRT_VIEWPORT_MODE mode;
 
-    /* LIMIT and LIMIT_PX: the size. DESKTOP: the fraction in width (0.01 to
-     * 1). RELATIVE: the horizontal and vertical scale (0.2 to 3) */
+    /* LIMIT and LIMIT_PX: the size. RELATIVE: the fractions of the desktop's
+     * width and height (0.1 to 3) */
     float width;
     float height;
 } CRT_VIEWPORT;

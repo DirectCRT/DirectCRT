@@ -155,10 +155,10 @@ static const SETTING g_settings[] = {
         "fit = the window or screen\n"
         "WxH = a size in logical units (e.g. 960x720; with display scaling at 150%, 1440x1080 pixels)\n"
         "WxHpx = a size in pixels (e.g. 1440x1080px)\n"
-        "N% = a percentage of the desktop (e.g. 80%)\n"
         "  These must fit on the desktop (otherwise 'fit' is used) and shrink to fit a smaller window\n"
-        "relative H% V% = a 4:3 area fitted to the window, scaled by H and V (20% to 300%). It may go past the\n"
-        "  window's edges, like a CRT's stretch controls. Use it with 'aspect=stretch' for other shapes",
+        "relative H% V% = H% of the desktop's width and V% of its height (10% to 300%; e.g. relative 80% 80%).\n"
+        "  Past 100%, or in a smaller window, it goes past the edges, like a CRT's size controls.\n"
+        "  Use it with 'aspect=stretch' for the picture to fill it",
         T_PICTURE, "Viewport", "fit", 0, 0, SETTING_PICTURE, .icon = ICON_CROP_FREE },
 
     { SETTING_STRING, "viewport_offset", "0% 0%",

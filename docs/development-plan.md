@@ -39,8 +39,8 @@ Source: dosbox-staging, mainly `src/gui/render/auto_shader_switcher.cpp`,
 
 - **A fixed pipeline**, not one shader: optional dedithering passes, then image
   adjustments (always), then the main shader.
-- **Scaling is done in C++.** `viewport` (fit, a size limit, a percentage of the
-  desktop, or relative), `aspect` (the mode's own pixel shape, square pixels, or
+- **Scaling is done in C++.** `viewport` (fit, a size limit, or relative:
+  percentages of the desktop's width and height), `aspect` (the mode's own pixel shape, square pixels, or
   stretch) and `integer_scaling` (auto, vertical, horizontal, off) give the image
   rectangle. "Pixels per scanline" is that rectangle's height divided by the
   game's line count.
@@ -368,7 +368,8 @@ otherwise keep the no-shading trap. `original` has to be chosen.
      its rounding decides which side of a texel boundary some pixels fall
      (the fake double scan shader).
    - Done: DOSBox-style settings. `aspect`, `integer_scaling`, `viewport`
-     (all forms: `fit`, `WxH`, `WxHpx`, `N%`, `relative H% V%`),
+     (`fit`, `WxH`, `WxHpx`, and `relative H% V%`, which is DirectCRT's own:
+     DOSBox's `N%` of the desktop with a percentage each way, 10% to 300%),
      `image_adjustments`, `crt_color_profile`, `brightness`, `contrast`,
      `gamma`, `digital_contrast`, `black_level`, `saturation`,
      `color_temperature`, `color_temperature_luma_preserve` and the RGB gains,
@@ -537,12 +538,12 @@ otherwise keep the no-shading trap. `original` has to be chosen.
      type them in, text a field, a hotkey a box that takes the next key
      pressed (Esc cancels; "None" clears it). At the bottom are the default
      and a Reset button. The viewport has a section of its own: Fit, Size,
-     Pixels, Desktop or Relative, each with its controls (width and height
-     with the 4:3 sizes that fit the desktop, a percentage of the desktop,
-     or the horizontal and vertical stretch, with a button for
-     `aspect=stretch` when they differ), so none of its formats has to be
-     typed. Rows that need a restart say so, and a dot marks a value that
-     isn't the default. The highlight under the mouse's or the keyboard's
+     Pixels or Relative, each with its controls (width and height with the
+     4:3 sizes that fit the desktop, or the horizontal and vertical
+     percentages of the desktop, locked together by a padlock or set apart,
+     with a button for `aspect=stretch` when they differ), so none of its
+     formats has to be typed. Rows that need a restart say so, and a dot
+     marks a value that isn't the default. The highlight under the mouse's or the keyboard's
      row glides from row to row. A slider can move in steps (100 K for the
      colour temperature, 5% for the status OSD's opacity: the nearest step
      while it's dragged, the next one with the keyboard); a number typed

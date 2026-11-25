@@ -219,8 +219,8 @@ static void test_viewport()
     s = settings_with("viewport", "1280x720");
     LAYOUT_WITH(s, &d, 640, 480, 3840, 2160, CRT_SHADER_VGA_1080P, 2, 640, 480, 1280, 600, 1280, 960);
 
-    /* 50% of the desktop: 1920x1080 */
-    s = settings_with("viewport", "50%");
+    /* relative: 50% of the desktop each way, 1920x1080 */
+    s = settings_with("viewport", "relative 50% 50%");
     LAYOUT_WITH(s, &d, 640, 480, 3840, 2160, CRT_SHADER_VGA_1080P, 2, 640, 480, 1280, 600, 1280, 960);
 
     /* Larger than the desktop: rejected, so fit (4.5x) */
@@ -241,11 +241,12 @@ static void test_viewport()
     s = settings_with("viewport", "3000x2000px");
     LAYOUT_WITH(s, &d, 640, 480, 2560, 1440, CRT_SHADER_HYLLIAN_VGA_1440P, 3, 640, 480, 320, 0, 1920, 1440);
 
-    /* relative: half of the 1920x1440 4:3 box, 1.5x, so sharp, snapped to 1x */
+    /* relative, of a 2560x1440 desktop: 1280x720, 1.5x, so sharp, snapped
+     * to 1x */
     s = settings_with("viewport", "relative 50% 50%");
     LAYOUT_WITH(s, NULL, 640, 480, 2560, 1440, CRT_SHADER_SHARP, 1, 640, 480, 960, 480, 640, 480);
 
-    /* relative can go past the canvas */
+    /* relative can go past the canvas: 3840x2160, 4.5x, snapped to 4x */
     s = settings_with("viewport", "relative 200% 200%");
     LAYOUT_WITH(s, NULL, 640, 480, 1920, 1080, CRT_SHADER_HYLLIAN_VGA_4K, 4, 640, 480, -480, -540, 2880, 2160);
 
@@ -264,10 +265,21 @@ static void test_viewport()
     VIEWPORT_RECT(s, &d, 640, 480, 2560, 1440, 640, 240, 1280, 960);
 
     s = settings_with("viewport", "relative 50% 50%");
-    VIEWPORT_RECT(s, NULL, 640, 480, 2560, 1440, 800, 360, 960, 720);
+    VIEWPORT_RECT(s, NULL, 640, 480, 2560, 1440, 640, 360, 1280, 720);
 
     s = settings_with("viewport", "relative 200% 200%");
-    VIEWPORT_RECT(s, NULL, 640, 480, 1920, 1080, -480, -540, 2880, 2160);
+    VIEWPORT_RECT(s, NULL, 640, 480, 1920, 1080, -960, -540, 3840, 2160);
+
+    /* relative's two percentages are independent, and of the desktop, not
+     * the canvas: the same size in a window smaller than the desktop */
+    s = settings_with("viewport", "relative 100% 50%");
+    VIEWPORT_RECT(s, NULL, 640, 480, 1920, 1080, 0, 270, 1920, 540);
+
+    s = settings_with("viewport", "relative 150% 100%");
+    VIEWPORT_RECT(s, &d, 640, 480, 3840, 2160, -960, 0, 5760, 2160);
+
+    s = settings_with("viewport", "relative 50% 50%");
+    VIEWPORT_RECT(s, &d, 640, 480, 1600, 900, -160, -90, 1920, 1080);
 
     s = settings_with("viewport", "2600x1440");
     VIEWPORT_RECT(s, &d, 640, 480, 3840, 2160, 0, 0, 3840, 2160);
@@ -335,14 +347,14 @@ static void test_settings_parse()
     CHECK(crt_auto_set(&s, "viewport", "800x600") && s.viewport.mode == CRT_VIEWPORT_LIMIT);
     CHECK(s.viewport.width == 800 && s.viewport.height == 600);
     CHECK(crt_auto_set(&s, "viewport", "800,600PX") && s.viewport.mode == CRT_VIEWPORT_LIMIT_PX);
-    CHECK(crt_auto_set(&s, "viewport", "75%") && s.viewport.mode == CRT_VIEWPORT_DESKTOP);
-    CHECK(fabsf(s.viewport.width - 0.75f) < 1e-6f);
     CHECK(crt_auto_set(&s, "viewport", "relative 120% 80%") && s.viewport.mode == CRT_VIEWPORT_RELATIVE);
     CHECK(fabsf(s.viewport.width - 1.2f) < 1e-6f && fabsf(s.viewport.height - 0.8f) < 1e-6f);
+    CHECK(crt_auto_set(&s, "viewport", "relative 10% 300%") && s.viewport.mode == CRT_VIEWPORT_RELATIVE);
     CHECK(crt_auto_set(&s, "viewport", "fit") && s.viewport.mode == CRT_VIEWPORT_FIT);
 
+    /* N% was the desktop viewport; relative H% V% does it now */
     static const char* const bad_viewports[] = {
-        "0x600", "800x", "800x600x2", "101%", "0.5%", "medium", "50", "relative 10% 80%",
+        "0x600", "800x", "800x600x2", "75%", "101%", "medium", "50", "relative 9% 80%",
         "relative 100% 301%", "relative 100%", "relative 100% 100% 100%", "relative100% 100%", "",
     };
 

@@ -50,11 +50,10 @@ static int menu_viewport_mode(const char* v, int* a, int* b)
     if (!crt_auto_parse_viewport(v, &vp))
         return CRT_VIEWPORT_FIT;
 
-    bool percent = vp.mode == CRT_VIEWPORT_DESKTOP || vp.mode == CRT_VIEWPORT_RELATIVE;
-    float scale = percent ? 100.0f : 1.0f;
+    float scale = vp.mode == CRT_VIEWPORT_RELATIVE ? 100.0f : 1.0f;
 
     *a = (int)roundf(vp.width * scale);
-    *b = vp.mode == CRT_VIEWPORT_DESKTOP ? 0 : (int)roundf(vp.height * scale);
+    *b = (int)roundf(vp.height * scale);
     return vp.mode;
 }
 
@@ -64,7 +63,6 @@ static void menu_viewport_value(int mode, int a, int b, char* buf, size_t size)
     {
     case CRT_VIEWPORT_LIMIT: _snprintf(buf, size - 1, "%dx%d", a, b); break;
     case CRT_VIEWPORT_LIMIT_PX: _snprintf(buf, size - 1, "%dx%dpx", a, b); break;
-    case CRT_VIEWPORT_DESKTOP: _snprintf(buf, size - 1, "%d%%", a); break;
     case CRT_VIEWPORT_RELATIVE: _snprintf(buf, size - 1, "relative %d%% %d%%", a, b); break;
     default: _snprintf(buf, size - 1, "fit"); break;
     }
@@ -77,10 +75,10 @@ static void menu_viewport_value(int mode, int a, int b, char* buf, size_t size)
 void menu_viewport(int setting, const SETTING* s, float F)
 {
     /* Each kind's numbers, by CRT_VIEWPORT_MODE, kept while another kind is tried */
-    static int nums[5][2] = { { 0, 0 }, { 960, 720 }, { 1440, 1080 }, { 80, 0 }, { 100, 100 } };
+    static int nums[CRT_VIEWPORT_COUNT][2] = { { 0, 0 }, { 960, 720 }, { 1440, 1080 }, { 80, 80 } };
     static bool linked = true;
-    static const char* modes[] = { "Fit", "Size", "Pixels", "Desktop", "Relative" };
-    static const char* formats[] = { "fit", "WxH", "WxHpx", "N%", "relative H% V%" };
+    static const char* modes[CRT_VIEWPORT_COUNT] = { "Fit", "Size", "Pixels", "Relative" };
+    static const char* formats[CRT_VIEWPORT_COUNT] = { "fit", "WxH", "WxHpx", "relative H% V%" };
 
     char value[MENU_TEXT], text[1024];
     strncpy(value, overlay_menu_value(setting, NULL), sizeof(value) - 1);
@@ -100,7 +98,7 @@ void menu_viewport(int setting, const SETTING* s, float F)
 
     const ImGuiStyle& style = ImGui::GetStyle();
     int write_mode = -1, wa = 0, wb = 0;
-    int picked = ui_segmented("##mode", modes, 5, mode, F);
+    int picked = ui_segmented("##mode", modes, CRT_VIEWPORT_COUNT, mode, F);
 
     if (picked >= 0 && picked != mode)
     {
@@ -204,68 +202,83 @@ void menu_viewport(int setting, const SETTING* s, float F)
         if (a > max_w || b > max_h)
             ui_note("That's larger than the desktop: the window or screen is used, as with Fit", F, COL_ACCENT_HI);
     }
-    else if (mode == CRT_VIEWPORT_DESKTOP)
-    {
-        int n, live = -1;
-
-        if (ui_slider_box("##desktop", "Percentage", a, 1, 100, F, &n, 0, &live))
-        {
-            write_mode = mode;
-            wa = n;
-        }
-        else if (live >= 0 && GetTickCount() - g_slider_written_ms >= MENU_DRAG_WRITE_MS)
-        {
-            write_mode = mode;
-            wa = live;
-        }
-
-        if (live >= 0)
-            viewport_outline(F);
-
-        _snprintf(line, sizeof(line) - 1, "%d%% of the desktop is %d\xc3\x97%d pixels", a, (int)(dw * a / 100.0f), (int)(dh * a / 100.0f));
-        line[sizeof(line) - 1] = 0;
-        ui_note(line, F);
-    }
     else if (mode == CRT_VIEWPORT_RELATIVE)
     {
-        /* The slider to 100% (inside the window or screen), the box to
-         * 300%; linked, the other slider follows the one dragged */
+        /* Percentages of the desktop, past 100% off its edges. Locked, the
+         * vertical slider is greyed and follows the horizontal one */
         static int live_h = -1, live_v = -1;
+        float lock = ImGui::GetFrameHeight();
         int n;
-        int show_h = linked && live_v >= 0 ? live_v : a;
-        int show_v = linked && live_h >= 0 ? live_h : b;
+        int cur_a = a, cur_b = b;
 
-        if (ui_slider_box("##h", "Horizontal", show_h, 20, 100, F, &n, 300, &live_h))
+        if (ImGui::BeginTable("##relative", 2))
         {
-            write_mode = mode;
-            wa = n;
-            wb = linked ? n : b;
+            ImGui::TableSetupColumn("##sliders", ImGuiTableColumnFlags_WidthStretch);
+            ImGui::TableSetupColumn("##lock", ImGuiTableColumnFlags_WidthFixed, lock);
+
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            float top = ImGui::GetCursorScreenPos().y;
+
+            if (ui_slider_box("##h", "Horizontal", a, 10, 300, F, &n, 0, &live_h))
+            {
+                write_mode = mode;
+                wa = n;
+                wb = linked ? n : b;
+            }
+
+            cur_a = live_h >= 0 ? live_h : a;
+
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            ImGui::BeginDisabled(linked);
+
+            if (ui_slider_box("##v", "Vertical", linked ? cur_a : b, 10, 300, F, &n, 0, &live_v))
+            {
+                write_mode = mode;
+                wa = a;
+                wb = n;
+            }
+
+            ImGui::EndDisabled();
+            cur_b = linked ? cur_a : live_v >= 0 ? live_v : b;
+
+            /* The padlock, between the two rows it links */
+            ImGui::TableSetColumnIndex(1);
+            ImVec2 p = ImGui::GetCursorScreenPos();
+            ImGui::SetCursorScreenPos(ImVec2(p.x, floorf((top + p.y) * 0.5f)));
+
+            if (ui_icon_button("##lock", linked ? ICON_LOCK : ICON_LOCK_OPEN, lock, 1.15f * F, linked))
+            {
+                linked = !linked;
+
+                if (linked && a != b)
+                {
+                    write_mode = mode;
+                    wa = wb = a;
+                }
+            }
+
+            ImGui::SetItemTooltip(linked ? "Locked: the same both ways" : "Unlocked: set apart");
+            ImGui::EndTable();
         }
 
-        if (ui_slider_box("##v", "Vertical", show_v, 20, 100, F, &n, 300, &live_v))
+        bool dragging = live_h >= 0 || live_v >= 0;
+
+        if (write_mode < 0 && dragging && GetTickCount() - g_slider_written_ms >= MENU_DRAG_WRITE_MS)
         {
             write_mode = mode;
-            wa = linked ? n : a;
-            wb = n;
+            wa = cur_a;
+            wb = cur_b;
         }
 
-        int drag = live_h >= 0 ? live_h : live_v;
-
-        if (write_mode < 0 && drag >= 0 && GetTickCount() - g_slider_written_ms >= MENU_DRAG_WRITE_MS)
-        {
-            write_mode = mode;
-            wa = linked || live_h >= 0 ? drag : a;
-            wb = linked || live_v >= 0 ? drag : b;
-        }
-
-        if (drag >= 0)
+        if (dragging)
             viewport_outline(F);
 
-        if (ImGui::Checkbox("Same for both", &linked) && linked && a != b)
-        {
-            write_mode = mode;
-            wa = wb = a;
-        }
+        _snprintf(line, sizeof(line) - 1, "Of the %d\xc3\x97%d desktop: %d\xc3\x97%d pixels", dw, dh,
+            (int)(dw * cur_a / 100.0f + 0.5f), (int)(dh * cur_b / 100.0f + 0.5f));
+        line[sizeof(line) - 1] = 0;
+        ui_note(line, F);
 
         /* Another shape */
         int aspect = settings_index("aspect");
