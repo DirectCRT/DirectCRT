@@ -1,4 +1,6 @@
 // Generated from _internal/image-adjustments.glsl by gen_d3d11_shaders.py
+// SPDX-FileCopyrightText:  2025-2026 The DOSBox Staging Team
+// SPDX-License-Identifier: MIT
 
 cbuffer Globals : register(b0)
 {

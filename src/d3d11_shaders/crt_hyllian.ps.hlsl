@@ -1,4 +1,8 @@
 // Generated from crt/crt-hyllian.glsl by gen_d3d11_shaders.py
+// SPDX-FileCopyrightText:  2020-2026 The DOSBox Staging Team
+// SPDX-FileCopyrightText:  2021-2020 Hyllian <sergiogdb@gmail.com>
+// SPDX-FileCopyrightText:  2020-2020 Tyrells
+// SPDX-License-Identifier: MIT
 
 cbuffer DirectCRT : register(b1)
 {

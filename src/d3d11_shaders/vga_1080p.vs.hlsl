@@ -1,4 +1,6 @@
 // Generated from crt/vga-1080p.glsl by gen_d3d11_shaders.py
+// SPDX-FileCopyrightText:  2020-2026 The DOSBox Staging Team
+// SPDX-License-Identifier: MIT
 
 cbuffer Globals : register(b0)
 {
