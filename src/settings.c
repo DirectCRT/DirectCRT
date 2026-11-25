@@ -292,7 +292,7 @@ static const SETTING g_settings[] = {
         "Note: Can be used to slow down a too fast running game, fix flickering or too fast animations\n"
         "Note: Usually one of the following values will work: 60 / 30 / 25 / 20 / 15 (lower value = slower game speed)",
         T_TIMING, "Game speed (maxgameticks)",
-        "0=the emulated vertical blank|-2=your monitor's vertical blank|-1=disabled", 1, 1000, .icon = ICON_SLOW_MOTION_VIDEO },
+        "0=the emulated vertical blank|-2=your monitor's vertical blank|-1=disabled", 1, 1000, SETTING_LIVE, .icon = ICON_SLOW_MOTION_VIDEO },
 
     { SETTING_CHOICE, "limiter_type", "0",
         "Method that should be used to limit game ticks (maxgameticks=)\n"
@@ -301,7 +301,7 @@ static const SETTING g_settings[] = {
         "2 = BltFast\n"
         "3 = Unlock\n"
         "4 = PeekMessage",
-        T_TIMING, "Game speed method", "0=Automatic|1=TestCooperativeLevel|2=BltFast|3=Unlock|4=PeekMessage", .icon = ICON_TIMELAPSE },
+        T_TIMING, "Game speed method", "0=Automatic|1=TestCooperativeLevel|2=BltFast|3=Unlock|4=PeekMessage", 0, 0, SETTING_LIVE, .icon = ICON_TIMELAPSE },
 
     { SETTING_INT, "minfps", "0",
         "Force minimum FPS\n"
@@ -310,7 +310,7 @@ static const SETTING g_settings[] = {
         "-2 = same as -1 but force full redraw\n"
         "1-1000 = custom FPS\n"
         "Note: Set this to a low value such as 5 or 10 if some parts of the game are not being displayed (e.g. menus or loading screens)",
-        T_TIMING, "Minimum frame rate", "0=disabled|-1=the rendering rate limit|-2=the limit, full redraw", 1, 1000, .icon = ICON_HOURGLASS_BOTTOM },
+        T_TIMING, "Minimum frame rate", "0=disabled|-1=the rendering rate limit|-2=the limit, full redraw", 1, 1000, SETTING_LIVE, .icon = ICON_HOURGLASS_BOTTOM },
 
     { SETTING_BOOL, "nonexclusive", "true",
         "Disable fullscreen-exclusive mode for the opengl renderer\n"

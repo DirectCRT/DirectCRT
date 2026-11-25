@@ -769,6 +769,51 @@ static void dd_set_picture(int canvas_width, int canvas_height)
     }
 }
 
+/* A high resolution waitable timer where Windows has them */
+static HANDLE dd_create_timer(void)
+{
+    HANDLE (WINAPI *createTimerExW)(LPSECURITY_ATTRIBUTES, LPCWSTR, DWORD, DWORD) = NULL;
+
+    if (!IsWine() && IsWindows10Version1803OrGreater())
+    {
+        createTimerExW = (void*)real_GetProcAddress(real_LoadLibraryA("Kernel32.dll"), "CreateWaitableTimerExW");
+    }
+
+    DWORD timer_flags = CREATE_WAITABLE_TIMER_MANUAL_RESET | CREATE_WAITABLE_TIMER_HIGH_RESOLUTION;
+    HANDLE timer = createTimerExW ? createTimerExW(NULL, NULL, timer_flags, TIMER_ALL_ACCESS) : NULL;
+
+    return timer ? timer : CreateWaitableTimer(NULL, TRUE, NULL);
+}
+
+/* The game speed limiter (maxgameticks from 1 to 1000) and minfps' frame
+ * time: when DirectDraw is created, and when they change. The limiter waits
+ * on the game's window thread, the one that reloads the settings */
+static void dd_set_limits(void)
+{
+    if (g_config.minfps > 1000)
+        g_config.minfps = 1000;
+
+    g_ddraw.minfps_tick_len = g_config.minfps > 0 ? (DWORD)(1000.0f / g_config.minfps) : 0;
+
+    if (g_config.maxgameticks > 0 && g_config.maxgameticks <= 1000)
+    {
+        if (!g_ddraw.ticks_limiter.htimer)
+            g_ddraw.ticks_limiter.htimer = dd_create_timer();
+
+        float len = 1000.0f / g_config.maxgameticks;
+        g_ddraw.ticks_limiter.tick_length_ns = (LONGLONG)(len * 10000);
+        g_ddraw.ticks_limiter.tick_length = (DWORD)(len + 0.5f);
+    }
+    else
+    {
+        g_ddraw.ticks_limiter.tick_length_ns = 0;
+        g_ddraw.ticks_limiter.tick_length = 0;
+    }
+
+    /* Which call the game ticks on is found again */
+    g_ddraw.ticks_limiter.dds_unlock_limiter_disabled = FALSE;
+}
+
 /* Live reload of the settings: called from a timer on the game's window
  * (now = FALSE), and when the settings OSD has written directcrt.ini
  * (now = TRUE). What the picture is made with (the shader settings, the
@@ -797,6 +842,12 @@ void dd_reload_settings(BOOL now)
     if (g_config.emulated_refresh != old.emulated_refresh && g_ddraw.width)
         dd_set_refresh(g_ddraw.refresh_asked);
 
+    if (g_ddraw.ref && (g_config.maxgameticks != old.maxgameticks || g_config.limiter_type != old.limiter_type ||
+        g_config.minfps != old.minfps))
+    {
+        dd_set_limits();
+    }
+
     BOOL size_changed = memcmp(&old.window_size, &g_config.window_size, sizeof(old.window_size)) != 0;
     BOOL position_changed = memcmp(&old.window_position, &g_config.window_position, sizeof(old.window_position)) != 0;
 
@@ -822,7 +873,7 @@ void dd_reload_settings(BOOL now)
         (!g_ddraw.renderer || dd_next_renderer() != g_ddraw.renderer);
     /* What the render thread starts with */
     BOOL render_changed = old.maxfps != g_config.maxfps || old.vsync != g_config.vsync ||
-        old.adjmouse != g_config.adjmouse;
+        old.adjmouse != g_config.adjmouse || old.minfps != g_config.minfps;
     BOOL picture_changed = memcmp(&crt, &g_config.crt, sizeof(crt)) != 0 || window_changed ||
         render_changed || renderer_changed;
 
@@ -2109,39 +2160,10 @@ HRESULT dd_CreateEx(GUID* lpGuid, LPVOID* lplpDD, REFIID iid, IUnknown* pUnkOute
         g_ddraw.render.sem = CreateSemaphore(NULL, 0, 1, NULL);
         g_blt_use_avx = util_is_avx_supported();
 
-        if (g_config.minfps > 1000)
-            g_config.minfps = 1000;
-
-        if (g_config.minfps > 0)
-            g_ddraw.minfps_tick_len = (DWORD)(1000.0f / g_config.minfps);
-
-
-        HANDLE (WINAPI *createTimerExW)(LPSECURITY_ATTRIBUTES, LPCWSTR, DWORD, DWORD) = NULL;
-
-        if (!IsWine() && IsWindows10Version1803OrGreater())
-        {
-            createTimerExW = (void*)real_GetProcAddress(real_LoadLibraryA("Kernel32.dll"), "CreateWaitableTimerExW");
-        }
-
-        DWORD timer_flags = CREATE_WAITABLE_TIMER_MANUAL_RESET | CREATE_WAITABLE_TIMER_HIGH_RESOLUTION;
-
         /* can't fully set it up here due to missing g_ddraw.mode.dmDisplayFrequency  */
-        g_fpsl.htimer = createTimerExW ? createTimerExW(NULL, NULL, timer_flags, TIMER_ALL_ACCESS) : NULL;
-        
-        if (!g_fpsl.htimer) 
-            g_fpsl.htimer = CreateWaitableTimer(NULL, TRUE, NULL);
+        g_fpsl.htimer = dd_create_timer();
 
-        if (g_config.maxgameticks > 0 && g_config.maxgameticks <= 1000)
-        {
-            g_ddraw.ticks_limiter.htimer = createTimerExW ? createTimerExW(NULL, NULL, timer_flags, TIMER_ALL_ACCESS) : NULL;
-
-            if (!g_ddraw.ticks_limiter.htimer)
-                g_ddraw.ticks_limiter.htimer = CreateWaitableTimer(NULL, TRUE, NULL);
-
-            float len = 1000.0f / g_config.maxgameticks;
-            g_ddraw.ticks_limiter.tick_length_ns = (LONGLONG)(len * 10000);
-            g_ddraw.ticks_limiter.tick_length = (DWORD)(len + 0.5f);
-        }
+        dd_set_limits();
 
 
         DWORD system_affinity;

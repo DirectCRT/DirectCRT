@@ -63,9 +63,6 @@ void cfg_load()
     /* Compatibility settings */
 
     GET_BOOL(g_config.noactivateapp, "noactivateapp");
-    GET_INT(g_config.maxgameticks, "maxgameticks");
-    GET_INT(g_config.limiter_type, "limiter_type");
-    GET_INT(g_config.minfps, "minfps");
     GET_BOOL(g_config.nonexclusive, "nonexclusive");
     GET_BOOL(g_config.singlecpu, "singlecpu");
     GET_INT(g_config.resolutions, "resolutions");
@@ -460,6 +457,9 @@ static void cfg_load_runtime_settings()
 {
     GET_INT(g_config.maxfps, "maxfps");
     GET_BOOL(g_config.vsync, "vsync");
+    GET_INT(g_config.maxgameticks, "maxgameticks");
+    GET_INT(g_config.limiter_type, "limiter_type");
+    GET_INT(g_config.minfps, "minfps");
     GET_BOOL(g_config.adjmouse, "adjmouse");
     GET_STRING("renderer", g_config.renderer, sizeof(g_config.renderer));
     const char* renderer = ds_legacy_renderer(g_config.renderer);
