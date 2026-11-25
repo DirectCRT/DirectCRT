@@ -66,18 +66,23 @@ jobs:
       # .pdb goes in a zip of its own, for reading crash dumps, and ddtest in
       # another, so the one most people get is small. DebugLog and DebugLogMini
       # build ddtest as Release, into bin/Release
+      # The names carry the version as the DLL does (tools/git-version.ps1):
+      # 0.2.0 on a tag, 0.2.0-3-g1a2b3c4 three commits after it
       - name: Collect files
         shell: bash
         run: |
+          version="$(git describe --tags --match='v[0-9]*' --exclude='v*.*.*.*' --always)"
+          version="${version#v}"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
           bin="bin/${{ matrix.configuration }}"
-          out="DirectCRT-${{ matrix.configuration }}"
+          out="DirectCRT-$version-${{ matrix.configuration }}"
           mkdir "$out"
           cp "$bin/ddraw.dll" LICENSE LICENSE-cnc-ddraw.txt "$out"
           if [[ "${{ matrix.configuration }}" == Release ]]; then
-            mkdir DirectCRT-Release-symbols DirectCRT-ddtest
-            cp "$bin/ddraw.pdb" DirectCRT-Release-symbols
-            cp "$bin/ddtest.exe" LICENSE LICENSE-cnc-ddraw.txt DirectCRT-ddtest
-            cp tools/ddtest/README.md DirectCRT-ddtest/README-ddtest.md
+            mkdir "DirectCRT-$version-Release-symbols" "DirectCRT-$version-ddtest"
+            cp "$bin/ddraw.pdb" "DirectCRT-$version-Release-symbols"
+            cp "$bin/ddtest.exe" LICENSE LICENSE-cnc-ddraw.txt "DirectCRT-$version-ddtest"
+            cp tools/ddtest/README.md "DirectCRT-$version-ddtest/README-ddtest.md"
           else
             ddtest_bin="$bin"
             [[ "${{ matrix.configuration }}" == Debug ]] || ddtest_bin=bin/Release
@@ -86,20 +91,20 @@ jobs:
 
       - uses: actions/upload-artifact@v7
         with:
-          name: DirectCRT-${{ matrix.configuration }}
-          path: DirectCRT-${{ matrix.configuration }}
+          name: DirectCRT-${{ env.VERSION }}-${{ matrix.configuration }}
+          path: DirectCRT-${{ env.VERSION }}-${{ matrix.configuration }}
 
       - uses: actions/upload-artifact@v7
         if: matrix.configuration == 'Release'
         with:
-          name: DirectCRT-Release-symbols
-          path: DirectCRT-Release-symbols
+          name: DirectCRT-${{ env.VERSION }}-Release-symbols
+          path: DirectCRT-${{ env.VERSION }}-Release-symbols
 
       - uses: actions/upload-artifact@v7
         if: matrix.configuration == 'Release'
         with:
-          name: DirectCRT-ddtest
-          path: DirectCRT-ddtest
+          name: DirectCRT-${{ env.VERSION }}-ddtest
+          path: DirectCRT-${{ env.VERSION }}-ddtest
 
   shaders:
     # The Direct3D 11 shaders in src/d3d11_shaders are committed, so a normal
