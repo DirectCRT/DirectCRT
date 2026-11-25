@@ -1,62 +1,69 @@
 # DirectCRT
 
 DirectCRT is a `ddraw.dll` replacement for 2D DirectDraw games from the Windows 98
-and XP era. Those games render at 640x480, 800x600 or less, which looks blurry or
-tiny on today's screens. DirectCRT scales them properly and shades them like a
-period CRT monitor, the way DOSBox Staging's `crt-auto` does for VGA.
+and XP era. Those games render at 640x480, 800x600 etc., which looks blurry or
+tiny on today's screens. DirectCRT gives them
+[DOSBox Staging](https://www.dosbox-staging.org/)'s picture: its scaling, its
+colour adjustments and its CRT shading (`crt-auto`), which makes them look as
+they did on a period CRT monitor.
+
+![Baldur's Gate at 1280x720, shown at 3840x2160 with crt-auto's shading, the settings OSD on the left and the status OSD at the bottom right](docs/images/baldurs-gate.png)
+*Baldur's Gate (BioWare, 1998) at 1280x720 on a 4K screen, with the settings
+and status OSDs open. Open the image at full size to see the shading.
+Baldur's Gate © 1998 BioWare Corp.; see [Licence](#licence).*
 
 It's a fork of [cnc-ddraw](https://github.com/FunkyFr3sh/cnc-ddraw) by
-FunkyFr3sh and keeps its DirectDraw implementation and its game compatibility
-work.
+FunkyFr3sh. The DirectDraw implementation, the Windows API hooks and the
+compatibility settings come from cnc-ddraw, and so do the fixes it applies to
+a few games by itself (StarCraft, Battle.net, Age of Empires II, Claw, ...).
+cnc-ddraw's built-in profiles for 285 games, and the game-specific hacks they
+turned on, aren't part of DirectCRT: a setting a game needs goes in its own
+`directcrt.ini`. The renderers and the display settings are new.
+
+## Features
+
+- **CRT shading from DOSBox Staging.** `shader=crt-auto`, the default, uses
+  `crt-auto`'s VGA monitor: its shaders, its choice of shader for the
+  screen's size, its picture size and its colours, with the same result as
+  DOSBox. `sharp`, `nearest` and `bilinear` are the other shaders.
+- **Scaling as in DOSBox Staging:** aspect ratio correction, integer scaling
+  and a viewport of any size, with every shader.
+- **Colour adjustments as in DOSBox Staging:** CRT colour profiles,
+  brightness, contrast, gamma, colour temperature and gain, saturation and
+  black level, with every shader.
+- **Fullscreen or a window.** `display=auto` follows the game. Fullscreen is
+  at the desktop resolution, so the shading has room to work; `original`
+  switches the monitor to the game's resolution instead, for real CRTs and
+  external scalers. A window can be small, medium, large, a size of your own
+  or unscaled, and games that run in their own window are scaled the same
+  way.
+- **Settings while the game runs.** The settings OSD (Alt+F12) has every
+  setting with its help. Most changes apply at once, and so do edits to
+  `directcrt.ini`, which is created next to `ddraw.dll` the first time a
+  game starts.
+- **Status OSD** (Alt+F11): the game's mode, the picture's size and scale,
+  the shader and renderer, the frame rate and a graph of the frame times.
+- **An emulated refresh rate.** The game's flips and waits for the vertical
+  blank follow a display at the rate it asks for (`emulated_refresh`),
+  whatever the monitor runs at.
+- **Direct3D 11 and OpenGL 3.3**, fallback to Direct3D 11 on WARP
+- **Screenshots** (Print Screen): the game's own picture and what's on
+  screen, as PNG files.
 
 ## Status
 
-Early development. DirectCRT is cnc-ddraw with new display settings and
-DOSBox Staging's CRT shading.
-[docs/development-plan.md](docs/development-plan.md) covers the goals, the
-decisions and the phases.
+Early development. [docs/development-plan.md](docs/development-plan.md)
+covers the goals, the decisions and the phases.
 
-Changes from cnc-ddraw so far:
-
-- `shader=crt-auto`, the default, shades the picture with DOSBox Staging's
-  `crt-auto` for VGA: its own shaders, its choice of shader for the screen
-  size, its picture size and its colours, with the same result pixel for
-  pixel. `sharp`, `nearest` and `bilinear` are the other shaders. `aspect`,
-  `integer_scaling`, `viewport` and the colour settings work as in DOSBox,
-  with every shader, and changes to them apply while the game runs.
-- Renderers: Direct3D 11 (the default, on WARP if the graphics card can't)
-  and OpenGL 3.3, each the other's fallback. Where neither works DirectCRT
-  steps aside for Windows' own DirectDraw and says so. Direct3D 9, GDI and
-  the libretro shader files are gone.
-- `display` decides fullscreen or a window: `auto` (the default) follows the
-  game, `window` and `fullscreen` force one, and `original` switches the
-  monitor to the game's resolution as Windows' own DirectDraw did. Fullscreen
-  is at the desktop resolution, so the shading has room to work.
-- Windows are `window_size` (DOSBox's `small`, `medium`, `large`, `WxH`, or
-  `unscaled`), with the picture placed in them as in fullscreen. Games that
-  run in their own window are scaled the same way and get the desktop's colour
-  depth instead of a fixed 16-bit. `window_position`, `window_decorations`,
-  `window_resizable` and `remember_window` replace `posX`, `posY`, `border`,
-  `resizable` and `savesettings`. Old keys are still read.
-- Settings are in `directcrt.ini`, section `[directcrt]`. The file is
-  created next to `ddraw.dll` the first time a game starts, so each game has
-  its own. Sections named after a game's executable aren't read.
-- cnc-ddraw's 280 built-in game profiles and the game-specific hacks they
-  turned on (`tshack`, `armadahack`, ...) are gone, and so are
-  `min_font_size` and the C++Builder config tool.
-- The mouse is released when the game releases DirectDraw.
-  `unlockcursor_middleclick=true` adds a middle click as a way to release it.
-- Logs and crash dumps are named `directcrt-*.log` and `directcrt-*.dmp`.
-- Windows XP and older aren't supported. DirectCRT targets Windows 10 and 11,
-  Wine and Proton.
+DirectCRT runs on Windows 10 and 11. Wine and Proton are untested so far.
 
 ## Using it
 
 1. Copy `ddraw.dll` into the game's folder, next to its `.exe`.
 2. Start the game.
 
-On Wine and Proton, set `ddraw` to "native, builtin" in `winecfg` (Libraries),
-or start the game with `WINEDLLOVERRIDES="ddraw=n,b"`.
+To try it on Wine or Proton, set `ddraw` to "native, builtin" in `winecfg`
+(Libraries), or start the game with `WINEDLLOVERRIDES="ddraw=n,b"`.
 
 DirectCRT only handles DirectDraw: Direct3D games aren't supported. A game
 with several renderers needs its DirectDraw or "software" renderer selected.
@@ -74,6 +81,9 @@ the game).
 | Alt+Enter | Switch between a window and fullscreen |
 | Ctrl+Tab, or Right Alt+Right Ctrl | Release the mouse |
 | Alt+Page Down | Maximise the window |
+| Alt+F11 | Show or hide the status OSD |
+| Alt+F12 | Open or close the settings OSD |
+| Print Screen | Save a screenshot |
 
 ## Building
 
@@ -110,7 +120,7 @@ push to `master` and on pull requests.
 ## Licence
 
 DirectCRT as a whole is licensed under the GNU General Public License, version 2
-or (at your option) any later version; see [LICENSE](LICENSE). It will include
+or (at your option) any later version; see [LICENSE](LICENSE). It includes
 code ported from DOSBox Staging, which is GPL-2.0-or-later.
 
 The code that comes from cnc-ddraw is also available under its original MIT
@@ -125,3 +135,8 @@ code keeps its own licence:
 - Dear ImGui, for the OSDs: MIT (`third_party/imgui/LICENSE.txt`)
 - Source Sans 3, the OSDs' font: SIL Open Font License 1.1
   (`third_party/fonts/source-sans-3/LICENSE.md`)
+
+The screenshot in `docs/images/` isn't covered by these licences. It shows
+Baldur's Gate, © 1998 BioWare Corp.; Baldur's Gate is a trademark of Wizards
+of the Coast LLC. It's here only to show what DirectCRT does; DirectCRT isn't
+affiliated with or endorsed by either.
