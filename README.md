@@ -7,8 +7,8 @@ tiny on today's screens. DirectCRT gives them
 colour adjustments and its CRT shading (`crt-auto`), which makes them look as
 they did on a period CRT monitor.
 
-[![Baldur's Gate at 1280x720, shown at 3840x2160 with crt-auto's shading, the settings OSD on the left and the status OSD at the bottom right](docs/images/baldurs-gate.webp)](docs/images/baldurs-gate.webp?raw=true)
-*Baldur's Gate (BioWare, 1998) at 1280x720 on a 4K screen, with the settings
+[![Baldur's Gate at 640x480, shown at 3840x2160 with crt-auto's shading, the settings OSD on the left and the status OSD at the bottom right](docs/images/baldurs-gate.webp)](docs/images/baldurs-gate.webp?raw=true)
+*Baldur's Gate (BioWare, 1998) at 640x480 on a 4K screen, with the settings
 and status OSDs open. Open the image at full size to see the shading.
 Baldur's Gate © 1998 BioWare Corp.; see [Licence](#licence).*
 
