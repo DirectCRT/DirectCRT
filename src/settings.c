@@ -161,6 +161,13 @@ static const SETTING g_settings[] = {
         "  window's edges, like a CRT's stretch controls. Use it with 'aspect=stretch' for other shapes",
         T_PICTURE, "Viewport", "fit", 0, 0, SETTING_PICTURE, .icon = ICON_CROP_FREE },
 
+    { SETTING_STRING, "viewport_offset", "0% 0%",
+        "Moves the picture from where the viewport puts it, like a CRT's position controls\n"
+        "H% V% = by percentages of the picture's width and height (-50% to 50%; e.g. 1.5% -2%), right and down\n"
+        "  for positive values. In the settings OSD, 'Move the picture' moves it with the arrow keys\n"
+        "This is DirectCRT's own setting; DOSBox Staging doesn't have it",
+        T_PICTURE, "Position", "0% 0%=Centred", 0, 0, SETTING_PICTURE, .icon = ICON_OPEN_WITH },
+
     { SETTING_CHOICE, "color_space", "srgb",
         "The colour space of your monitor; the others need a wide gamut monitor in that mode\n"
         "srgb = sRGB, 6500K white point, sRGB gamma: the usual one\n"

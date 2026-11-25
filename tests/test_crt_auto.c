@@ -226,6 +226,14 @@ static void test_viewport()
     /* relative can go past the canvas */
     s = settings_with("viewport", "relative 200% 200%");
     LAYOUT_WITH(s, NULL, 640, 480, 1920, 1080, CRT_SHADER_HYLLIAN_VGA_4K, 4, 640, 480, -480, -540, 2880, 2160);
+
+    /* viewport_offset moves the 1280x960 picture by fractions of its size,
+     * and changes nothing else */
+    s = settings_with("viewport_offset", "10% 5%");
+    LAYOUT_WITH(s, NULL, 640, 480, 1920, 1080, CRT_SHADER_VGA_1080P, 2, 640, 480, 448, 108, 1280, 960);
+
+    s = settings_with("viewport_offset", "-50% -50%");
+    LAYOUT_WITH(s, NULL, 640, 480, 1920, 1080, CRT_SHADER_VGA_1080P, 2, 640, 480, -320, -420, 1280, 960);
 }
 
 static void test_settings_parse()
@@ -302,6 +310,22 @@ static void test_settings_parse()
     {
         CRT_AUTO_SETTINGS t = settings_with("viewport", "800x600");
         CHECK(!crt_auto_set(&t, "viewport", bad_viewports[i]) && t.viewport.mode == CRT_VIEWPORT_FIT);
+    }
+
+    /* viewport_offset */
+    CHECK(s.offset_x == 0.0f && s.offset_y == 0.0f);
+    CHECK(crt_auto_set(&s, "viewport_offset", "1.25% -0.5%"));
+    CHECK(fabsf(s.offset_x - 0.0125f) < 1e-6f && fabsf(s.offset_y + 0.005f) < 1e-6f);
+    CHECK(crt_auto_set(&s, "viewport_offset", " -50%   50% ") && s.offset_x == -0.5f && s.offset_y == 0.5f);
+
+    static const char* const bad_offsets[] = {
+        "50.1% 0%", "0% -51%", "0%", "0% 0% 0%", "0 0", "0%0%", "x% 0%", "",
+    };
+
+    for (size_t i = 0; i < sizeof(bad_offsets) / sizeof(bad_offsets[0]); i++)
+    {
+        CRT_AUTO_SETTINGS t = settings_with("viewport_offset", "10% 10%");
+        CHECK(!crt_auto_set(&t, "viewport_offset", bad_offsets[i]) && t.offset_x == 0.0f && t.offset_y == 0.0f);
     }
 }
 

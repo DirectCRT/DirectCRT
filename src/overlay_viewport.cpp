@@ -247,3 +247,274 @@ void menu_viewport(int setting, const SETTING* s, float F)
             overlay_menu_write(setting, v);
     }
 }
+
+/* ---------------------------------------- viewport_offset: moving the picture */
+
+#define PAN_WRITE_MS 40 /* while it's dragged, how often it's written */
+
+static int g_pan = -1;              /* the setting being moved, or -1 */
+static char g_pan_start[MENU_TEXT]; /* its value before, for Cancel */
+static bool g_pan_start_set;        /* and whether the ini had it */
+static float g_pan_x, g_pan_y;      /* where it is, as crt_auto.c reads it */
+static bool g_pan_dragging;
+static bool g_pan_unwritten;        /* dragged since the last write */
+static DWORD g_pan_written_ms;
+
+static float pan_clamp(float v)
+{
+    return v < -CRT_AUTO_OFFSET_MAX ? -CRT_AUTO_OFFSET_MAX : v > CRT_AUTO_OFFSET_MAX ? CRT_AUTO_OFFSET_MAX : v;
+}
+
+/* A fraction as a percentage, without the zeros it doesn't need */
+static void pan_percent(float v, char* buf, size_t size)
+{
+    _snprintf(buf, size - 1, "%.4f", v * 100.0f);
+    buf[size - 1] = 0;
+
+    char* end = buf + strlen(buf);
+
+    while (end > buf && end[-1] == '0')
+        *--end = 0;
+
+    if (end > buf && end[-1] == '.')
+        *--end = 0;
+
+    if (!strcmp(buf, "-0"))
+        strncpy(buf, "0", size);
+}
+
+static void pan_write(void)
+{
+    char x[32], y[32], v[64];
+    pan_percent(g_pan_x, x, sizeof(x));
+    pan_percent(g_pan_y, y, sizeof(y));
+    _snprintf(v, sizeof(v) - 1, "%s%% %s%%", x, y);
+    v[sizeof(v) - 1] = 0;
+
+    overlay_menu_write(g_pan, v);
+    g_pan_written_ms = GetTickCount();
+    g_pan_unwritten = false;
+}
+
+static void pan_move(float dx, float dy)
+{
+    g_pan_x = pan_clamp(g_pan_x + dx);
+    g_pan_y = pan_clamp(g_pan_y + dy);
+}
+
+/* One of n: a step of one pixel of the game's picture or of the screen's */
+static float pan_step(int n)
+{
+    return n > 0 ? 1.0f / n : 0.001f;
+}
+
+/* "Right 20 px, up 4 px", in the screen's pixels */
+static void pan_describe(float x, float y, char* buf, size_t size)
+{
+    int px = (int)roundf(x * g_ddraw.render.viewport.width);
+    int py = (int)roundf(y * g_ddraw.render.viewport.height);
+
+    if (px == 0 && py == 0)
+        strncpy(buf, x == 0.0f && y == 0.0f ? "Centred" : "Less than a pixel from the centre", size - 1);
+    else if (py == 0)
+        _snprintf(buf, size - 1, "%s %d px", px > 0 ? "Right" : "Left", abs(px));
+    else if (px == 0)
+        _snprintf(buf, size - 1, "%s %d px", py > 0 ? "Down" : "Up", abs(py));
+    else
+        _snprintf(buf, size - 1, "%s %d px, %s %d px", px > 0 ? "Right" : "Left", abs(px), py > 0 ? "down" : "up", abs(py));
+
+    buf[size - 1] = 0;
+}
+
+bool menu_pan_active(void)
+{
+    return g_pan >= 0;
+}
+
+static void menu_pan_start(int setting)
+{
+    BOOL set = FALSE;
+    const char* v = overlay_menu_value(setting, &set);
+
+    strncpy(g_pan_start, v, sizeof(g_pan_start) - 1);
+    g_pan_start[sizeof(g_pan_start) - 1] = 0;
+    g_pan_start_set = set != FALSE;
+
+    g_pan_x = g_pan_y = 0.0f;
+    crt_auto_parse_offset(v, &g_pan_x, &g_pan_y);
+
+    g_pan = setting;
+    g_pan_dragging = false;
+    g_pan_unwritten = false;
+
+    /* The keys are the picture's now: ImGui won't see the Enter that started
+     * it let go */
+    ImGui::GetIO().ClearInputKeys();
+}
+
+void menu_pan_end(bool keep)
+{
+    if (g_pan < 0)
+        return;
+
+    if (!keep)
+        overlay_menu_write(g_pan, g_pan_start_set ? g_pan_start : NULL);
+    else if (g_pan_unwritten)
+        pan_write();
+
+    g_pan = -1;
+    g_pan_dragging = false;
+    ImGui::GetIO().ClearInputKeys();
+}
+
+void menu_pan_key(const OVERLAY_EVENT* e)
+{
+    if (g_pan < 0 || !e->down)
+        return;
+
+    /* A pixel of the game's picture; ten with Shift; one of the screen's with Ctrl */
+    float sx = pan_step(g_ddraw.width), sy = pan_step(g_ddraw.height);
+
+    if (e->ctrl)
+    {
+        sx = pan_step(g_ddraw.render.viewport.width);
+        sy = pan_step(g_ddraw.render.viewport.height);
+    }
+    else if (e->shift)
+    {
+        sx *= 10.0f;
+        sy *= 10.0f;
+    }
+
+    switch (e->vk)
+    {
+    case VK_LEFT: pan_move(-sx, 0.0f); break;
+    case VK_RIGHT: pan_move(sx, 0.0f); break;
+    case VK_UP: pan_move(0.0f, -sy); break;
+    case VK_DOWN: pan_move(0.0f, sy); break;
+    case VK_HOME: g_pan_x = g_pan_y = 0.0f; break;
+    case VK_RETURN: menu_pan_end(true); return;
+    case VK_ESCAPE: menu_pan_end(false); return;
+    default: return;
+    }
+
+    pan_write();
+}
+
+/* While the picture is moved: no panel in front of it, a bar at the bottom
+ * with the keys, and the mouse drags it */
+void menu_pan_draw(int width, int canvas_height, float F)
+{
+    ImGuiIO& io = ImGui::GetIO();
+    const ImGuiStyle& style = ImGui::GetStyle();
+    float pw = (float)g_ddraw.render.viewport.width, ph = (float)g_ddraw.render.viewport.height;
+    bool over_bar = ImGui::IsWindowHovered(ImGuiHoveredFlags_AnyWindow);
+
+    if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !over_bar)
+        g_pan_dragging = true;
+
+    if (!over_bar || g_pan_dragging)
+        ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeAll);
+
+    if (g_pan_dragging)
+    {
+        if ((io.MouseDelta.x != 0.0f || io.MouseDelta.y != 0.0f) && pw > 0.0f && ph > 0.0f)
+        {
+            pan_move(io.MouseDelta.x / pw, io.MouseDelta.y / ph);
+            g_pan_unwritten = true;
+        }
+
+        if (!ImGui::IsMouseDown(ImGuiMouseButton_Left))
+            g_pan_dragging = false;
+
+        if (g_pan_unwritten && (!g_pan_dragging || GetTickCount() - g_pan_written_ms >= PAN_WRITE_MS))
+            pan_write();
+    }
+
+    static const char* const hints[][2] = {
+        { "\xe2\x86\x90\xe2\x86\x91\xe2\x86\x92\xe2\x86\x93", "Move" },
+        { "Shift", "10\xc3\x97" },
+        { "Ctrl", "1 pixel" },
+        { "Home", "Centre" },
+        { "Enter", "Keep" },
+        { "Esc", "Cancel" },
+    };
+    const int count = (int)(sizeof(hints) / sizeof(hints[0]));
+
+    /* The hints' width, measured right to left as they're drawn */
+    float hx = 0.0f;
+
+    for (int i = count - 1; i >= 0; i--)
+        hx = menu_hint(NULL, hx, 0.0f, -FLT_MAX, hints[i][0], hints[i][1], F);
+
+    float hints_w = -hx - 1.2f * F;
+    float pad = 0.9f * F;
+
+    ImGui::SetNextWindowPos(ImVec2(width * 0.5f, canvas_height - 1.5f * F), ImGuiCond_Always, ImVec2(0.5f, 1.0f));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(pad, pad));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.4f * F);
+
+    ImGuiWindowFlags flags =
+        ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
+        ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_AlwaysAutoResize;
+
+    bool shown = ImGui::Begin("##pan", NULL, flags);
+    ImGui::PopStyleVar(2);
+
+    if (shown)
+    {
+        char line[160];
+
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted("Move the picture");
+
+        float cw = ImGui::CalcTextSize("Cancel").x + style.FramePadding.x * 2;
+        float kw = ImGui::CalcTextSize("Keep").x + style.FramePadding.x * 2;
+        float bx = pad + hints_w - cw - style.ItemSpacing.x - kw;
+
+        ImGui::SameLine();
+
+        if (bx > ImGui::GetCursorPosX())
+            ImGui::SetCursorPosX(bx);
+
+        if (ui_button("Cancel", cw, false))
+            menu_pan_end(false);
+
+        ImGui::SameLine();
+
+        if (ui_button("Keep", kw, true))
+            menu_pan_end(true);
+
+        pan_describe(g_pan_x, g_pan_y, line, sizeof(line));
+        strncat(line, ". Or drag it with the mouse", sizeof(line) - strlen(line) - 1);
+        ui_note(line, F);
+
+        ImGui::Dummy(ImVec2(hints_w, 2.0f * F));
+        ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        hx = b.x;
+
+        for (int i = count - 1; i >= 0 && hx >= 0.0f; i--)
+            hx = menu_hint(dl, hx, (a.y + b.y) * 0.5f, a.x - 1.0f, hints[i][0], hints[i][1], F);
+    }
+
+    ImGui::End();
+}
+
+/* The viewport_offset row: where the picture is, and the button that moves it */
+void menu_viewport_offset(int setting, const SETTING* s, float F)
+{
+    (void)s;
+
+    float x = 0.0f, y = 0.0f;
+    char line[160];
+
+    crt_auto_parse_offset(overlay_menu_value(setting, NULL), &x, &y);
+    pan_describe(x, y, line, sizeof(line));
+    ImGui::TextUnformatted(line);
+
+    if (ui_button("Move the picture", 0.0f, true))
+        menu_pan_start(setting);
+
+    ui_take_focus(ImGui::GetItemID());
+}

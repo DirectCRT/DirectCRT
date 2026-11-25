@@ -106,6 +106,12 @@ typedef struct CRT_VIEWPORT
 /* The viewport setting's value; 0, and out unchanged, if it isn't valid */
 int crt_auto_parse_viewport(const char* v, CRT_VIEWPORT* out);
 
+#define CRT_AUTO_OFFSET_MAX 0.5f
+
+/* The viewport_offset setting's value, "H% V%", as fractions of the picture's
+ * width and height; 0, and x and y unchanged, if it isn't valid */
+int crt_auto_parse_offset(const char* v, float* x, float* y);
+
 #define CRT_AUTO_SETTING_AUTO (-1000)
 
 typedef struct CRT_AUTO_SETTINGS
@@ -115,6 +121,11 @@ typedef struct CRT_AUTO_SETTINGS
     CRT_INTEGER_SCALING integer_scaling;
     CRT_VIEWPORT viewport;
     int color_space; /* 0 srgb, 1 dci-p3, 2 dci-p3-d65, 3 display-p3, 4 modern-p3, 5 adobe-rgb, 6 rec-2020 */
+
+    /* viewport_offset, DirectCRT's own: the picture moved from where the
+     * viewport puts it, by fractions of its width and height; right and down */
+    float offset_x;
+    float offset_y;
 
     /* Image adjustments, in the settings' own ranges. CRT_AUTO_SETTING_AUTO
      * where 'auto' is allowed */

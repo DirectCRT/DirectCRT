@@ -1063,10 +1063,9 @@ static void ogl_render()
 
         LeaveCriticalSection(&g_ddraw.cs);
 
-        if (g_ddraw.render.viewport.x != 0 || g_ddraw.render.viewport.y != 0)
-        {
-            glClear(GL_COLOR_BUFFER_BIT);
-        }
+        /* Every frame, as Direct3D 11 does: viewport_offset can leave a
+         * border on one side only, with the picture at 0,0 */
+        glClear(GL_COLOR_BUFFER_BIT);
 
         if (glActiveTexture)
             glActiveTexture(GL_TEXTURE0);

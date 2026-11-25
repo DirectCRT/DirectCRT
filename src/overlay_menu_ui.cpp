@@ -83,6 +83,7 @@ static void menu_close_row(bool focus)
 
 void menu_reset(void)
 {
+    menu_pan_end(true);
     memset(g_key_down, 0, sizeof(g_key_down));
     menu_close_row(false);
     g_focus_row = -1;
@@ -242,6 +243,14 @@ void menu_input(int width, int canvas_height)
                 if (g_capture >= 0)
                 {
                     menu_capture_key(e);
+                    break;
+                }
+
+                /* The keys move the picture; ImGui sees none of them */
+                if (menu_pan_active())
+                {
+                    menu_pan_key(e);
+                    g_key_down[e->vk & 0xFF] = false;
                     break;
                 }
 
@@ -1198,6 +1207,7 @@ static void menu_editor(int first, int count, float F)
     const ImGuiStyle& style = ImGui::GetStyle();
     bool listed = s->choices && s->kind != SETTING_BOOL && s->kind != SETTING_KEY && count == 1;
     bool viewport = s->key && !strcmp(s->key, "viewport");
+    bool offset = s->key && !strcmp(s->key, "viewport_offset");
     char text[1024], desc[1024];
     bool has_desc = menu_description(first, desc, sizeof(desc));
 
@@ -1206,7 +1216,7 @@ static void menu_editor(int first, int count, float F)
     ImGui::PushStyleColor(ImGuiCol_Text, COL_DIM);
     ImGui::PushTextWrapPos(0.0f);
 
-    while (menu_general_line(help, &cursor, text, sizeof(text), !listed && !viewport))
+    while (menu_general_line(help, &cursor, text, sizeof(text), offset || (!listed && !viewport)))
     {
         if (!has_desc || strcmp(text, desc))
             ImGui::TextUnformatted(text);
@@ -1234,6 +1244,11 @@ static void menu_editor(int first, int count, float F)
     if (viewport)
     {
         menu_viewport(first, s, F);
+        editor = false;
+    }
+    else if (offset)
+    {
+        menu_viewport_offset(first, s, F);
         editor = false;
     }
     else if (listed)
@@ -1739,9 +1754,7 @@ static void menu_list(float F)
 
 /* -------------------------------------------------- the settings OSD's panel */
 
-/* A key and what it does, in the footer, drawn right to left from x;
- * returns where the next one goes, or -1 when it didn't fit after min_x */
-static float menu_hint(ImDrawList* dl, float x, float cy, float min_x, const char* key, const char* what, float F)
+float menu_hint(ImDrawList* dl, float x, float cy, float min_x, const char* key, const char* what, float F)
 {
     float key_size = 0.82f * F, what_size = 0.88f * F;
     ImVec2 ks = ui_text_size(key_size, key);
@@ -1753,6 +1766,10 @@ static float menu_hint(ImDrawList* dl, float x, float cy, float min_x, const cha
         return -1.0f;
 
     float left = x - w;
+
+    if (!dl)
+        return left - 1.2f * F;
+
     ImVec2 a(left, cy - cap_h * 0.5f), b(left + cap_w, cy + cap_h * 0.5f);
     dl->AddRectFilled(a, b, ui_col(COL_PILL), 0.3f * F);
     dl->AddRect(a, b, ui_col(COL_RULE), 0.3f * F, 1.0f);
@@ -1765,6 +1782,14 @@ static float menu_hint(ImDrawList* dl, float x, float cy, float min_x, const cha
 /* The settings OSD: a panel down the left, the picture still showing to its right */
 void menu_draw(int width, int canvas_height, float F, bool first)
 {
+    /* The picture being moved: the list takes the keyboard back after */
+    if (menu_pan_active())
+    {
+        menu_pan_draw(width, canvas_height, F);
+        g_focus_rows = true;
+        return;
+    }
+
     float ch = (float)canvas_height;
     float pw = width * 0.32f;
 

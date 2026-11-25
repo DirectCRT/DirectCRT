@@ -27,7 +27,9 @@ turned on, aren't part of DirectCRT: a setting a game needs goes in its own
   screen's size, its picture size and its colours, with the same result as
   DOSBox. `sharp`, `nearest` and `bilinear` are the other shaders.
 - **Scaling as in DOSBox Staging:** aspect ratio correction, integer scaling
-  and a viewport of any size, with every shader.
+  and a viewport of any size, with every shader. The picture can be moved
+  too, like a CRT's position controls, with the arrow keys or the mouse in
+  the settings OSD.
 - **Colour adjustments as in DOSBox Staging:** CRT colour profiles,
   brightness, contrast, gamma, colour temperature and gain, saturation and
   black level, with every shader, and wide gamut colour spaces (Display P3,

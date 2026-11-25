@@ -426,7 +426,8 @@ CRT_AUTO_LAYOUT crt_auto_calc_layout(
     }
 
     /* RENDER_CalcDrawRectInPixels, rounded as in GFX_CalcDrawRectInPixels.
-     * With 'viewport = relative' the picture can be larger than the canvas */
+     * With 'viewport = relative' the picture can be larger than the canvas;
+     * viewport_offset moves it, partly off the canvas too */
     {
         RECTF r = calc_draw_rect(
             s->integer_scaling,
@@ -437,8 +438,8 @@ CRT_AUTO_LAYOUT crt_auto_calc_layout(
             layout.render_height,
             pixel_aspect(aspect, layout.render_width, layout.render_height));
 
-        layout.x = iroundf(r.x);
-        layout.y = iroundf(r.y);
+        layout.x = iroundf(r.x + s->offset_x * r.w);
+        layout.y = iroundf(r.y + s->offset_y * r.h);
         layout.width = iroundf(r.w);
         layout.height = iroundf(r.h);
     }
@@ -704,6 +705,35 @@ static int parse_percent(const char* v, size_t len, float* out)
     return len >= 2 && v[len - 1] == '%' && parse_float(v, len - 1, out);
 }
 
+/* "A% B%", separated by spaces */
+static int parse_two_percents(const char* p, float* a, float* b)
+{
+    const char* parts[2] = { NULL, NULL };
+    size_t lens[2] = { 0, 0 };
+    int n = 0;
+
+    while (*p)
+    {
+        while (*p == ' ' || *p == '\t')
+            p++;
+
+        if (!*p)
+            break;
+
+        if (n == 2)
+            return 0;
+
+        parts[n] = p;
+        while (*p && *p != ' ' && *p != '\t')
+            p++;
+
+        lens[n] = (size_t)(p - parts[n]);
+        n++;
+    }
+
+    return n == 2 && parse_percent(parts[0], lens[0], a) && parse_percent(parts[1], lens[1], b);
+}
+
 static int parse_int_in_range(const char* v, int min, int max, int* out)
 {
     int n;
@@ -771,36 +801,11 @@ int crt_auto_parse_viewport(const char* v, CRT_VIEWPORT* out)
 
     if (starts_with_i(v, "relative"))
     {
-        /* relative H% V%, separated by spaces */
+        /* relative H% V% */
         const char* p = v + 8;
-        const char* parts[2] = { NULL, NULL };
-        size_t lens[2] = { 0, 0 };
-        int n = 0;
-
-        if (*p != ' ' && *p != '\t')
-            return 0;
-
-        while (*p)
-        {
-            while (*p == ' ' || *p == '\t')
-                p++;
-
-            if (!*p)
-                break;
-
-            if (n == 2)
-                return 0;
-
-            parts[n] = p;
-            while (*p && *p != ' ' && *p != '\t')
-                p++;
-
-            lens[n] = (size_t)(p - parts[n]);
-            n++;
-        }
-
         float w, h;
-        if (n != 2 || !parse_percent(parts[0], lens[0], &w) || !parse_percent(parts[1], lens[1], &h))
+
+        if ((*p != ' ' && *p != '\t') || !parse_two_percents(p, &w, &h))
             return 0;
 
         w /= 100.0f;
@@ -832,6 +837,24 @@ int crt_auto_parse_viewport(const char* v, CRT_VIEWPORT* out)
     return 1;
 }
 
+int crt_auto_parse_offset(const char* v, float* x, float* y)
+{
+    float dx, dy;
+
+    if (!parse_two_percents(v, &dx, &dy))
+        return 0;
+
+    dx /= 100.0f;
+    dy /= 100.0f;
+
+    if (fabsf(dx) > CRT_AUTO_OFFSET_MAX || fabsf(dy) > CRT_AUTO_OFFSET_MAX)
+        return 0;
+
+    *x = dx;
+    *y = dy;
+    return 1;
+}
+
 /* The settings, with DOSBox Staging's defaults and the ranges of their
  * numbers (min = max = 0: not a number) */
 static const struct
@@ -844,6 +867,7 @@ static const struct
     { "aspect", "auto" },
     { "integer_scaling", "auto" },
     { "viewport", "fit" },
+    { "viewport_offset", "0% 0%" },
     { "color_space", "srgb" },
     { "image_adjustments", "on" },
     { "crt_color_profile", "auto" },
@@ -956,6 +980,9 @@ static int parse_setting(CRT_AUTO_SETTINGS* s, const char* name, const char* v)
 
     if (str_ieq(name, "viewport"))
         return crt_auto_parse_viewport(v, &s->viewport);
+
+    if (str_ieq(name, "viewport_offset"))
+        return crt_auto_parse_offset(v, &s->offset_x, &s->offset_y);
 
     if (str_ieq(name, "color_space"))
     {
