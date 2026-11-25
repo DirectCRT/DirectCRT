@@ -46,6 +46,28 @@ static void check_layout(
 #define LAYOUT_WITH(s, d, mw, mh, cw, ch, shader, pps, rw, rh, x, y, w, h) \
     check_layout(__LINE__, &(s), d, mw, mh, cw, ch, shader, pps, rw, rh, x, y, w, h)
 
+/* The viewport's area in the layout */
+static void check_viewport_rect(
+    int line, const CRT_AUTO_SETTINGS* settings, const CRT_AUTO_DISPLAY* display,
+    int mw, int mh, int cw, int ch, int x, int y, int w, int h)
+{
+    CRT_AUTO_LAYOUT l = crt_auto_calc_layout(settings, display, mw, mh, cw, ch);
+
+    g_checks++;
+
+    if (l.viewport_x != x || l.viewport_y != y || l.viewport_width != w || l.viewport_height != h)
+    {
+        g_failed++;
+        printf(
+            "  FAIL line %d: %dx%d in %dx%d: viewport %d,%d %dx%d, expected %d,%d %dx%d\n",
+            line, mw, mh, cw, ch,
+            l.viewport_x, l.viewport_y, l.viewport_width, l.viewport_height, x, y, w, h);
+    }
+}
+
+#define VIEWPORT_RECT(s, d, mw, mh, cw, ch, x, y, w, h) \
+    check_viewport_rect(__LINE__, &(s), d, mw, mh, cw, ch, x, y, w, h)
+
 /* The defaults with one setting changed */
 static CRT_AUTO_SETTINGS settings_with(const char* name, const char* value)
 {
@@ -234,6 +256,24 @@ static void test_viewport()
 
     s = settings_with("viewport_offset", "-50% -50%");
     LAYOUT_WITH(s, NULL, 640, 480, 1920, 1080, CRT_SHADER_VGA_1080P, 2, 640, 480, -320, -420, 1280, 960);
+
+    /* The viewport's own area, centred as the picture is: a size, the
+     * canvas for fit and when it's rejected, a relative box past the canvas;
+     * viewport_offset moves it with the picture */
+    s = settings_with("viewport", "1280x960px");
+    VIEWPORT_RECT(s, &d, 640, 480, 2560, 1440, 640, 240, 1280, 960);
+
+    s = settings_with("viewport", "relative 50% 50%");
+    VIEWPORT_RECT(s, NULL, 640, 480, 2560, 1440, 800, 360, 960, 720);
+
+    s = settings_with("viewport", "relative 200% 200%");
+    VIEWPORT_RECT(s, NULL, 640, 480, 1920, 1080, -480, -540, 2880, 2160);
+
+    s = settings_with("viewport", "2600x1440");
+    VIEWPORT_RECT(s, &d, 640, 480, 3840, 2160, 0, 0, 3840, 2160);
+
+    s = settings_with("viewport_offset", "10% 5%");
+    VIEWPORT_RECT(s, NULL, 640, 480, 1920, 1080, 128, 48, 1920, 1080);
 }
 
 static void test_settings_parse()

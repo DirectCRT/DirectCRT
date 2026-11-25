@@ -50,6 +50,14 @@ typedef struct CRT_AUTO_LAYOUT
     int width;
     int height;
 
+    /* The area the viewport setting gives, which the picture is fitted in:
+     * centred as the picture is and moved with it, top-left origin. It can
+     * be larger than the canvas */
+    int viewport_x;
+    int viewport_y;
+    int viewport_width;
+    int viewport_height;
+
     /* The viewport setting was larger than the desktop: DOSBox rejects it and
      * uses 'fit', and so does this */
     int viewport_rejected;

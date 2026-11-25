@@ -22,6 +22,25 @@ extern "C" {
 
 static DWORD g_slider_written_ms;
 
+/* While a viewport slider is dragged: the area the viewport gives, outlined
+ * behind the panel. It's the picture's layout, so it follows the writes */
+static void viewport_outline(float F)
+{
+    const CRT_AUTO_LAYOUT* l = &g_ddraw.render.crt;
+
+    if (l->viewport_width <= 0 || l->viewport_height <= 0)
+        return;
+
+    /* Inside the area, dark under the accent so it shows on any picture */
+    float t = 0.15f * F > 1.0f ? 0.15f * F : 1.0f;
+    ImVec2 a((float)l->viewport_x + t, (float)l->viewport_y + t);
+    ImVec2 b((float)(l->viewport_x + l->viewport_width) - t, (float)(l->viewport_y + l->viewport_height) - t);
+    ImDrawList* dl = ImGui::GetBackgroundDrawList();
+
+    dl->AddRect(a, b, IM_COL32(0, 0, 0, 160), 0.0f, t * 2.0f);
+    dl->AddRect(a, b, ImGui::GetColorU32(COL_ACCENT), 0.0f, t);
+}
+
 /* A viewport's kind, as crt_auto.c reads it, and its numbers: the size, or
  * the percentages; what crt_auto.c doesn't take is "fit" */
 static int menu_viewport_mode(const char* v, int* a, int* b)
@@ -200,6 +219,9 @@ void menu_viewport(int setting, const SETTING* s, float F)
             wa = live;
         }
 
+        if (live >= 0)
+            viewport_outline(F);
+
         _snprintf(line, sizeof(line) - 1, "%d%% of the desktop is %d\xc3\x97%d pixels", a, (int)(dw * a / 100.0f), (int)(dh * a / 100.0f));
         line[sizeof(line) - 1] = 0;
         ui_note(line, F);
@@ -235,6 +257,9 @@ void menu_viewport(int setting, const SETTING* s, float F)
             wa = linked || live_h >= 0 ? drag : a;
             wb = linked || live_v >= 0 ? drag : b;
         }
+
+        if (drag >= 0)
+            viewport_outline(F);
 
         if (ImGui::Checkbox("Same for both", &linked) && linked && a != b)
         {

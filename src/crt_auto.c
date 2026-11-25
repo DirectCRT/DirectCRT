@@ -442,6 +442,11 @@ CRT_AUTO_LAYOUT crt_auto_calc_layout(
         layout.y = iroundf(r.y + s->offset_y * r.h);
         layout.width = iroundf(r.w);
         layout.height = iroundf(r.h);
+
+        layout.viewport_x = iroundf((float)canvas_width / 2 - viewport.w / 2 + s->offset_x * r.w);
+        layout.viewport_y = iroundf((float)canvas_height / 2 - viewport.h / 2 + s->offset_y * r.h);
+        layout.viewport_width = iroundf(viewport.w);
+        layout.viewport_height = iroundf(viewport.h);
     }
 
     return layout;
