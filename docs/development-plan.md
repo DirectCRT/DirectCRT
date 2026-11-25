@@ -369,7 +369,7 @@ otherwise keep the no-shading trap. `original` has to be chosen.
      (the fake double scan shader).
    - Done: DOSBox-style settings. `aspect`, `integer_scaling`, `viewport`
      (`fit`, `WxH`, `WxHpx`, and `relative H% V%`, which is DirectCRT's own:
-     DOSBox's `N%` of the desktop with a percentage each way, 10% to 300%),
+     DOSBox's `N%` of the desktop with a percentage each way, 10% to 200%),
      `image_adjustments`, `crt_color_profile`, `brightness`, `contrast`,
      `gamma`, `digital_contrast`, `black_level`, `saturation`,
      `color_temperature`, `color_temperature_luma_preserve` and the RGB gains,

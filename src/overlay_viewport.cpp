@@ -220,7 +220,7 @@ void menu_viewport(int setting, const SETTING* s, float F)
             ImGui::TableSetColumnIndex(0);
             float top = ImGui::GetCursorScreenPos().y;
 
-            if (ui_slider_box("##h", "Horizontal", a, 10, 300, F, &n, 0, &live_h))
+            if (ui_slider_box("##h", "Horizontal", a, 10, 200, F, &n, 0, &live_h))
             {
                 write_mode = mode;
                 wa = n;
@@ -233,7 +233,7 @@ void menu_viewport(int setting, const SETTING* s, float F)
             ImGui::TableSetColumnIndex(0);
             ImGui::BeginDisabled(linked);
 
-            if (ui_slider_box("##v", "Vertical", linked ? cur_a : b, 10, 300, F, &n, 0, &live_v))
+            if (ui_slider_box("##v", "Vertical", linked ? cur_a : b, 10, 200, F, &n, 0, &live_v))
             {
                 write_mode = mode;
                 wa = a;

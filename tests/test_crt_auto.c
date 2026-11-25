@@ -349,13 +349,13 @@ static void test_settings_parse()
     CHECK(crt_auto_set(&s, "viewport", "800,600PX") && s.viewport.mode == CRT_VIEWPORT_LIMIT_PX);
     CHECK(crt_auto_set(&s, "viewport", "relative 120% 80%") && s.viewport.mode == CRT_VIEWPORT_RELATIVE);
     CHECK(fabsf(s.viewport.width - 1.2f) < 1e-6f && fabsf(s.viewport.height - 0.8f) < 1e-6f);
-    CHECK(crt_auto_set(&s, "viewport", "relative 10% 300%") && s.viewport.mode == CRT_VIEWPORT_RELATIVE);
+    CHECK(crt_auto_set(&s, "viewport", "relative 10% 200%") && s.viewport.mode == CRT_VIEWPORT_RELATIVE);
     CHECK(crt_auto_set(&s, "viewport", "fit") && s.viewport.mode == CRT_VIEWPORT_FIT);
 
     /* N% was the desktop viewport; relative H% V% does it now */
     static const char* const bad_viewports[] = {
         "0x600", "800x", "800x600x2", "75%", "101%", "medium", "50", "relative 9% 80%",
-        "relative 100% 301%", "relative 100%", "relative 100% 100% 100%", "relative100% 100%", "",
+        "relative 100% 201%", "relative 100%", "relative 100% 100% 100%", "relative100% 100%", "",
     };
 
     for (size_t i = 0; i < sizeof(bad_viewports) / sizeof(bad_viewports[0]); i++)

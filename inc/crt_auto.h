@@ -106,7 +106,7 @@ typedef struct CRT_VIEWPORT
     CRT_VIEWPORT_MODE mode;
 
     /* LIMIT and LIMIT_PX: the size. RELATIVE: the fractions of the desktop's
-     * width and height (0.1 to 3) */
+     * width and height (0.1 to 2) */
     float width;
     float height;
 } CRT_VIEWPORT;

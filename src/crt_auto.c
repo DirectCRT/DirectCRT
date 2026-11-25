@@ -807,7 +807,7 @@ int crt_auto_parse_viewport(const char* v, CRT_VIEWPORT* out)
         w /= 100.0f;
         h /= 100.0f;
 
-        if (w < 0.1f || w > 3.0f || h < 0.1f || h > 3.0f)
+        if (w < 0.1f || w > 2.0f || h < 0.1f || h > 2.0f)
             return 0;
 
         vp.mode = CRT_VIEWPORT_RELATIVE;
