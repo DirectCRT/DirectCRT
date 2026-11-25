@@ -164,4 +164,7 @@ void blt_stretch(
     int src_p,
     int bpp);
 
+/* Frees the calling thread's stretch table (DLL_THREAD_DETACH) */
+void blt_thread_exit(void);
+
 #endif
