@@ -61,21 +61,33 @@ jobs:
           if ($version -ne $env:GITHUB_REF_NAME.Substring(1)) { throw "ddraw.dll is $version, the tag is $env:GITHUB_REF_NAME" }
           "ddraw.dll is $version"
 
+      # The DLL and the licences; ddtest is a developer's tool and stays out.
+      # The debug configurations keep their .pdb; Release's goes in a zip of
+      # its own, for reading crash dumps, so the one most people get is small
       - name: Collect files
         shell: bash
         run: |
+          bin="bin/${{ matrix.configuration }}"
           out="DirectCRT-${{ matrix.configuration }}"
           mkdir "$out"
-          cp "bin/${{ matrix.configuration }}/ddraw.dll" "bin/${{ matrix.configuration }}/ddraw.pdb" "$out"
-          if [[ -f "bin/${{ matrix.configuration }}/ddtest.exe" ]]; then
-            cp "bin/${{ matrix.configuration }}/ddtest.exe" "$out"
+          cp "$bin/ddraw.dll" LICENSE LICENSE-cnc-ddraw.txt "$out"
+          if [[ "${{ matrix.configuration }}" == Release ]]; then
+            mkdir DirectCRT-Release-symbols
+            cp "$bin/ddraw.pdb" DirectCRT-Release-symbols
+          else
+            cp "$bin/ddraw.pdb" "$out"
           fi
-          cp LICENSE LICENSE-cnc-ddraw.txt "$out"
 
       - uses: actions/upload-artifact@v7
         with:
           name: DirectCRT-${{ matrix.configuration }}
           path: DirectCRT-${{ matrix.configuration }}
+
+      - uses: actions/upload-artifact@v7
+        if: matrix.configuration == 'Release'
+        with:
+          name: DirectCRT-Release-symbols
+          path: DirectCRT-Release-symbols
 
   shaders:
     # The Direct3D 11 shaders in src/d3d11_shaders are committed, so a normal
