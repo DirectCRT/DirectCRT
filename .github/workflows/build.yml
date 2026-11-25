@@ -130,15 +130,42 @@ jobs:
       contents: write
 
     steps:
+      - uses: actions/checkout@v7
+        with:
+          # The history and the tags, for the commits since the last version
+          fetch-depth: 0
+          path: src
+
       - uses: actions/download-artifact@v8
+        with:
+          path: artifacts
 
       - name: Zip each configuration
+        working-directory: artifacts
         run: for d in DirectCRT-*/; do (cd "$d" && zip -qr "../${d%/}.zip" .); done
+
+      # GitHub's generated notes list merged pull requests, and the commits
+      # go straight to master, so the notes are the commits since the
+      # previous version tag (vX.Y.Z; cnc-ddraw's v7.1.0.0 and the like
+      # don't count), newest first. Edit them in the draft before publishing
+      - name: Write the release notes
+        working-directory: src
+        run: |
+          prev="$(git describe --tags --abbrev=0 --match='v[0-9]*' --exclude='v*.*.*.*' "$GITHUB_REF_NAME^" 2>/dev/null || true)"
+          if [[ -z "$prev" ]]; then echo "No previous version tag" >&2; exit 1; fi
+          {
+            echo "## Changes since $prev"
+            echo
+            git log --no-merges --format='- %s (%h)' "$prev..$GITHUB_REF_NAME"
+            echo
+            echo "**Full changelog**: https://github.com/$GITHUB_REPOSITORY/compare/$prev...$GITHUB_REF_NAME"
+          } > ../notes.md
+          cat ../notes.md
 
       - name: Create the draft release
         env:
           GH_TOKEN: ${{ github.token }}
         run: >
-          gh release create "$GITHUB_REF_NAME" DirectCRT-*.zip
+          gh release create "$GITHUB_REF_NAME" artifacts/DirectCRT-*.zip
           --repo "$GITHUB_REPOSITORY" --title "DirectCRT $GITHUB_REF_NAME"
-          --generate-notes --draft
+          --notes-file notes.md --draft
