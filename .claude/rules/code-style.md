@@ -87,8 +87,8 @@ Design hot code around its data:
   needs it)
 - Data written by different threads (the game's and the renderer's) goes on
   different cache lines
-- Hold a critical section only for the copy that needs it, never across an
-  upload, a `Present` or a wait
+- Hold a critical section only for the copy out of the game's surface (the
+  upload's Map and copy); never across `Present`, a wait or other GPU work
 - SIMD through intrinsics, behind a runtime CPU check with a scalar fallback
   (as `blt.c` does with `g_blt_use_avx`)
 - CPU to GPU: one upload per frame with `D3D11_MAP_WRITE_DISCARD` (or the
