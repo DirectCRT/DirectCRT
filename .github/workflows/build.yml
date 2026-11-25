@@ -67,7 +67,9 @@ jobs:
       # another, so the one most people get is small. DebugLog and DebugLogMini
       # build ddtest as Release, into bin/Release
       # The names carry the version as the DLL does (tools/git-version.ps1):
-      # 0.2.0 on a tag, 0.2.0-3-g1a2b3c4 three commits after it
+      # 0.2.0 on a tag, 0.2.0-3-g1a2b3c4 three commits after it. The readmes
+      # are named for what they cover, as the zips are unpacked into the
+      # game's folder, next to the game's own readme
       - name: Collect files
         shell: bash
         run: |
@@ -78,15 +80,17 @@ jobs:
           out="DirectCRT-$version-${{ matrix.configuration }}"
           mkdir "$out"
           cp "$bin/ddraw.dll" LICENSE LICENSE-cnc-ddraw.txt "$out"
+          sed "s/@VERSION@/$version/" docs/DirectCRT-README.txt > "$out/DirectCRT-README.txt"
           if [[ "${{ matrix.configuration }}" == Release ]]; then
             mkdir "DirectCRT-$version-Release-symbols" "DirectCRT-$version-ddtest"
             cp "$bin/ddraw.pdb" "DirectCRT-$version-Release-symbols"
             cp "$bin/ddtest.exe" LICENSE LICENSE-cnc-ddraw.txt "DirectCRT-$version-ddtest"
-            cp tools/ddtest/README.md "DirectCRT-$version-ddtest/README-ddtest.md"
+            cp tools/ddtest/README.md "DirectCRT-$version-ddtest/ddtest-README.md"
           else
             ddtest_bin="$bin"
             [[ "${{ matrix.configuration }}" == Debug ]] || ddtest_bin=bin/Release
             cp "$bin/ddraw.pdb" "$ddtest_bin/ddtest.exe" "$ddtest_bin/ddtest.pdb" "$out"
+            cp tools/ddtest/README.md "$out/ddtest-README.md"
           fi
 
       - uses: actions/upload-artifact@v7
