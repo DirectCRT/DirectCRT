@@ -61,9 +61,11 @@ jobs:
           if ($version -ne $env:GITHUB_REF_NAME.Substring(1)) { throw "ddraw.dll is $version, the tag is $env:GITHUB_REF_NAME" }
           "ddraw.dll is $version"
 
-      # The DLL and the licences; ddtest is a developer's tool and stays out.
-      # The debug configurations keep their .pdb; Release's goes in a zip of
-      # its own, for reading crash dumps, so the one most people get is small
+      # The DLL and the licences. The debug configurations also carry ddtest,
+      # for testing the DLL they come with, and keep their .pdb files. Release's
+      # .pdb goes in a zip of its own, for reading crash dumps, and ddtest in
+      # another, so the one most people get is small. DebugLog and DebugLogMini
+      # build ddtest as Release, into bin/Release
       - name: Collect files
         shell: bash
         run: |
@@ -72,10 +74,14 @@ jobs:
           mkdir "$out"
           cp "$bin/ddraw.dll" LICENSE LICENSE-cnc-ddraw.txt "$out"
           if [[ "${{ matrix.configuration }}" == Release ]]; then
-            mkdir DirectCRT-Release-symbols
+            mkdir DirectCRT-Release-symbols DirectCRT-ddtest
             cp "$bin/ddraw.pdb" DirectCRT-Release-symbols
+            cp "$bin/ddtest.exe" LICENSE LICENSE-cnc-ddraw.txt DirectCRT-ddtest
+            cp tools/ddtest/README.md DirectCRT-ddtest/README-ddtest.md
           else
-            cp "$bin/ddraw.pdb" "$out"
+            ddtest_bin="$bin"
+            [[ "${{ matrix.configuration }}" == Debug ]] || ddtest_bin=bin/Release
+            cp "$bin/ddraw.pdb" "$ddtest_bin/ddtest.exe" "$ddtest_bin/ddtest.pdb" "$out"
           fi
 
       - uses: actions/upload-artifact@v7
@@ -88,6 +94,12 @@ jobs:
         with:
           name: DirectCRT-Release-symbols
           path: DirectCRT-Release-symbols
+
+      - uses: actions/upload-artifact@v7
+        if: matrix.configuration == 'Release'
+        with:
+          name: DirectCRT-ddtest
+          path: DirectCRT-ddtest
 
   shaders:
     # The Direct3D 11 shaders in src/d3d11_shaders are committed, so a normal
