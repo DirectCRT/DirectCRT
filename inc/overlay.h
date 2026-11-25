@@ -72,7 +72,6 @@ void overlay_gpu_time(double ms);
 void overlay_get_status(OVERLAY_STATUS* status, int canvas_width, int canvas_height);
 
 /* The display's scale (1 = 96 dpi) */
-float overlay_dpi_scale(void);
 
 /* overlay_menu.c: the settings OSD. While it's open the game keeps running,
  * but its keyboard and mouse input goes to the OSD: the game's window
@@ -123,7 +122,6 @@ void overlay_menu_write(int setting, const char* value); /* NULL = remove the ke
 void overlay_menu_values_changed(void); /* any thread: directcrt.ini was written elsewhere */
 void overlay_menu_frame_drawn(BOOL moving); /* render thread: a frame of the OSD, something in it moving */
 BOOL overlay_menu_apply_pending(void); /* a change waits for the OSD to stand still */
-BOOL dd_opengl_waits(void); /* dd.c */
 
 /* overlay.cpp: draw the OSD if it's shown. FALSE = it couldn't be drawn */
 

@@ -149,7 +149,13 @@ BOOL ss_begin()
     time_t t = time(NULL);
     strftime(str_time, sizeof(str_time), "%Y-%m-%d_%H-%M-%S", localtime(&t));
 
-    CreateDirectoryA(g_config.screenshot_dir, NULL);
+    /* The live reload writes it under the lock */
+    char dir[sizeof(g_config.screenshot_dir)];
+    EnterCriticalSection(&g_ddraw.cs);
+    memcpy(dir, g_config.screenshot_dir, sizeof(dir));
+    LeaveCriticalSection(&g_ddraw.cs);
+
+    CreateDirectoryA(dir, NULL);
 
     /* Two in the same second get a number */
     for (int i = 1; i < 100; i++)
@@ -157,9 +163,9 @@ BOOL ss_begin()
         char raw[MAX_PATH], crt[MAX_PATH];
 
         if (i == 1)
-            _snprintf(g_ss_base, sizeof(g_ss_base) - 1, "%s%s_%s", g_config.screenshot_dir, title, str_time);
+            _snprintf(g_ss_base, sizeof(g_ss_base) - 1, "%s%s_%s", dir, title, str_time);
         else
-            _snprintf(g_ss_base, sizeof(g_ss_base) - 1, "%s%s_%s_%d", g_config.screenshot_dir, title, str_time, i);
+            _snprintf(g_ss_base, sizeof(g_ss_base) - 1, "%s%s_%s_%d", dir, title, str_time, i);
 
         g_ss_base[sizeof(g_ss_base) - 1] = 0;
 

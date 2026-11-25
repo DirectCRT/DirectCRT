@@ -67,7 +67,10 @@
     <ClCompile Include="src\screenshot.c" />
     <ClCompile Include="src\overlay.cpp" />
     <ClCompile Include="src\overlay_menu.c" />
+    <ClCompile Include="src\overlay_menu_ui.cpp" />
     <ClCompile Include="src\overlay_status.c" />
+    <ClCompile Include="src\overlay_viewport.cpp" />
+    <ClCompile Include="src\overlay_widgets.cpp" />
     <ClCompile Include="src\settings.c" />
     <ClCompile Include="third_party\imgui\imgui.cpp" />
     <ClCompile Include="third_party\imgui\imgui_draw.cpp" />
@@ -91,6 +94,8 @@
     <ClInclude Include="inc\ddraw.h" />
     <ClInclude Include="inc\overlay.h" />
     <ClInclude Include="inc\overlay_icons.h" />
+    <ClInclude Include="inc\overlay_menu_ui.h" />
+    <ClInclude Include="inc\overlay_widgets.h" />
     <ClInclude Include="inc\delay_imports.h" />
     <ClInclude Include="inc\directinput.h" />
     <ClInclude Include="inc\dllmain.h" />

@@ -24,8 +24,12 @@ LONGLONG vbeam_next_end(LONGLONG t, LONGLONG period);                    /* firs
 DWORD vbeam_line_at(LONGLONG t, LONGLONG period, DWORD total_lines);     /* the line the beam is on */
 DWORD vbeam_total_lines(DWORD active_lines);                             /* active lines plus VGA's share of blank */
 
+/* The rates a CRT could run at */
+#define VBEAM_MIN_HZ 24
+#define VBEAM_MAX_HZ 240
+
 void vbeam_init(void);
-void vbeam_set_rate(DWORD hz);
+void vbeam_set_rate(DWORD hz); /* ignored outside VBEAM_MIN_HZ to VBEAM_MAX_HZ */
 DWORD vbeam_rate(void);
 void vbeam_set_lines(DWORD active_lines); /* the game's mode height */
 

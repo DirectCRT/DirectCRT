@@ -5,14 +5,16 @@
 #include <stdlib.h>
 #include <string.h>
 #include "display_settings.h"
+#include "crt_auto.h"
 
 /* Parsed values are copied into this, lowercased and trimmed */
 #define DS_BUF 128
 
 
-static int iroundf_ds(float f)
+/* As DOSBox's iround and crt_auto.c's: halves away from zero */
+static int iroundf(float f)
 {
-    return (int)floorf(f + 0.5f);
+    return (int)roundf(f);
 }
 
 static int copy_lower(char* dst, const char* src)
@@ -361,18 +363,13 @@ DISPLAY_KIND ds_display_fullscreen_kind(DISPLAY_MODE mode)
 
 void ds_window_client_size(
     const WINDOW_SIZE* size,
-    int desktop_width,
-    int desktop_height,
-    float scale,
+    const CRT_AUTO_DISPLAY* display,
     int game_width,
     int game_height,
     int* out_width,
     int* out_height)
 {
-    (void)desktop_width;
-
-    if (scale <= 0.0f)
-        scale = 1.0f;
+    float scale = display->scale > 0.0f ? display->scale : 1.0f;
 
     if (size->unscaled)
     {
@@ -382,7 +379,7 @@ void ds_window_client_size(
     }
 
     /* As DOSBox: the desktop in logical units isn't rounded */
-    float desktop_h = (float)desktop_height / scale;
+    float desktop_h = (float)display->desktop_height / scale;
     float w, h;
 
     switch (size->unit)
@@ -410,37 +407,34 @@ void ds_window_client_size(
     if (h < (float)WINDOW_MIN_HEIGHT)
         h = (float)WINDOW_MIN_HEIGHT;
 
-    *out_width = iroundf_ds(w * scale);
-    *out_height = iroundf_ds(h * scale);
+    *out_width = iroundf(w * scale);
+    *out_height = iroundf(h * scale);
 }
 
 void ds_window_position_pixels(
     const WINDOW_POSITION* position,
-    int desktop_width,
-    int desktop_height,
-    float scale,
+    const CRT_AUTO_DISPLAY* display,
     int* out_x,
     int* out_y)
 {
-    if (scale <= 0.0f)
-        scale = 1.0f;
+    float scale = display->scale > 0.0f ? display->scale : 1.0f;
 
     switch (position->unit)
     {
     case GEOMETRY_PIXELS:
-        *out_x = iroundf_ds(position->x);
-        *out_y = iroundf_ds(position->y);
+        *out_x = iroundf(position->x);
+        *out_y = iroundf(position->y);
         break;
 
     case GEOMETRY_PERCENT:
-        *out_x = iroundf_ds(position->x * (float)desktop_width / 100.0f);
-        *out_y = iroundf_ds(position->y * (float)desktop_height / 100.0f);
+        *out_x = iroundf(position->x * (float)display->desktop_width / 100.0f);
+        *out_y = iroundf(position->y * (float)display->desktop_height / 100.0f);
         break;
 
     case GEOMETRY_LOGICAL:
     default:
-        *out_x = iroundf_ds(position->x * scale);
-        *out_y = iroundf_ds(position->y * scale);
+        *out_x = iroundf(position->x * scale);
+        *out_y = iroundf(position->y * scale);
         break;
     }
 }
@@ -464,17 +458,8 @@ static int legacy_bool(const char* s, int* out)
     if (!copy_lower(b, s))
         return 0;
 
-    if (!strcmp(b, "true") || !strcmp(b, "yes") || !strcmp(b, "on"))
-    {
-        *out = 1;
+    if (ds_parse_bool(b, out))
         return 1;
-    }
-
-    if (!strcmp(b, "false") || !strcmp(b, "no") || !strcmp(b, "off"))
-    {
-        *out = 0;
-        return 1;
-    }
 
     char* end;
     long v = strtol(b, &end, 10);
@@ -590,12 +575,12 @@ const char* ds_legacy_shader(const char* shader)
     if (!copy_lower(s, shader))
         return NULL;
 
-    static const char* const names[] = { "crt-auto", "sharp", "nearest", "bilinear" };
-
-    for (int i = 0; i < (int)(sizeof(names) / sizeof(names[0])); i++)
+    for (int i = 0; i < CRT_SHADER_SETTING_COUNT; i++)
     {
-        if (!strcmp(s, names[i]))
-            return names[i];
+        const char* name = crt_auto_shader_setting_name((CRT_SHADER_SETTING)i);
+
+        if (!strcmp(s, name))
+            return name;
     }
 
     /* cnc-ddraw's name; its "Bilinear" is matched above */

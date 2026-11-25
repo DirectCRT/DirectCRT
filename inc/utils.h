@@ -25,4 +25,8 @@ void util_set_window_rect(int x, int y, int width, int height, UINT flags);
 BOOL CALLBACK util_enum_thread_wnd_proc(HWND hwnd, LPARAM lParam);
 BOOL CALLBACK util_enum_child_proc(HWND hwnd, LPARAM lParam);
 
+/* A text resource of ddraw.dll's (an RCDATA one), NUL-terminated; free() it.
+ * NULL if it isn't there or is empty */
+char* util_load_text_resource(const char* name);
+
 #endif

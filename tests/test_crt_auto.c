@@ -11,15 +11,7 @@
 #include <string.h>
 #include <math.h>
 #include "crt_auto.h"
-
-static int g_failed;
-static int g_checks;
-
-#define CHECK(cond) \
-    do { \
-        g_checks++; \
-        if (!(cond)) { g_failed++; printf("  FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); } \
-    } while (0)
+#include "check.h"
 
 static void check_layout(
     int line, const CRT_AUTO_SETTINGS* settings, const CRT_AUTO_DISPLAY* display,
@@ -435,6 +427,54 @@ static void test_fixed_shaders()
     LAYOUT_WITH(s, NULL, 320, 200, 2560, 1440, CRT_SHADER_NEAREST, 3, 320, 200, 347, 20, 1867, 1400);
 }
 
+/* Every shader has a name and a resource; the Hyllian ones a preset, and an
+ * unknown one is sharp. Every shader setting's name is taken back */
+static void test_shader_table()
+{
+    for (int i = 0; i < CRT_SHADER_COUNT; i++)
+    {
+        const CRT_SHADER_INFO* info = crt_auto_shader_info((CRT_SHADER)i);
+        CHECK(info->name && info->resource);
+        CHECK((info->preset != NULL) == (i == CRT_SHADER_HYLLIAN_VGA_1440P || i == CRT_SHADER_HYLLIAN_VGA_4K));
+    }
+
+    CHECK_STR(crt_auto_shader_name(CRT_SHADER_VGA_1080P), "crt/vga-1080p");
+    CHECK_STR(crt_auto_shader_info(CRT_SHADER_HYLLIAN_VGA_4K)->preset, "CRT_PRESET_VGA_4K");
+    CHECK(crt_auto_shader_info(CRT_SHADER_COUNT) == crt_auto_shader_info(CRT_SHADER_SHARP));
+
+    for (int i = 0; i < CRT_SHADER_SETTING_COUNT; i++)
+    {
+        CRT_AUTO_SETTINGS s = crt_auto_default_settings();
+        CHECK(crt_auto_set(&s, "shader", crt_auto_shader_setting_name((CRT_SHADER_SETTING)i)));
+        CHECK(s.shader == (CRT_SHADER_SETTING)i);
+    }
+
+    CHECK(crt_auto_shader_setting_name(CRT_SHADER_SETTING_COUNT) == NULL);
+}
+
+/* The colour's uniforms: every field once, with its type */
+static void test_color_uniforms()
+{
+    int n = 0;
+    size_t covered = 0;
+    const CRT_AUTO_UNIFORM* u;
+
+    for (; (u = crt_auto_color_uniform(n)) != NULL; n++)
+    {
+        size_t size = u->type == CRT_AUTO_UNIFORM_VEC3 ? 3 * sizeof(float) :
+            u->type == CRT_AUTO_UNIFORM_INT ? sizeof(int) : sizeof(float);
+        CHECK(u->offset + size <= sizeof(CRT_AUTO_COLOR));
+        covered += size;
+
+        for (int j = 0; j < n; j++)
+            CHECK(strcmp(crt_auto_color_uniform(j)->name, u->name) != 0);
+    }
+
+    CHECK(n == 15);
+    CHECK(covered == sizeof(CRT_AUTO_COLOR));
+    CHECK(crt_auto_color_uniform(-1) == NULL);
+}
+
 int main(void)
 {
     test_1440p();
@@ -452,7 +492,8 @@ int main(void)
     test_params();
     test_real_presets_parse();
     test_fixed_shaders();
+    test_shader_table();
+    test_color_uniforms();
 
-    printf("crt_auto: %d checks, %d failed\n", g_checks, g_failed);
-    return g_failed ? 1 : 0;
+    return check_report("crt_auto");
 }

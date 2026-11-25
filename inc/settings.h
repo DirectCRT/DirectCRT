@@ -58,6 +58,10 @@ typedef struct SETTING
     SETTING_APPLY apply;
     int flags;
     int step;            /* SETTING_INT: the OSD's slider moves in these steps (a typed value needn't) */
+
+    const char* icon;      /* the OSD's icon for it (overlay_icons.h); NULL = a general one */
+    unsigned tint;         /* a setting for one colour (an RGB gain): 0xRRGGBB, and its name; 0 = none */
+    const char* tint_name;
 } SETTING;
 
 int settings_count(void);

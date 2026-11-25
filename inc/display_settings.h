@@ -1,6 +1,8 @@
 #ifndef DISPLAY_SETTINGS_H
 #define DISPLAY_SETTINGS_H
 
+#include "crt_auto.h"
+
 /*
  * The display settings: display, window_size, window_position and
  * remember_window, and the translation of cnc-ddraw's old keys.
@@ -79,14 +81,12 @@ DISPLAY_KIND ds_display_start(DISPLAY_MODE mode, int game_fullscreen);
 /* Which fullscreen Alt+Enter goes to from a window */
 DISPLAY_KIND ds_display_fullscreen_kind(DISPLAY_MODE mode);
 
-/* The window's client size in pixels. desktop_* is the desktop in pixels and
- * scale Windows' display scale (1.5 for 150%). game_* is the game's
- * resolution, for 'unscaled', which is not limited to the minimum size. */
+/* The window's client size in pixels, on display: the desktop in pixels and
+ * Windows' display scale (1.5 for 150%). game_* is the game's resolution, for
+ * 'unscaled', which is not limited to the minimum size. */
 void ds_window_client_size(
     const WINDOW_SIZE* size,
-    int desktop_width,
-    int desktop_height,
-    float scale,
+    const CRT_AUTO_DISPLAY* display,
     int game_width,
     int game_height,
     int* out_width,
@@ -95,9 +95,7 @@ void ds_window_client_size(
 /* A position that isn't 'auto', in pixels from the desktop's top left */
 void ds_window_position_pixels(
     const WINDOW_POSITION* position,
-    int desktop_width,
-    int desktop_height,
-    float scale,
+    const CRT_AUTO_DISPLAY* display,
     int* out_x,
     int* out_y);
 
@@ -126,7 +124,7 @@ const char* ds_legacy_remember_window(const char* savesettings);
  * unchanged (as its canonical name); anything else is crt-auto. */
 const char* ds_legacy_shader(const char* shader);
 
-/* renderer: openglcore, direct3d9 and direct3d9on12 -> auto; others unchanged
+/* renderer: openglcore, direct3d9, direct3d9on12, gdi and software -> auto; others unchanged
  * (NULL when the value isn't an old one) */
 const char* ds_legacy_renderer(const char* renderer);
 

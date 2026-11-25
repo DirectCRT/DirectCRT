@@ -10,23 +10,26 @@
 #include "ini.h"
 #include "settings.h"
 #include "overlay.h"
+#include "vbeam.h"
 #include "versionhelpers.h"
 
 static void cfg_init();
 static void cfg_create_ini();
-static BOOL cfg_get_bool(LPCSTR key, BOOL default_value);
-static int cfg_get_int(LPCSTR key, int default_value);
+static LPCSTR cfg_default(LPCSTR key);
+static BOOL cfg_get_bool(LPCSTR key);
+static int cfg_get_int(LPCSTR key);
 static DWORD cfg_get_string(LPCSTR key, LPCSTR default_value, LPSTR out_string, DWORD out_size);
 static void cfg_load_crt_auto_settings(CRT_AUTO_SETTINGS* settings);
 static void cfg_load_display_settings();
 static void cfg_load_runtime_settings();
 static void cfg_load_live_settings();
 static void cfg_ini_stat(WIN32_FILE_ATTRIBUTE_DATA* data);
-static int cfg_get_choice(LPCSTR key, const char* const* names, int count, int default_index);
+static int cfg_get_choice(LPCSTR key);
 
-#define GET_INT(a,b,c) a = cfg_get_int(b, c); TRACE("%s=%d\n", b, a)
-#define GET_BOOL(a,b,c) a = cfg_get_bool(b, c); TRACE("%s=%s\n", b, a ? "true" : "false")
-#define GET_STRING(a,b,c,d) cfg_get_string(a, b, c, d); TRACE("%s=%s\n", a, c)
+/* The defaults are settings.c's */
+#define GET_INT(a,b) a = cfg_get_int(b); TRACE("%s=%d\n", b, a)
+#define GET_BOOL(a,b) a = cfg_get_bool(b); TRACE("%s=%s\n", b, a ? "true" : "false")
+#define GET_STRING(a,b,c) cfg_get_string(a, cfg_default(a), b, c); TRACE("%s=%s\n", a, b)
 
 CNCDDRAWCONFIG g_config =
     { .window_rect = {.left = -32000, .top = -32000, .right = 0, .bottom = 0 } };
@@ -59,38 +62,38 @@ void cfg_load()
 
     /* Compatibility settings */
 
-    GET_BOOL(g_config.noactivateapp, "noactivateapp", FALSE);
-    GET_INT(g_config.maxgameticks, "maxgameticks", 0);
-    GET_INT(g_config.limiter_type, "limiter_type", LIMIT_AUTO);
-    GET_INT(g_config.minfps, "minfps", 0);
-    GET_BOOL(g_config.nonexclusive, "nonexclusive", TRUE);
-    GET_BOOL(g_config.singlecpu, "singlecpu", TRUE);
-    GET_INT(g_config.resolutions, "resolutions", RESLIST_NORMAL);
-    GET_INT(g_config.fixchilds, "fixchilds", FIX_CHILDS_DETECT_PAINT);
-    GET_BOOL(g_config.hook_peekmessage, "hook_peekmessage", FALSE);
-    GET_INT(g_config.windowed_bpp, "windowed_bpp", 0);
+    GET_BOOL(g_config.noactivateapp, "noactivateapp");
+    GET_INT(g_config.maxgameticks, "maxgameticks");
+    GET_INT(g_config.limiter_type, "limiter_type");
+    GET_INT(g_config.minfps, "minfps");
+    GET_BOOL(g_config.nonexclusive, "nonexclusive");
+    GET_BOOL(g_config.singlecpu, "singlecpu");
+    GET_INT(g_config.resolutions, "resolutions");
+    GET_INT(g_config.fixchilds, "fixchilds");
+    GET_BOOL(g_config.hook_peekmessage, "hook_peekmessage");
+    GET_INT(g_config.windowed_bpp, "windowed_bpp");
 
     /* Undocumented settings */
 
-    GET_BOOL(g_config.fix_alt_key_stuck, "fix_alt_key_stuck", FALSE);
-    GET_BOOL(GameHandlesClose, "game_handles_close", FALSE);
-    GET_BOOL(g_config.fix_not_responding, "fix_not_responding", FALSE);
-    GET_BOOL(g_config.no_compat_warning, "no_compat_warning", FALSE);
-    GET_INT(g_config.guard_lines, "guard_lines", 200);
-    GET_INT(g_config.max_resolutions, "max_resolutions", 0);
-    GET_BOOL(g_config.lock_surfaces, "lock_surfaces", FALSE);
-    GET_BOOL(g_config.flipclear, "flipclear", FALSE);
-    GET_BOOL(g_config.rgb555, "rgb555", FALSE);
-    GET_BOOL(g_config.no_dinput_hook, "no_dinput_hook", FALSE);
-    GET_BOOL(g_config.center_cursor_fix, "center_cursor_fix", FALSE);
-    GET_STRING("fake_mode", "", g_config.fake_mode, sizeof(g_config.fake_mode));
-    GET_BOOL(g_config.lock_mouse_top_left, "lock_mouse_top_left", FALSE);
-    GET_STRING("win_version", "", g_config.win_version, sizeof(g_config.win_version));
-    GET_INT(g_config.hook, "hook", 4);
-    GET_BOOL(g_config.limit_gdi_handles, "limit_gdi_handles", FALSE);
-    GET_BOOL(g_config.remove_menu, "remove_menu", FALSE);
-    GET_INT(g_config.refresh_rate, "refresh_rate", 0);
-    GET_BOOL(g_config.terminate_process, "terminate_process", FALSE);
+    GET_BOOL(g_config.fix_alt_key_stuck, "fix_alt_key_stuck");
+    GET_BOOL(GameHandlesClose, "game_handles_close");
+    GET_BOOL(g_config.fix_not_responding, "fix_not_responding");
+    GET_BOOL(g_config.no_compat_warning, "no_compat_warning");
+    GET_INT(g_config.guard_lines, "guard_lines");
+    GET_INT(g_config.max_resolutions, "max_resolutions");
+    GET_BOOL(g_config.lock_surfaces, "lock_surfaces");
+    GET_BOOL(g_config.flipclear, "flipclear");
+    GET_BOOL(g_config.rgb555, "rgb555");
+    GET_BOOL(g_config.no_dinput_hook, "no_dinput_hook");
+    GET_BOOL(g_config.center_cursor_fix, "center_cursor_fix");
+    GET_STRING("fake_mode", g_config.fake_mode, sizeof(g_config.fake_mode));
+    GET_BOOL(g_config.lock_mouse_top_left, "lock_mouse_top_left");
+    GET_STRING("win_version", g_config.win_version, sizeof(g_config.win_version));
+    GET_INT(g_config.hook, "hook");
+    GET_BOOL(g_config.limit_gdi_handles, "limit_gdi_handles");
+    GET_BOOL(g_config.remove_menu, "remove_menu");
+    GET_INT(g_config.refresh_rate, "refresh_rate");
+    GET_BOOL(g_config.terminate_process, "terminate_process");
 
     /* ddtest, our test program, stops its test when the window is closed
        instead of quitting, so it gets the close itself. Forced, because the
@@ -114,7 +117,7 @@ void cfg_save()
         return;
 
     char buf[32];
-    char* section = "directcrt";
+    char* section = CFG_SECTION;
 
     if (g_config.window_rect.right > 0 && g_config.window_rect.bottom > 0)
     {
@@ -146,7 +149,7 @@ void cfg_save_status_osd(BOOL shown)
     if (!g_config.ini_path[0])
         return;
 
-    WritePrivateProfileStringA("directcrt", "status_osd", shown ? "on" : "off", g_config.ini_path);
+    WritePrivateProfileStringA(CFG_SECTION, "status_osd", shown ? "on" : "off", g_config.ini_path);
 
     /* Our own change, not one to reload */
     cfg_ini_stat(&g_ini_seen);
@@ -294,7 +297,7 @@ static void cfg_init()
  * ddraw.dll. Sections named after a game, as cnc-ddraw had, aren't read */
 static DWORD cfg_get_string(LPCSTR key, LPCSTR default_value, LPSTR buf, DWORD size)
 {
-    return ini_get_string(&g_config.ini, "directcrt", key, default_value, buf, size);
+    return ini_get_string(&g_config.ini, CFG_SECTION, key, default_value, buf, size);
 }
 
 /* An old cnc-ddraw key's value in one section, translated to its new key's
@@ -373,25 +376,24 @@ static BOOL cfg_legacy_integer_scaling(LPCSTR section, LPSTR buf, DWORD size)
     return cfg_copy("vertical", buf, size);
 }
 
-/* A setting that replaced old keys: the new key, then the old ones */
+/* A setting that replaced old keys: the new key, then the old ones, then the default */
 static void cfg_get_new_or_old(
     LPCSTR key,
-    LPCSTR default_value,
     CFG_LEGACY legacy,
     LPCSTR old_keys,
     LPSTR buf,
     DWORD size)
 {
-    if (cfg_get_raw("directcrt", key, buf, size) > 0)
+    if (cfg_get_raw(CFG_SECTION, key, buf, size) > 0)
         return;
 
-    if (legacy && legacy("directcrt", buf, size))
+    if (legacy && legacy(CFG_SECTION, buf, size))
     {
         TRACE("     the old setting %s, read as %s=%s\n", old_keys, key, buf);
         return;
     }
 
-    cfg_copy(default_value, buf, size);
+    cfg_copy(cfg_default(key), buf, size);
 }
 
 static BOOL cfg_parse_on_off(LPCSTR key, LPCSTR value)
@@ -400,8 +402,8 @@ static BOOL cfg_parse_on_off(LPCSTR key, LPCSTR value)
 
     if (!ds_parse_bool(value, &on))
     {
-        TRACE("%s=%s is invalid, using on\n", key, value);
-        on = 1;
+        TRACE("%s=%s is invalid, using %s\n", key, value, cfg_default(key));
+        on = ds_parse_bool(cfg_default(key), &on) && on;
     }
 
     TRACE("%s=%s\n", key, on ? "on" : "off");
@@ -412,43 +414,43 @@ static void cfg_load_display_settings()
 {
     char value[64];
 
-    cfg_get_new_or_old("display", "auto", cfg_legacy_display, "windowed/fullscreen", value, sizeof(value));
+    cfg_get_new_or_old("display", cfg_legacy_display, "windowed/fullscreen", value, sizeof(value));
     if (!ds_parse_display(value, &g_config.display))
     {
-        TRACE("display=%s is invalid, using auto\n", value);
-        g_config.display = DISPLAY_AUTO;
+        TRACE("display=%s is invalid, using %s\n", value, cfg_default("display"));
+        ds_parse_display(cfg_default("display"), &g_config.display);
     }
     TRACE("display=%s\n", ds_display_name(g_config.display));
 
-    cfg_get_new_or_old("window_size", "default", cfg_legacy_window_size, "width/height", value, sizeof(value));
+    cfg_get_new_or_old("window_size", cfg_legacy_window_size, "width/height", value, sizeof(value));
     if (ds_parse_window_size(value, &g_config.window_size))
     {
         TRACE("window_size=%s\n", value);
     }
     else
     {
-        TRACE("window_size=%s is invalid, using default\n", value);
-        ds_parse_window_size("default", &g_config.window_size);
+        TRACE("window_size=%s is invalid, using %s\n", value, cfg_default("window_size"));
+        ds_parse_window_size(cfg_default("window_size"), &g_config.window_size);
     }
 
-    cfg_get_new_or_old("window_position", "auto", cfg_legacy_window_position, "posX/posY", value, sizeof(value));
+    cfg_get_new_or_old("window_position", cfg_legacy_window_position, "posX/posY", value, sizeof(value));
     if (ds_parse_window_position(value, &g_config.window_position))
     {
         TRACE("window_position=%s\n", value);
     }
     else
     {
-        TRACE("window_position=%s is invalid, using auto\n", value);
-        ds_parse_window_position("auto", &g_config.window_position);
+        TRACE("window_position=%s is invalid, using %s\n", value, cfg_default("window_position"));
+        ds_parse_window_position(cfg_default("window_position"), &g_config.window_position);
     }
 
-    cfg_get_new_or_old("window_decorations", "on", cfg_legacy_border, "border", value, sizeof(value));
+    cfg_get_new_or_old("window_decorations", cfg_legacy_border, "border", value, sizeof(value));
     g_config.window_decorations = cfg_parse_on_off("window_decorations", value);
 
-    cfg_get_new_or_old("window_resizable", "on", cfg_legacy_resizable, "resizable", value, sizeof(value));
+    cfg_get_new_or_old("window_resizable", cfg_legacy_resizable, "resizable", value, sizeof(value));
     g_config.window_resizable = cfg_parse_on_off("window_resizable", value);
 
-    cfg_get_string("fullscreen_minimize", "off", value, sizeof(value));
+    cfg_get_string("fullscreen_minimize", cfg_default("fullscreen_minimize"), value, sizeof(value));
     g_config.fullscreen_minimize = cfg_parse_on_off("fullscreen_minimize", value);
 }
 
@@ -456,19 +458,19 @@ static void cfg_load_display_settings()
  * set up again where they need it (dd_reload_settings) */
 static void cfg_load_runtime_settings()
 {
-    GET_INT(g_config.maxfps, "maxfps", -1);
-    GET_BOOL(g_config.vsync, "vsync", FALSE);
-    GET_BOOL(g_config.adjmouse, "adjmouse", TRUE);
-    GET_STRING("renderer", "auto", g_config.renderer, sizeof(g_config.renderer));
+    GET_INT(g_config.maxfps, "maxfps");
+    GET_BOOL(g_config.vsync, "vsync");
+    GET_BOOL(g_config.adjmouse, "adjmouse");
+    GET_STRING("renderer", g_config.renderer, sizeof(g_config.renderer));
     const char* renderer = ds_legacy_renderer(g_config.renderer);
     if (renderer)
     {
         TRACE("     renderer=%s is no longer available, using %s\n", g_config.renderer, renderer);
         strncpy(g_config.renderer, renderer, sizeof(g_config.renderer) - 1);
     }
-    GET_BOOL(g_config.devmode, "devmode", FALSE);
-    GET_INT(g_config.anti_aliased_fonts_min_size, "anti_aliased_fonts_min_size", 13);
-    GET_STRING("screenshotdir", ".\\Screenshots\\", g_config.screenshot_dir, sizeof(g_config.screenshot_dir));
+    GET_BOOL(g_config.devmode, "devmode");
+    GET_INT(g_config.anti_aliased_fonts_min_size, "anti_aliased_fonts_min_size");
+    GET_STRING("screenshotdir", g_config.screenshot_dir, sizeof(g_config.screenshot_dir));
 }
 
 /* The settings that apply while the game runs, apart from crt-auto's
@@ -477,10 +479,10 @@ static void cfg_load_live_settings()
 {
     char value[32];
 
-    cfg_get_string("emulated_refresh", "auto", value, sizeof(value));
+    cfg_get_string("emulated_refresh", cfg_default("emulated_refresh"), value, sizeof(value));
     g_config.emulated_refresh = _stricmp(value, "auto") == 0 ? 0 : strtoul(value, NULL, 10);
 
-    if (g_config.emulated_refresh && (g_config.emulated_refresh < 24 || g_config.emulated_refresh > 240))
+    if (g_config.emulated_refresh && (g_config.emulated_refresh < VBEAM_MIN_HZ || g_config.emulated_refresh > VBEAM_MAX_HZ))
     {
         TRACE("     emulated_refresh=%s is invalid, using auto\n", value);
         g_config.emulated_refresh = 0;
@@ -488,35 +490,33 @@ static void cfg_load_live_settings()
 
     TRACE("emulated_refresh=%lu\n", g_config.emulated_refresh);
 
-    cfg_get_new_or_old("remember_window", "off", cfg_legacy_remember_window, "savesettings", value, sizeof(value));
+    cfg_get_new_or_old("remember_window", cfg_legacy_remember_window, "savesettings", value, sizeof(value));
     if (!ds_parse_remember_window(value, &g_config.remember_window))
     {
-        TRACE("remember_window=%s is invalid, using off\n", value);
-        g_config.remember_window = REMEMBER_WINDOW_OFF;
+        TRACE("remember_window=%s is invalid, using %s\n", value, cfg_default("remember_window"));
+        ds_parse_remember_window(cfg_default("remember_window"), &g_config.remember_window);
     }
     TRACE("remember_window=%s\n", ds_remember_window_name(g_config.remember_window));
 
-    GET_BOOL(g_config.status_osd, "status_osd", FALSE);
+    GET_BOOL(g_config.status_osd, "status_osd");
 
-    static const char* const osd_sizes[] = { "small", "medium", "large" };
-    static const char* const osd_details[] = { "basic", "full" };
-    static const char* const osd_positions[] = { "top-left", "top-right", "bottom-left", "bottom-right" };
-    g_config.status_osd_size = cfg_get_choice("status_osd_size", osd_sizes, 3, 1);
-    g_config.status_osd_full = cfg_get_choice("status_osd_detail", osd_details, 2, 0) == 1;
-    g_config.status_osd_position = cfg_get_choice("status_osd_position", osd_positions, 4, 0);
-    GET_INT(g_config.status_osd_opacity, "status_osd_opacity", 75);
+    /* By their places in settings.c's choices */
+    g_config.status_osd_size = cfg_get_choice("status_osd_size");
+    g_config.status_osd_full = cfg_get_choice("status_osd_detail") == 1;
+    g_config.status_osd_position = cfg_get_choice("status_osd_position");
+    GET_INT(g_config.status_osd_opacity, "status_osd_opacity");
     g_config.status_osd_opacity = max(0, min(100, g_config.status_osd_opacity));
 
-    GET_INT(g_config.hotkeys.toggle_fullscreen, "keytogglefullscreen", VK_RETURN);
-    GET_INT(g_config.hotkeys.toggle_fullscreen2, "keytogglefullscreen2", 0);
-    GET_INT(g_config.hotkeys.toggle_maximize, "keytogglemaximize", VK_NEXT);
-    GET_INT(g_config.hotkeys.toggle_maximize2, "keytogglemaximize2", 0);
-    GET_INT(g_config.hotkeys.unlock_cursor1, "keyunlockcursor1", VK_TAB);
-    GET_INT(g_config.hotkeys.unlock_cursor2, "keyunlockcursor2", VK_RCONTROL);
-    GET_BOOL(g_config.hotkeys.unlock_cursor_middleclick, "unlockcursor_middleclick", FALSE);
-    GET_INT(g_config.hotkeys.screenshot, "keyscreenshot", VK_SNAPSHOT);
-    GET_INT(g_config.hotkeys.status_osd, "keystatusosd", VK_F11);
-    GET_INT(g_config.hotkeys.settings_osd, "keysettingsosd", VK_F12);
+    GET_INT(g_config.hotkeys.toggle_fullscreen, "keytogglefullscreen");
+    GET_INT(g_config.hotkeys.toggle_fullscreen2, "keytogglefullscreen2");
+    GET_INT(g_config.hotkeys.toggle_maximize, "keytogglemaximize");
+    GET_INT(g_config.hotkeys.toggle_maximize2, "keytogglemaximize2");
+    GET_INT(g_config.hotkeys.unlock_cursor1, "keyunlockcursor1");
+    GET_INT(g_config.hotkeys.unlock_cursor2, "keyunlockcursor2");
+    GET_BOOL(g_config.hotkeys.unlock_cursor_middleclick, "unlockcursor_middleclick");
+    GET_INT(g_config.hotkeys.screenshot, "keyscreenshot");
+    GET_INT(g_config.hotkeys.status_osd, "keystatusosd");
+    GET_INT(g_config.hotkeys.settings_osd, "keysettingsosd");
 }
 
 /* The shader and crt-auto's settings use DOSBox Staging's names, values and
@@ -533,7 +533,6 @@ static void cfg_load_crt_auto_settings(CRT_AUTO_SETTINGS* settings)
         char value[MAX_PATH];
         cfg_get_new_or_old(
             name,
-            default_value,
             strcmp(name, "integer_scaling") == 0 ? cfg_legacy_integer_scaling : NULL,
             "boxing",
             value,
@@ -562,41 +561,72 @@ static void cfg_load_crt_auto_settings(CRT_AUTO_SETTINGS* settings)
     }
 }
 
-/* One of a list of words; an invalid value gets the default */
-static int cfg_get_choice(LPCSTR key, const char* const* names, int count, int default_index)
+/* A setting's default: its row in settings.c, or "" for one whose ini line
+ * is commented out (it has an example value, not a default) */
+static LPCSTR cfg_default(LPCSTR key)
 {
-    char value[64];
-    cfg_get_string(key, names[default_index], value, sizeof(value));
+    const SETTING* s = settings_find(key);
 
-    for (int i = 0; i < count; i++)
+    if (!s || !s->value)
     {
-        if (_stricmp(value, names[i]) == 0)
-        {
-            TRACE("%s=%s\n", key, names[i]);
-            return i;
-        }
+        TRACE("     %s isn't in settings.c\n", key);
+        return "";
     }
 
-    TRACE("%s=%s is invalid, using %s\n", key, value, names[default_index]);
-    return default_index;
+    return s->flags & SETTING_COMMENTED ? "" : s->value;
 }
 
-static BOOL cfg_get_bool(LPCSTR key, BOOL default_value)
+/* value's place in a setting's choices, -1 if it isn't one */
+static int cfg_choice_index(const SETTING* s, LPCSTR value)
+{
+    char name[64], label[2];
+
+    for (int i = 0; settings_choice(s, i, name, sizeof(name), label, sizeof(label)); i++)
+    {
+        if (_stricmp(value, name) == 0)
+            return i;
+    }
+
+    return -1;
+}
+
+/* One of a SETTING_CHOICE's choices, by its place in them; an invalid value gets the default */
+static int cfg_get_choice(LPCSTR key)
+{
+    const SETTING* s = settings_find(key);
+    char value[64];
+    cfg_get_string(key, cfg_default(key), value, sizeof(value));
+
+    int i = cfg_choice_index(s, value);
+
+    if (i >= 0)
+    {
+        TRACE("%s=%s\n", key, value);
+        return i;
+    }
+
+    i = cfg_choice_index(s, cfg_default(key));
+    TRACE("%s=%s is invalid, using %s\n", key, value, cfg_default(key));
+    return i >= 0 ? i : 0;
+}
+
+static BOOL cfg_get_bool(LPCSTR key)
 {
     char value[8];
-    cfg_get_string(key, default_value ? "Yes" : "No", value, sizeof(value));
+    cfg_get_string(key, cfg_default(key), value, sizeof(value));
 
     int on;
-    return ds_parse_bool(value, &on) ? on : default_value;
+
+    if (ds_parse_bool(value, &on))
+        return on;
+
+    return ds_parse_bool(cfg_default(key), &on) && on;
 }
 
-static int cfg_get_int(LPCSTR key, int default_value)
+static int cfg_get_int(LPCSTR key)
 {
-    char def_value[24];
-    _snprintf(def_value, sizeof(def_value) - 1, "%d", default_value);
-
     char value[20];
-    cfg_get_string(key, def_value, value, sizeof(value));
+    cfg_get_string(key, cfg_default(key), value, sizeof(value));
 
     if (strstr(value, "0x"))
     {

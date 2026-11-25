@@ -3,7 +3,7 @@
 Unmodified files from [Dear ImGui](https://github.com/ocornut/imgui) v1.93.0
 (released 14 October 2026), at the same paths as in its repository: the core
 and the Direct3D 11 and OpenGL 3 renderer backends. DirectCRT's overlay
-(`src/overlay.cpp`) is built with them.
+(`src/overlay*.cpp`) is built with them.
 
 Taken from `https://github.com/ocornut/imgui/archive/refs/tags/v1.93.0.zip`
 (SHA-256 `e21907fd8dd5ea59aa00538632a02ad0a3ededb4ddc533b94702331fbcd6c470`).

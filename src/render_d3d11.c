@@ -76,7 +76,10 @@ typedef struct D3D11_TARGET
 } D3D11_TARGET;
 
 /* A shader made into the GPU's own code: kept for the renderer's life, as
- * the driver takes a while (up to a few frames) to make one */
+ * the driver takes a while (up to a few frames) to make one. Room for every
+ * shader in d3d11_shaders.h (seven) */
+#define D3D11_SHADER_CODE_MAX 8
+
 typedef struct D3D11_SHADER_CODE
 {
     const D3D11_SHADER* shader;
@@ -131,7 +134,7 @@ typedef struct D3D11RENDERER
     D3D11_TARGET adj;
 
     BOOL crt_auto;
-    D3D11_SHADER_CODE shader_code[8];
+    D3D11_SHADER_CODE shader_code[D3D11_SHADER_CODE_MAX];
     D3D11_PASS adj_pass;
     D3D11_PASS crt_pass;
     CRT_AUTO_PARAMS crt_params;
@@ -195,7 +198,7 @@ static HRESULT d3d11_create_any_device(
     const UINT count = sizeof(levels) / sizeof(levels[0]);
     HRESULT hr = E_FAIL;
 
-    for (int i = 0; i < 2 && FAILED(hr); i++)
+    for (int i = 0; i < (int)(sizeof(types) / sizeof(types[0])) && FAILED(hr); i++)
     {
         *warp = types[i] == D3D_DRIVER_TYPE_WARP;
 
@@ -609,74 +612,31 @@ static void d3d11_upload_pass(D3D11_PASS* p)
         ID3D11DeviceContext_UpdateSubresource(g_d3d11.ctx, (ID3D11Resource*)p->ps_cb, 0, NULL, p->ps_data, 0, 0);
 }
 
-static char* d3d11_load_text_resource(const char* name)
-{
-    HRSRC res = FindResourceA(g_ddraw_module, name, MAKEINTRESOURCEA(10) /* RT_RCDATA */);
-    HGLOBAL mem = res ? LoadResource(g_ddraw_module, res) : NULL;
-    DWORD size = res ? SizeofResource(g_ddraw_module, res) : 0;
-    const void* data = mem ? LockResource(mem) : NULL;
-
-    if (!data)
-        return NULL;
-
-    char* text = malloc(size + 1);
-    if (text)
-    {
-        memcpy(text, data, size);
-        text[size] = 0;
-    }
-
-    return text;
-}
-
 /* The shader crt-auto chose, with the uniforms DOSBox Staging's shader
  * pipeline sets (shader_pipeline.cpp); as ogl_init_crt_auto_uniforms */
 static BOOL d3d11_create_crt_auto()
 {
     const CRT_AUTO_LAYOUT* crt = &g_ddraw.render.crt;
-    const D3D11_SHADER* shader = NULL;
-    const char* shader_res = NULL;
-    const char* preset_res = NULL;
+    /* The HLSL translations, by CRT_SHADER */
+    static const D3D11_SHADER* const shaders[CRT_SHADER_COUNT] = {
+        &d3d11_sharp,
+        &d3d11_vga_1080p,
+        &d3d11_vga_1080p_fake_double_scan,
+        &d3d11_crt_hyllian,
+        &d3d11_crt_hyllian,
+        &d3d11_nearest,
+        &d3d11_bilinear,
+    };
 
-    switch (crt->shader)
-    {
-    case CRT_SHADER_VGA_1080P:
-        shader = &d3d11_vga_1080p;
-        shader_res = "CRT_VGA_1080P";
-        break;
-    case CRT_SHADER_VGA_1080P_FAKE_DOUBLE_SCAN:
-        shader = &d3d11_vga_1080p_fake_double_scan;
-        shader_res = "CRT_VGA_1080P_FAKE_DOUBLE_SCAN";
-        break;
-    case CRT_SHADER_HYLLIAN_VGA_1440P:
-        shader = &d3d11_crt_hyllian;
-        shader_res = "CRT_HYLLIAN";
-        preset_res = "CRT_PRESET_VGA_1440P";
-        break;
-    case CRT_SHADER_HYLLIAN_VGA_4K:
-        shader = &d3d11_crt_hyllian;
-        shader_res = "CRT_HYLLIAN";
-        preset_res = "CRT_PRESET_VGA_4K";
-        break;
-    case CRT_SHADER_NEAREST:
-        shader = &d3d11_nearest;
-        shader_res = "CRT_NEAREST";
-        break;
-    case CRT_SHADER_BILINEAR:
-        shader = &d3d11_bilinear;
-        shader_res = "CRT_BILINEAR";
-        break;
-    case CRT_SHADER_SHARP:
-    default:
-        shader = &d3d11_sharp;
-        shader_res = "CRT_SHARP";
-        break;
-    }
+    const CRT_SHADER_INFO* info = crt_auto_shader_info(crt->shader);
+    const D3D11_SHADER* shader = shaders[(unsigned)crt->shader < CRT_SHADER_COUNT ? crt->shader : CRT_SHADER_SHARP];
+    const char* shader_res = info->resource;
+    const char* preset_res = info->preset;
 
     /* The '#pragma parameter' defaults come from the GLSL source the
      * shader was translated from, then the preset */
-    char* source = d3d11_load_text_resource(shader_res);
-    char* preset = preset_res ? d3d11_load_text_resource(preset_res) : NULL;
+    char* source = util_load_text_resource(shader_res);
+    char* preset = preset_res ? util_load_text_resource(preset_res) : NULL;
 
     memset(&g_d3d11.crt_params, 0, sizeof(g_d3d11.crt_params));
 
@@ -711,21 +671,17 @@ static BOOL d3d11_create_crt_auto()
     d3d11_uniform2f(p, "OUTPUT_START_OFFSET", 0.0f, 0.0f);
     d3d11_uniform2f(p, "OUTPUT_SIZE", (float)crt->render_width, (float)crt->render_height);
 
-    d3d11_uniform1i(p, "COLOR_SPACE", color.color_space);
-    d3d11_uniform1i(p, "ENABLE_ADJUSTMENTS", color.enable_adjustments);
-    d3d11_uniform1i(p, "COLOR_PROFILE", color.color_profile);
-    d3d11_uniform1f(p, "BRIGHTNESS", color.brightness);
-    d3d11_uniform1f(p, "CONTRAST", color.contrast);
-    d3d11_uniform1f(p, "GAMMA", color.gamma);
-    d3d11_uniform1f(p, "DIGITAL_CONTRAST", color.digital_contrast);
-    d3d11_uniform(p, "BLACK_LEVEL_COLOR", color.black_level_color, 0);
-    d3d11_uniform1f(p, "BLACK_LEVEL", color.black_level);
-    d3d11_uniform1f(p, "SATURATION", color.saturation);
-    d3d11_uniform1f(p, "COLOR_TEMPERATURE_KELVIN", color.color_temperature_kelvin);
-    d3d11_uniform1f(p, "COLOR_TEMPERATURE_LUMA_PRESERVE", color.color_temperature_luma_preserve);
-    d3d11_uniform1f(p, "RED_GAIN", color.red_gain);
-    d3d11_uniform1f(p, "GREEN_GAIN", color.green_gain);
-    d3d11_uniform1f(p, "BLUE_GAIN", color.blue_gain);
+    const CRT_AUTO_UNIFORM* u;
+
+    for (int i = 0; (u = crt_auto_color_uniform(i)) != NULL; i++)
+    {
+        const void* v = (const char*)&color + u->offset;
+
+        if (u->type == CRT_AUTO_UNIFORM_INT)
+            d3d11_uniform1i(p, u->name, *(const int*)v);
+        else
+            d3d11_uniform(p, u->name, (const float*)v, 0);
+    }
 
     p = &g_d3d11.crt_pass;
 

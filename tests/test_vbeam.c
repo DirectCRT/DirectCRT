@@ -9,15 +9,7 @@
 #include <stdio.h>
 #include <windows.h>
 #include "vbeam.h"
-
-static int g_failed;
-static int g_checks;
-
-#define CHECK(cond) \
-    do { \
-        g_checks++; \
-        if (!(cond)) { g_failed++; printf("  FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); } \
-    } while (0)
+#include "check.h"
 
 static void test_total_lines(void)
 {
@@ -155,6 +147,5 @@ int main(void)
     test_lines();
     test_real_beam();
 
-    printf("vbeam: %d checks, %d failed\n", g_checks, g_failed);
-    return g_failed ? 1 : 0;
+    return check_report("vbeam");
 }

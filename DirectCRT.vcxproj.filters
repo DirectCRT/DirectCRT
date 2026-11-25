@@ -45,7 +45,16 @@
     <ClCompile Include="src\overlay_menu.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="src\overlay_menu_ui.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="src\overlay_status.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\overlay_viewport.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\overlay_widgets.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="src\settings.c">
@@ -258,6 +267,12 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="inc\overlay_icons.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\overlay_menu_ui.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\overlay_widgets.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="inc\render_ogl.h">

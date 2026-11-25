@@ -1,6 +1,8 @@
 #include <windows.h>
 #include <intrin.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <math.h>
 #include <tlhelp32.h>
 #include "ddraw.h"
@@ -10,6 +12,7 @@
 #include "hook.h"
 #include "mouse.h"
 #include "utils.h"
+#include "dllmain.h"
 #include "config.h"
 #include "versionhelpers.h"
 #include "delay_imports.h"
@@ -921,4 +924,25 @@ BOOL CALLBACK util_enum_child_proc(HWND hwnd, LPARAM lparam)
 #else
     return FALSE;
 #endif
+}
+
+char* util_load_text_resource(const char* name)
+{
+    HRSRC res = FindResourceA(g_ddraw_module, name, MAKEINTRESOURCEA(10) /* RT_RCDATA */);
+    HGLOBAL mem = res ? LoadResource(g_ddraw_module, res) : NULL;
+    DWORD size = res ? SizeofResource(g_ddraw_module, res) : 0;
+    const void* data = mem ? LockResource(mem) : NULL;
+
+    if (!data || !size)
+        return NULL;
+
+    char* text = malloc(size + 1);
+
+    if (text)
+    {
+        memcpy(text, data, size);
+        text[size] = '\0';
+    }
+
+    return text;
 }

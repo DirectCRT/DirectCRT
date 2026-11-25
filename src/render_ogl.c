@@ -681,67 +681,17 @@ static void ogl_init_shader2_program()
 }
 
 /* A shader or preset built into the DLL (res.rc), as a NUL-terminated copy */
-static char* ogl_load_text_resource(const char* name)
-{
-    HRSRC res = FindResourceA(g_ddraw_module, name, MAKEINTRESOURCEA(10) /* RT_RCDATA */);
-    if (!res)
-        return NULL;
-
-    HGLOBAL handle = LoadResource(g_ddraw_module, res);
-    DWORD size = SizeofResource(g_ddraw_module, res);
-    const void* data = handle ? LockResource(handle) : NULL;
-
-    if (!data || !size)
-        return NULL;
-
-    char* text = malloc(size + 1);
-    if (text)
-    {
-        memcpy(text, data, size);
-        text[size] = '\0';
-    }
-
-    return text;
-}
-
 /* shader1: DOSBox Staging's image-adjustments pass. shader2: the shader
  * crt-auto chose for this mode and window size, with its preset */
 static void ogl_build_crt_auto_programs(BOOL core_profile)
 {
-    const char* shader_name = NULL;
-    const char* preset_name = NULL;
+    const CRT_SHADER_INFO* info = crt_auto_shader_info(g_ddraw.render.crt.shader);
+    const char* shader_name = info->resource;
+    const char* preset_name = info->preset;
 
-    switch (g_ddraw.render.crt.shader)
-    {
-    case CRT_SHADER_VGA_1080P:
-        shader_name = "CRT_VGA_1080P";
-        break;
-    case CRT_SHADER_VGA_1080P_FAKE_DOUBLE_SCAN:
-        shader_name = "CRT_VGA_1080P_FAKE_DOUBLE_SCAN";
-        break;
-    case CRT_SHADER_HYLLIAN_VGA_1440P:
-        shader_name = "CRT_HYLLIAN";
-        preset_name = "CRT_PRESET_VGA_1440P";
-        break;
-    case CRT_SHADER_HYLLIAN_VGA_4K:
-        shader_name = "CRT_HYLLIAN";
-        preset_name = "CRT_PRESET_VGA_4K";
-        break;
-    case CRT_SHADER_NEAREST:
-        shader_name = "CRT_NEAREST";
-        break;
-    case CRT_SHADER_BILINEAR:
-        shader_name = "CRT_BILINEAR";
-        break;
-    case CRT_SHADER_SHARP:
-    default:
-        shader_name = "CRT_SHARP";
-        break;
-    }
-
-    char* adjustments = ogl_load_text_resource("CRT_IMAGE_ADJUSTMENTS");
-    char* shader = ogl_load_text_resource(shader_name);
-    char* preset = preset_name ? ogl_load_text_resource(preset_name) : NULL;
+    char* adjustments = util_load_text_resource("CRT_IMAGE_ADJUSTMENTS");
+    char* shader = util_load_text_resource(shader_name);
+    char* preset = preset_name ? util_load_text_resource(preset_name) : NULL;
 
     memset(&g_ogl.crt_params, 0, sizeof(g_ogl.crt_params));
 
@@ -842,21 +792,19 @@ static void ogl_init_crt_auto_uniforms()
     ogl_uniform2f(p, "OUTPUT_START_OFFSET", 0.0f, 0.0f);
     ogl_uniform2f(p, "OUTPUT_SIZE", (float)crt->render_width, (float)crt->render_height);
 
-    ogl_uniform1i(p, "COLOR_SPACE", color.color_space);
-    ogl_uniform1i(p, "ENABLE_ADJUSTMENTS", color.enable_adjustments);
-    ogl_uniform1i(p, "COLOR_PROFILE", color.color_profile);
-    ogl_uniform1f(p, "BRIGHTNESS", color.brightness);
-    ogl_uniform1f(p, "CONTRAST", color.contrast);
-    ogl_uniform1f(p, "GAMMA", color.gamma);
-    ogl_uniform1f(p, "DIGITAL_CONTRAST", color.digital_contrast);
-    ogl_uniform3f(p, "BLACK_LEVEL_COLOR", color.black_level_color);
-    ogl_uniform1f(p, "BLACK_LEVEL", color.black_level);
-    ogl_uniform1f(p, "SATURATION", color.saturation);
-    ogl_uniform1f(p, "COLOR_TEMPERATURE_KELVIN", color.color_temperature_kelvin);
-    ogl_uniform1f(p, "COLOR_TEMPERATURE_LUMA_PRESERVE", color.color_temperature_luma_preserve);
-    ogl_uniform1f(p, "RED_GAIN", color.red_gain);
-    ogl_uniform1f(p, "GREEN_GAIN", color.green_gain);
-    ogl_uniform1f(p, "BLUE_GAIN", color.blue_gain);
+    const CRT_AUTO_UNIFORM* u;
+
+    for (int i = 0; (u = crt_auto_color_uniform(i)) != NULL; i++)
+    {
+        const void* v = (const char*)&color + u->offset;
+
+        if (u->type == CRT_AUTO_UNIFORM_INT)
+            ogl_uniform1i(p, u->name, *(const int*)v);
+        else if (u->type == CRT_AUTO_UNIFORM_VEC3)
+            ogl_uniform3f(p, u->name, (const float*)v);
+        else
+            ogl_uniform1f(p, u->name, *(const float*)v);
+    }
 
     p = g_ogl.shader2_program;
     glUseProgram(p);

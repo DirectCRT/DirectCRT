@@ -1,6 +1,8 @@
 #ifndef CRT_AUTO_H
 #define CRT_AUTO_H
 
+#include <stddef.h>
+
 /* crt-auto for VGA, as in DOSBox Staging: which CRT shader to use, the size
  * and position of the picture, and the shader settings.
  *
@@ -78,7 +80,8 @@ typedef enum CRT_SHADER_SETTING
     CRT_SHADER_SETTING_CRT_AUTO = 0,
     CRT_SHADER_SETTING_SHARP,
     CRT_SHADER_SETTING_NEAREST,
-    CRT_SHADER_SETTING_BILINEAR
+    CRT_SHADER_SETTING_BILINEAR,
+    CRT_SHADER_SETTING_COUNT
 } CRT_SHADER_SETTING;
 
 typedef enum CRT_VIEWPORT_MODE
@@ -99,6 +102,9 @@ typedef struct CRT_VIEWPORT
     float width;
     float height;
 } CRT_VIEWPORT;
+
+/* The viewport setting's value; 0, and out unchanged, if it isn't valid */
+int crt_auto_parse_viewport(const char* v, CRT_VIEWPORT* out);
 
 #define CRT_AUTO_SETTING_AUTO (-1000)
 
@@ -134,6 +140,7 @@ CRT_AUTO_SETTINGS crt_auto_default_settings(void);
 int crt_auto_setting_count(void);
 const char* crt_auto_setting_name(int i);
 const char* crt_auto_setting_default(int i);
+int crt_auto_setting_range(int i, int* min, int* max); /* 0 if it isn't a number */
 
 /* Sets a setting from its text, as DOSBox Staging reads it. Returns 1 when
  * the value is valid; otherwise sets the default and returns 0 (DOSBox shows
@@ -162,7 +169,21 @@ CRT_AUTO_LAYOUT crt_auto_calc_layout(
     int canvas_width,
     int canvas_height);
 
+/* A shader: DOSBox Staging's name for it, and the resources (DirectCRT.rc)
+ * its GLSL source and preset are in */
+typedef struct CRT_SHADER_INFO
+{
+    const char* name;
+    const char* resource;
+    const char* preset; /* NULL: none */
+} CRT_SHADER_INFO;
+
+/* An unknown shader is interpolation/sharp */
+const CRT_SHADER_INFO* crt_auto_shader_info(CRT_SHADER shader);
 const char* crt_auto_shader_name(CRT_SHADER shader);
+
+/* The shader setting's value: crt-auto, sharp, nearest or bilinear */
+const char* crt_auto_shader_setting_name(CRT_SHADER_SETTING shader);
 
 
 #define CRT_AUTO_MAX_PARAMS 32
@@ -219,5 +240,23 @@ typedef struct CRT_AUTO_COLOR
  * 'auto' means P22 phosphors, 7800 K and no black level boost. Output is
  * sRGB. settings can be NULL for DOSBox's defaults */
 CRT_AUTO_COLOR crt_auto_vga_color(const CRT_AUTO_SETTINGS* settings);
+
+/* CRT_AUTO_COLOR's fields as the shader's uniforms, for a renderer to set */
+typedef enum CRT_AUTO_UNIFORM_TYPE
+{
+    CRT_AUTO_UNIFORM_INT,
+    CRT_AUTO_UNIFORM_FLOAT,
+    CRT_AUTO_UNIFORM_VEC3
+} CRT_AUTO_UNIFORM_TYPE;
+
+typedef struct CRT_AUTO_UNIFORM
+{
+    const char* name;
+    CRT_AUTO_UNIFORM_TYPE type;
+    size_t offset; /* in CRT_AUTO_COLOR */
+} CRT_AUTO_UNIFORM;
+
+/* The i'th; NULL past the last */
+const CRT_AUTO_UNIFORM* crt_auto_color_uniform(int i);
 
 #endif

@@ -230,15 +230,8 @@ static const char* overlay_mode_name(void)
 
 static const char* overlay_shader_setting(void)
 {
-    switch (g_config.crt.shader)
-    {
-    case CRT_SHADER_SETTING_CRT_AUTO: return "crt-auto";
-    case CRT_SHADER_SETTING_SHARP: return "sharp";
-    case CRT_SHADER_SETTING_NEAREST: return "nearest";
-    case CRT_SHADER_SETTING_BILINEAR: return "bilinear";
-    }
-
-    return "?";
+    const char* name = crt_auto_shader_setting_name(g_config.crt.shader);
+    return name ? name : "?";
 }
 
 /* The emulated display's rate and where it comes from */
@@ -309,24 +302,6 @@ static void overlay_vblank(char* buf, size_t size)
     buf[size - 1] = 0;
 }
 
-float overlay_dpi_scale(void)
-{
-    typedef UINT(WINAPI* GETDPIFORWINDOWPROC)(HWND);
-    static GETDPIFORWINDOWPROC get_dpi_for_window;
-    static BOOL looked;
-
-    if (!looked)
-    {
-        get_dpi_for_window =
-            (GETDPIFORWINDOWPROC)GetProcAddress(GetModuleHandleA("user32.dll"), "GetDpiForWindow");
-        looked = TRUE;
-    }
-
-    UINT dpi = get_dpi_for_window && g_ddraw.hwnd ? get_dpi_for_window(g_ddraw.hwnd) : 0;
-
-    return dpi ? dpi / 96.0f : 1.0f;
-}
-
 void overlay_get_status(OVERLAY_STATUS* status, int canvas_width, int canvas_height)
 {
     static const float sizes[] = { 13.0f, 16.0f, 20.0f };
@@ -338,7 +313,7 @@ void overlay_get_status(OVERLAY_STATUS* status, int canvas_width, int canvas_hei
         size = 1;
 
     /* For the display scale, but never more than a 22nd of the picture's height */
-    float font = sizes[size] * overlay_dpi_scale();
+    float font = sizes[size] * dd_display_scale();
 
     if (font > canvas_height / 22.0f)
         font = canvas_height / 22.0f;

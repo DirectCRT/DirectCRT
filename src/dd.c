@@ -490,7 +490,7 @@ void dd_set_refresh(DWORD game_hz)
     g_ddraw.refresh_asked = game_hz;
 
     /* A game that doesn't ask, or asks for a rate no CRT had, gets 60 Hz */
-    vbeam_set_rate(hz >= 24 && hz <= 240 ? hz : 60);
+    vbeam_set_rate(hz >= VBEAM_MIN_HZ && hz <= VBEAM_MAX_HZ ? hz : 60);
     TRACE("     emulated refresh %lu Hz (the game asked for %lu)\n", vbeam_rate(), game_hz);
 }
 
@@ -555,19 +555,21 @@ HRESULT dd_RestoreDisplayMode()
     return DD_OK;
 }
 
-/* The desktop and its display scale, for crt-auto's 'viewport' sizes */
-static CRT_AUTO_DISPLAY dd_crt_auto_display()
+float dd_display_scale(void)
 {
-    CRT_AUTO_DISPLAY display = { 0 };
-    display.desktop_width = g_ddraw.mode.dmPelsWidth;
-    display.desktop_height = g_ddraw.mode.dmPelsHeight;
-
-    UINT dpi = 0;
-
     /* Windows 10 1607 and later */
     typedef UINT(WINAPI* GETDPIFORWINDOWPROC)(HWND);
-    GETDPIFORWINDOWPROC get_dpi_for_window =
-        (GETDPIFORWINDOWPROC)GetProcAddress(GetModuleHandleA("user32.dll"), "GetDpiForWindow");
+    static GETDPIFORWINDOWPROC get_dpi_for_window;
+    static volatile LONG looked;
+
+    if (!looked)
+    {
+        get_dpi_for_window =
+            (GETDPIFORWINDOWPROC)GetProcAddress(GetModuleHandleA("user32.dll"), "GetDpiForWindow");
+        InterlockedExchange(&looked, TRUE);
+    }
+
+    UINT dpi = 0;
 
     if (get_dpi_for_window && g_ddraw.hwnd)
         dpi = get_dpi_for_window(g_ddraw.hwnd);
@@ -583,8 +585,15 @@ static CRT_AUTO_DISPLAY dd_crt_auto_display()
         }
     }
 
-    display.scale = dpi ? dpi / 96.0f : 1.0f;
+    return dpi ? dpi / 96.0f : 1.0f;
+}
 
+CRT_AUTO_DISPLAY dd_crt_auto_display(void)
+{
+    CRT_AUTO_DISPLAY display = { 0 };
+    display.desktop_width = g_ddraw.mode.dmPelsWidth;
+    display.desktop_height = g_ddraw.mode.dmPelsHeight;
+    display.scale = dd_display_scale();
     return display;
 }
 
@@ -623,12 +632,15 @@ BOOL dd_fullscreen_stays(void)
     return !g_config.windowed && g_config.fullscreen && !g_config.fullscreen_minimize;
 }
 
-/* Whether renderer=opengl waits for the game to start again: Direct3D 11
- * keeps going in the window it has shown its frames in (dd_next_renderer) */
+/* Direct3D 11 keeps going in the window it has shown its frames in
+ * (dd_next_renderer) */
 BOOL dd_opengl_waits(void)
 {
-    return _strcmpi(g_config.renderer, "opengl") == 0 && g_ddraw.renderer == d3d11_render_main &&
-        d3d11_flipped(g_ddraw.hwnd);
+    EnterCriticalSection(&g_ddraw.cs);
+    BOOL opengl = _stricmp(g_config.renderer, "opengl") == 0;
+    LeaveCriticalSection(&g_ddraw.cs);
+
+    return opengl && g_ddraw.renderer == d3d11_render_main && d3d11_flipped(g_ddraw.hwnd);
 }
 
 /* To the renderer the settings give now, the render thread stopped */
@@ -764,32 +776,29 @@ static void dd_set_picture(int canvas_width, int canvas_height)
  * display goes to the window or fullscreen it gives */
 void dd_reload_settings(BOOL now)
 {
+    /* The settings as they were, to see what changed (this thread is the one
+       that writes them). The new crt-auto settings come in crt, for the
+       render thread to get them when it's ready */
+    CNCDDRAWCONFIG old = g_config;
     CRT_AUTO_SETTINGS crt;
-    DWORD refresh = g_config.emulated_refresh;
-    BOOL status_osd = g_config.status_osd;
-    DISPLAY_MODE display = g_config.display;
-    WINDOW_SIZE window_size = g_config.window_size;
-    WINDOW_POSITION window_position = g_config.window_position;
-    BOOL decorations = g_config.window_decorations;
-    BOOL resizable = g_config.window_resizable;
-    BOOL fullscreen_minimize = g_config.fullscreen_minimize;
-    int maxfps = g_config.maxfps;
-    BOOL vsync = g_config.vsync;
-    BOOL adjmouse = g_config.adjmouse;
-    char renderer[sizeof(g_config.renderer)];
-    memcpy(renderer, g_config.renderer, sizeof(renderer));
 
-    if (!cfg_reload_settings(&crt, now))
+    /* The render thread reads g_config's text (the renderer, screenshotdir)
+       under the lock */
+    EnterCriticalSection(&g_ddraw.cs);
+    BOOL reloaded = cfg_reload_settings(&crt, now);
+    LeaveCriticalSection(&g_ddraw.cs);
+
+    if (!reloaded)
         return;
 
-    if (g_config.status_osd != status_osd)
+    if (g_config.status_osd != old.status_osd)
         overlay_set_status(g_config.status_osd);
 
-    if (g_config.emulated_refresh != refresh && g_ddraw.width)
+    if (g_config.emulated_refresh != old.emulated_refresh && g_ddraw.width)
         dd_set_refresh(g_ddraw.refresh_asked);
 
-    BOOL size_changed = memcmp(&window_size, &g_config.window_size, sizeof(window_size)) != 0;
-    BOOL position_changed = memcmp(&window_position, &g_config.window_position, sizeof(window_position)) != 0;
+    BOOL size_changed = memcmp(&old.window_size, &g_config.window_size, sizeof(old.window_size)) != 0;
+    BOOL position_changed = memcmp(&old.window_position, &g_config.window_position, sizeof(old.window_position)) != 0;
 
     /* A new size or place, over where the user dragged the window */
     if (size_changed)
@@ -802,21 +811,24 @@ void dd_reload_settings(BOOL now)
     if (g_ddraw.bnet_active)
     {
         g_ddraw.bnet_was_resizable = g_config.window_resizable;
-        g_config.window_resizable = resizable;
+        g_config.window_resizable = old.window_resizable;
     }
 
     BOOL window_changed = size_changed || position_changed ||
-        decorations != g_config.window_decorations || resizable != g_config.window_resizable ||
-        fullscreen_minimize != g_config.fullscreen_minimize;
+        old.window_decorations != g_config.window_decorations || old.window_resizable != g_config.window_resizable ||
+        old.fullscreen_minimize != g_config.fullscreen_minimize;
     /* Only when another one would run: OpenGL can wait (dd_opengl_waits) */
-    BOOL renderer_changed = _stricmp(renderer, g_config.renderer) != 0 &&
+    BOOL renderer_changed = _stricmp(old.renderer, g_config.renderer) != 0 &&
         (!g_ddraw.renderer || dd_next_renderer() != g_ddraw.renderer);
+    /* What the render thread starts with */
+    BOOL render_changed = old.maxfps != g_config.maxfps || old.vsync != g_config.vsync ||
+        old.adjmouse != g_config.adjmouse;
     BOOL picture_changed = memcmp(&crt, &g_config.crt, sizeof(crt)) != 0 || window_changed ||
-        maxfps != g_config.maxfps || vsync != g_config.vsync || adjmouse != g_config.adjmouse || renderer_changed;
+        render_changed || renderer_changed;
 
     /* What 'display' gives now, for what the game asked for */
     DISPLAY_KIND kind = ds_display_start(g_config.display, g_ddraw.saw_fullscreen || !g_ddraw.saw_normal);
-    BOOL display_changed = display != g_config.display && kind != dd_display_kind();
+    BOOL display_changed = old.display != g_config.display && kind != dd_display_kind();
 
     if (!picture_changed && !display_changed)
     {
@@ -827,8 +839,7 @@ void dd_reload_settings(BOOL now)
     /* Only the picture: the render thread keeps going and sets up its shader
        passes again between two frames. Stopping it would hold the screen
        still a while, the settings OSD with it */
-    BOOL only_picture = !display_changed && !window_changed && !renderer_changed &&
-        maxfps == g_config.maxfps && vsync == g_config.vsync && adjmouse == g_config.adjmouse;
+    BOOL only_picture = !display_changed && !window_changed && !renderer_changed && !render_changed;
 
     if (only_picture && g_ddraw.render.thread && g_ddraw.width && !g_ddraw.bnet_active &&
         (g_ddraw.renderer == d3d11_render_main || g_ddraw.renderer == ogl_render_main))
@@ -927,9 +938,7 @@ static POINT dd_window_origin(int width, int height, BOOL* clamp)
 
         ds_window_position_pixels(
             &g_config.window_position,
-            display.desktop_width,
-            display.desktop_height,
-            display.scale,
+            &display,
             &x,
             &y);
 
@@ -1064,9 +1073,7 @@ HRESULT dd_SetDisplayMode(DWORD dwWidth, DWORD dwHeight, DWORD dwBPP, DWORD dwFl
 
         ds_window_client_size(
             &g_config.window_size,
-            display.desktop_width,
-            display.desktop_height,
-            display.scale,
+            &display,
             dwWidth,
             dwHeight,
             &g_ddraw.render.width,
@@ -1915,7 +1922,7 @@ static BOOL g_dd_ogl_failed;
 static DD_RENDERER dd_next_renderer(void)
 {
     /* Not on a window Direct3D 11 has shown its frames in: OpenGL's wouldn't */
-    if (_strcmpi(g_config.renderer, "opengl") == 0 && !g_dd_ogl_failed &&
+    if (_stricmp(g_config.renderer, "opengl") == 0 && !g_dd_ogl_failed &&
         (g_dd_d3d11_failed || !d3d11_flipped(g_ddraw.hwnd)))
         return ogl_render_main;
 

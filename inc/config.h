@@ -6,6 +6,9 @@
 #include "crt_auto.h"
 #include "display_settings.h"
 
+/* The ini's one section */
+#define CFG_SECTION "directcrt"
+
 #define FILE_EXISTS(a) (GetFileAttributes(a) != INVALID_FILE_ATTRIBUTES)
 
 typedef struct CNCDDRAWCONFIG

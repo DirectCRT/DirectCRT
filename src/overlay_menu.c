@@ -193,7 +193,7 @@ static void menu_chars(WPARAM vk, LPARAM lParam)
     }
 }
 
-static void menu_button(HWND hwnd, int button, BOOL down)
+static void menu_push_mouse_button(HWND hwnd, int button, BOOL down)
 {
     OVERLAY_EVENT ev = { OVERLAY_EVENT_BUTTON };
     ev.button = button;
@@ -242,29 +242,29 @@ BOOL overlay_menu_wndproc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam, LRE
     }
     case WM_LBUTTONDOWN:
     case WM_LBUTTONDBLCLK:
-        menu_button(hwnd, 0, TRUE);
+        menu_push_mouse_button(hwnd, 0, TRUE);
         return TRUE;
     case WM_LBUTTONUP:
-        menu_button(hwnd, 0, FALSE);
+        menu_push_mouse_button(hwnd, 0, FALSE);
         return TRUE;
     case WM_RBUTTONDOWN:
     case WM_RBUTTONDBLCLK:
-        menu_button(hwnd, 1, TRUE);
+        menu_push_mouse_button(hwnd, 1, TRUE);
         return TRUE;
     case WM_RBUTTONUP:
-        menu_button(hwnd, 1, FALSE);
+        menu_push_mouse_button(hwnd, 1, FALSE);
         return TRUE;
     case WM_MBUTTONDOWN:
     case WM_MBUTTONDBLCLK:
-        menu_button(hwnd, 2, TRUE);
+        menu_push_mouse_button(hwnd, 2, TRUE);
         return TRUE;
     case WM_MBUTTONUP:
-        menu_button(hwnd, 2, FALSE);
+        menu_push_mouse_button(hwnd, 2, FALSE);
         return TRUE;
     case WM_XBUTTONDOWN:
     case WM_XBUTTONDBLCLK:
     case WM_XBUTTONUP:
-        menu_button(hwnd, GET_XBUTTON_WPARAM(wParam) == XBUTTON1 ? 3 : 4, msg != WM_XBUTTONUP);
+        menu_push_mouse_button(hwnd, GET_XBUTTON_WPARAM(wParam) == XBUTTON1 ? 3 : 4, msg != WM_XBUTTONUP);
         *result = TRUE;
         return TRUE;
     case WM_MOUSEWHEEL:
@@ -367,7 +367,7 @@ void overlay_menu_request_close(void)
 
 float overlay_menu_font_size(int canvas_height)
 {
-    float size = 16.0f * overlay_dpi_scale();
+    float size = 16.0f * dd_display_scale();
     float most = canvas_height / 30.0f;
 
     if (size > most)
@@ -398,7 +398,7 @@ static void menu_load(void)
             continue;
 
         char* buf = g_values[i].value;
-        ini_get_string(&ini, "directcrt", s->key, "\x01", buf, MENU_VALUE_SIZE);
+        ini_get_string(&ini, CFG_SECTION, s->key, "\x01", buf, MENU_VALUE_SIZE);
 
         /* An empty value is as good as none, as in config.c */
         g_values[i].set = buf[0] && !(buf[0] == '\x01' && buf[1] == 0);
@@ -450,7 +450,7 @@ void overlay_menu_write(int setting, const char* value)
     if (!InterlockedExchange(&g_apply_pending, 1))
         InterlockedExchange(&g_apply_since, (LONG)GetTickCount());
 
-    WritePrivateProfileStringA("directcrt", s->key, value, g_config.ini_path);
+    WritePrivateProfileStringA(CFG_SECTION, s->key, value, g_config.ini_path);
 
     if (g_values)
     {

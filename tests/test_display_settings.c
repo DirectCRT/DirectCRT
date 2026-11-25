@@ -10,26 +10,7 @@
 #include <string.h>
 #include <math.h>
 #include "display_settings.h"
-
-static int g_failed;
-static int g_checks;
-
-#define CHECK(cond) \
-    do { \
-        g_checks++; \
-        if (!(cond)) { g_failed++; printf("  FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); } \
-    } while (0)
-
-#define CHECK_STR(a, b) \
-    do { \
-        const char* a_ = (a); const char* b_ = (b); \
-        g_checks++; \
-        if ((a_ == NULL) != (b_ == NULL) || (a_ && strcmp(a_, b_) != 0)) { \
-            g_failed++; \
-            printf("  FAIL %s:%d: %s is \"%s\", expected \"%s\"\n", __FILE__, __LINE__, #a, \
-                a_ ? a_ : "(null)", b_ ? b_ : "(null)"); \
-        } \
-    } while (0)
+#include "check.h"
 
 static int feq(float a, float b)
 {
@@ -147,8 +128,10 @@ static void client(const char* value, int dw, int dh, float scale, int gw, int g
     WINDOW_SIZE s;
     *w = *h = -1;
 
+    CRT_AUTO_DISPLAY display = { dw, dh, scale };
+
     if (ds_parse_window_size(value, &s))
-        ds_window_client_size(&s, dw, dh, scale, gw, gh, w, h);
+        ds_window_client_size(&s, &display, gw, gh, w, h);
 }
 
 static void test_window_client_size(void)
@@ -234,17 +217,19 @@ static void test_window_position(void)
     CHECK(!ds_parse_window_position("center", &p));
     CHECK(feq(p.x, 7.0f));
 
+    CRT_AUTO_DISPLAY display = { 3840, 2160, 1.5f };
+
     ds_parse_window_position("100,50", &p);
-    ds_window_position_pixels(&p, 3840, 2160, 1.5f, &x, &y);
+    ds_window_position_pixels(&p, &display, &x, &y);
     CHECK(x == 150 && y == 75);
 
     ds_parse_window_position("100,50px", &p);
-    ds_window_position_pixels(&p, 3840, 2160, 1.5f, &x, &y);
+    ds_window_position_pixels(&p, &display, &x, &y);
     CHECK(x == 100 && y == 50);
 
     /* Percentages of the desktop's width and height */
     ds_parse_window_position("25,50%", &p);
-    ds_window_position_pixels(&p, 3840, 2160, 1.5f, &x, &y);
+    ds_window_position_pixels(&p, &display, &x, &y);
     CHECK(x == 960 && y == 1080);
 }
 
@@ -339,6 +324,5 @@ int main(void)
     test_format();
     test_legacy();
 
-    printf("display_settings: %d checks, %d failed\n", g_checks, g_failed);
-    return g_failed ? 1 : 0;
+    return check_report("display_settings");
 }

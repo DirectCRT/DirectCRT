@@ -6,9 +6,8 @@ static LONGLONG g_freq;     /* counter ticks per second */
 static LONGLONG g_origin;   /* counter value at the start of refresh 0 */
 static volatile LONG g_hz = 60;
 static volatile LONG g_lines = VBEAM_VGA_ACTIVE_LINES;
-static CRITICAL_SECTION g_cs;
-static HANDLE g_timer;
-static BOOL g_timer_tried;
+static CRITICAL_SECTION g_cs; /* g_flip_due; held only to read or set it, never while waiting */
+static volatile LONG g_high_res = -1; /* whether high-resolution timers work; -1 = not tried yet */
 static LONGLONG g_flip_due; /* when the pending flip is shown; 0 if none */
 
 LONGLONG vbeam_next_begin(LONGLONG t, LONGLONG period, LONGLONG active)
@@ -50,7 +49,7 @@ void vbeam_init(void)
 
 void vbeam_set_rate(DWORD hz)
 {
-    if (hz >= 24 && hz <= 240)
+    if (hz >= VBEAM_MIN_HZ && hz <= VBEAM_MAX_HZ)
         InterlockedExchange(&g_hz, (LONG)hz);
 }
 
@@ -89,40 +88,51 @@ static LONGLONG now(void)
     return c.QuadPart - g_origin;
 }
 
-static HANDLE timer(void)
+/* A timer of the waiting thread's own, so threads can wait at once. A
+   high-resolution timer wakes within about half a millisecond; Windows before
+   10 1803 refuses the flag, and then an ordinary timer is used */
+static HANDLE create_timer(void)
 {
-    if (!g_timer_tried)
-    {
-        g_timer_tried = TRUE;
+    typedef HANDLE (WINAPI *CREATETIMEREXW)(LPSECURITY_ATTRIBUTES, LPCWSTR, DWORD, DWORD);
+    HANDLE h = NULL;
 
-        /* A high-resolution timer wakes within about half a millisecond. Windows
-           before 10 1803 refuses the flag; then an ordinary timer is used. */
-        typedef HANDLE (WINAPI *CREATETIMEREXW)(LPSECURITY_ATTRIBUTES, LPCWSTR, DWORD, DWORD);
+    if (g_high_res != 0)
+    {
         CREATETIMEREXW create_ex =
             (CREATETIMEREXW)(void*)GetProcAddress(GetModuleHandleA("Kernel32.dll"), "CreateWaitableTimerExW");
 
         if (create_ex)
-            g_timer = create_ex(NULL, NULL, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
+            h = create_ex(NULL, NULL, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
 
-        if (!g_timer)
-            g_timer = CreateWaitableTimer(NULL, FALSE, NULL);
+        InterlockedExchange(&g_high_res, h != NULL);
     }
 
-    return g_timer;
+    if (!h)
+        h = CreateWaitableTimer(NULL, FALSE, NULL);
+
+    return h;
 }
 
-/* Call with g_cs held. Never returns before t. */
+/* Never returns before t. Call without g_cs held */
 static void wait_until(LONGLONG t)
 {
+    HANDLE h = NULL;
+    BOOL tried = FALSE;
+
     for (;;)
     {
         LONGLONG left = t - now();
 
         if (left <= 0)
-            return;
+            break;
 
         LONGLONG left_100ns = left * 10000000 / g_freq;
-        HANDLE h = timer();
+
+        if (left_100ns > 2000 && !tried)
+        {
+            h = create_timer();
+            tried = TRUE;
+        }
 
         if (left_100ns > 2000 && h)
         {
@@ -141,6 +151,17 @@ static void wait_until(LONGLONG t)
         else
             SwitchToThread();
     }
+
+    if (h)
+        CloseHandle(h);
+}
+
+static LONGLONG flip_due(void)
+{
+    EnterCriticalSection(&g_cs);
+    LONGLONG due = g_flip_due;
+    LeaveCriticalSection(&g_cs);
+    return due;
 }
 
 BOOL vbeam_in_vblank(void)
@@ -163,44 +184,38 @@ DWORD vbeam_scanline(BOOL* in_vblank)
 
 void vbeam_wait(BOOL end)
 {
-    /* Threads waiting together queue on the lock; once the first wakes at the
-       edge, the others find it has passed and return at once. */
-    EnterCriticalSection(&g_cs);
-
+    /* Each thread waits for the edge after its own call, so threads waiting
+       together all wake at the same one */
     LONGLONG p = period();
     LONGLONG t = now();
     wait_until(end ? vbeam_next_end(t, p) : vbeam_next_begin(t, p, active_part(p)));
-
-    LeaveCriticalSection(&g_cs);
 }
 
 BOOL vbeam_flip_pending(void)
 {
-    EnterCriticalSection(&g_cs);
-    BOOL pending = g_flip_due && now() < g_flip_due;
-    LeaveCriticalSection(&g_cs);
-    return pending;
+    LONGLONG due = flip_due();
+    return due && now() < due;
 }
 
 void vbeam_wait_flip_shown(void)
 {
-    EnterCriticalSection(&g_cs);
+    LONGLONG due = flip_due();
 
-    if (g_flip_due)
-        wait_until(g_flip_due);
-
-    LeaveCriticalSection(&g_cs);
+    if (due)
+        wait_until(due);
 }
 
 void vbeam_flip(void)
 {
-    EnterCriticalSection(&g_cs);
+    LONGLONG due = flip_due();
 
-    if (g_flip_due)
-        wait_until(g_flip_due);
+    if (due)
+        wait_until(due);
 
     LONGLONG p = period();
-    g_flip_due = vbeam_next_begin(now(), p, active_part(p));
+    LONGLONG next = vbeam_next_begin(now(), p, active_part(p));
 
+    EnterCriticalSection(&g_cs);
+    g_flip_due = next;
     LeaveCriticalSection(&g_cs);
 }

@@ -323,8 +323,14 @@ CRT_AUTO_LAYOUT crt_auto_calc_layout(
         return layout;
     }
 
-    CRT_AUTO_SETTINGS defaults = crt_auto_default_settings();
-    const CRT_AUTO_SETTINGS* s = settings ? settings : &defaults;
+    CRT_AUTO_SETTINGS defaults;
+    const CRT_AUTO_SETTINGS* s = settings;
+
+    if (!s)
+    {
+        defaults = crt_auto_default_settings();
+        s = &defaults;
+    }
 
     CRT_AUTO_DISPLAY d = { canvas_width, canvas_height, 1.0f };
     if (display && display->desktop_width > 0 && display->desktop_height > 0 && display->scale > 0)
@@ -440,19 +446,35 @@ CRT_AUTO_LAYOUT crt_auto_calc_layout(
     return layout;
 }
 
+/* By CRT_SHADER */
+static const CRT_SHADER_INFO g_shaders[CRT_SHADER_COUNT] = {
+    { "interpolation/sharp", "CRT_SHARP", NULL },
+    { "crt/vga-1080p", "CRT_VGA_1080P", NULL },
+    { "crt/vga-1080p-fake-double-scan", "CRT_VGA_1080P_FAKE_DOUBLE_SCAN", NULL },
+    { "crt/crt-hyllian:vga-1440p", "CRT_HYLLIAN", "CRT_PRESET_VGA_1440P" },
+    { "crt/crt-hyllian:vga-4k", "CRT_HYLLIAN", "CRT_PRESET_VGA_4K" },
+    { "interpolation/nearest", "CRT_NEAREST", NULL },
+    { "interpolation/bilinear", "CRT_BILINEAR", NULL },
+};
+
+const CRT_SHADER_INFO* crt_auto_shader_info(CRT_SHADER shader)
+{
+    return &g_shaders[(unsigned)shader < CRT_SHADER_COUNT ? shader : CRT_SHADER_SHARP];
+}
+
 const char* crt_auto_shader_name(CRT_SHADER shader)
 {
-    switch (shader)
-    {
-    case CRT_SHADER_SHARP: return "interpolation/sharp";
-    case CRT_SHADER_VGA_1080P: return "crt/vga-1080p";
-    case CRT_SHADER_VGA_1080P_FAKE_DOUBLE_SCAN: return "crt/vga-1080p-fake-double-scan";
-    case CRT_SHADER_HYLLIAN_VGA_1440P: return "crt/crt-hyllian:vga-1440p";
-    case CRT_SHADER_HYLLIAN_VGA_4K: return "crt/crt-hyllian:vga-4k";
-    case CRT_SHADER_NEAREST: return "interpolation/nearest";
-    case CRT_SHADER_BILINEAR: return "interpolation/bilinear";
-    default: return "?";
-    }
+    return crt_auto_shader_info(shader)->name;
+}
+
+/* By CRT_SHADER_SETTING */
+static const char* const g_shader_settings[CRT_SHADER_SETTING_COUNT] = {
+    "crt-auto", "sharp", "nearest", "bilinear",
+};
+
+const char* crt_auto_shader_setting_name(CRT_SHADER_SETTING shader)
+{
+    return (unsigned)shader < CRT_SHADER_SETTING_COUNT ? g_shader_settings[shader] : NULL;
 }
 
 
@@ -743,7 +765,7 @@ static int parse_size(const char* v, CRT_VIEWPORT* out)
 
 /* parse_viewport_settings. The check against the desktop size is done in
  * crt_auto_calc_layout, where the desktop is known */
-static int parse_viewport(const char* v, CRT_VIEWPORT* out)
+int crt_auto_parse_viewport(const char* v, CRT_VIEWPORT* out)
 {
     CRT_VIEWPORT vp = { CRT_VIEWPORT_FIT, 0, 0 };
 
@@ -810,59 +832,78 @@ static int parse_viewport(const char* v, CRT_VIEWPORT* out)
     return 1;
 }
 
-static const char* const g_setting_names[] = {
-    "shader",
-    "aspect",
-    "integer_scaling",
-    "viewport",
-    "image_adjustments",
-    "crt_color_profile",
-    "brightness",
-    "contrast",
-    "gamma",
-    "digital_contrast",
-    "black_level",
-    "saturation",
-    "color_temperature",
-    "color_temperature_luma_preserve",
-    "red_gain",
-    "green_gain",
-    "blue_gain",
-};
-
-static const char* const g_setting_defaults[] = {
-    "crt-auto", /* shader */
-    "auto", /* aspect */
-    "auto", /* integer_scaling */
-    "fit",  /* viewport */
-    "on",   /* image_adjustments */
-    "auto", /* crt_color_profile */
-    "45",   /* brightness */
-    "65",   /* contrast */
-    "0",    /* gamma */
-    "0",    /* digital_contrast */
-    "auto", /* black_level */
-    "0",    /* saturation */
-    "auto", /* color_temperature */
-    "0",    /* color_temperature_luma_preserve */
-    "100",  /* red_gain */
-    "100",  /* green_gain */
-    "100",  /* blue_gain */
+/* The settings, with DOSBox Staging's defaults and the ranges of their
+ * numbers (min = max = 0: not a number) */
+static const struct
+{
+    const char* name;
+    const char* value; /* the default, as text */
+    int min, max;
+} g_settings[] = {
+    { "shader", "crt-auto" },
+    { "aspect", "auto" },
+    { "integer_scaling", "auto" },
+    { "viewport", "fit" },
+    { "image_adjustments", "on" },
+    { "crt_color_profile", "auto" },
+    { "brightness", "45", 0, 100 },
+    { "contrast", "65", 0, 100 },
+    { "gamma", "0", -50, 50 },
+    { "digital_contrast", "0", -50, 50 },
+    { "black_level", "auto", 0, 100 },
+    { "saturation", "0", -50, 50 },
+    { "color_temperature", "auto", 3000, 10000 },
+    { "color_temperature_luma_preserve", "0", 0, 100 },
+    { "red_gain", "100", 0, 200 },
+    { "green_gain", "100", 0, 200 },
+    { "blue_gain", "100", 0, 200 },
 };
 
 int crt_auto_setting_count(void)
 {
-    return (int)(sizeof(g_setting_names) / sizeof(g_setting_names[0]));
+    return (int)(sizeof(g_settings) / sizeof(g_settings[0]));
 }
 
 const char* crt_auto_setting_name(int i)
 {
-    return i >= 0 && i < crt_auto_setting_count() ? g_setting_names[i] : NULL;
+    return i >= 0 && i < crt_auto_setting_count() ? g_settings[i].name : NULL;
 }
 
 const char* crt_auto_setting_default(int i)
 {
-    return i >= 0 && i < crt_auto_setting_count() ? g_setting_defaults[i] : NULL;
+    return i >= 0 && i < crt_auto_setting_count() ? g_settings[i].value : NULL;
+}
+
+int crt_auto_setting_range(int i, int* min, int* max)
+{
+    if (i < 0 || i >= crt_auto_setting_count() || g_settings[i].min == g_settings[i].max)
+        return 0;
+
+    *min = g_settings[i].min;
+    *max = g_settings[i].max;
+    return 1;
+}
+
+static int setting_index(const char* name)
+{
+    for (int i = 0; i < crt_auto_setting_count(); i++)
+    {
+        if (str_ieq(name, g_settings[i].name))
+            return i;
+    }
+
+    return -1;
+}
+
+/* A number in a setting's range */
+static int parse_setting_int(const char* name, const char* v, int* out)
+{
+    int min, max;
+
+    if (!crt_auto_setting_range(setting_index(name), &min, &max))
+        return 0;
+
+    return parse_int_in_range(v, min, max, out);
 }
 
 /* Returns 0 for an invalid value, and changes nothing then */
@@ -870,18 +911,16 @@ static int parse_setting(CRT_AUTO_SETTINGS* s, const char* name, const char* v)
 {
     if (str_ieq(name, "shader"))
     {
-        if (str_ieq(v, "crt-auto"))
-            s->shader = CRT_SHADER_SETTING_CRT_AUTO;
-        else if (str_ieq(v, "sharp"))
-            s->shader = CRT_SHADER_SETTING_SHARP;
-        else if (str_ieq(v, "nearest"))
-            s->shader = CRT_SHADER_SETTING_NEAREST;
-        else if (str_ieq(v, "bilinear"))
-            s->shader = CRT_SHADER_SETTING_BILINEAR;
-        else
-            return 0;
+        for (int i = 0; i < CRT_SHADER_SETTING_COUNT; i++)
+        {
+            if (str_ieq(v, g_shader_settings[i]))
+            {
+                s->shader = (CRT_SHADER_SETTING)i;
+                return 1;
+            }
+        }
 
-        return 1;
+        return 0;
     }
 
     if (str_ieq(name, "aspect"))
@@ -915,7 +954,7 @@ static int parse_setting(CRT_AUTO_SETTINGS* s, const char* name, const char* v)
     }
 
     if (str_ieq(name, "viewport"))
-        return parse_viewport(v, &s->viewport);
+        return crt_auto_parse_viewport(v, &s->viewport);
 
     if (str_ieq(name, "image_adjustments"))
         return parse_bool(v, &s->image_adjustments);
@@ -957,7 +996,7 @@ static int parse_setting(CRT_AUTO_SETTINGS* s, const char* name, const char* v)
             return 1;
         }
 
-        return parse_int_in_range(v, 0, 100, &s->black_level);
+        return parse_setting_int(name, v, &s->black_level);
     }
 
     if (str_ieq(name, "color_temperature"))
@@ -968,31 +1007,30 @@ static int parse_setting(CRT_AUTO_SETTINGS* s, const char* name, const char* v)
             return 1;
         }
 
-        return parse_int_in_range(v, 3000, 10000, &s->color_temperature);
+        return parse_setting_int(name, v, &s->color_temperature);
     }
 
+    /* Just a number; its range is g_settings' */
     static const struct
     {
         const char* name;
         size_t offset;
-        int min;
-        int max;
     } ints[] = {
-        { "brightness", offsetof(CRT_AUTO_SETTINGS, brightness), 0, 100 },
-        { "contrast", offsetof(CRT_AUTO_SETTINGS, contrast), 0, 100 },
-        { "gamma", offsetof(CRT_AUTO_SETTINGS, gamma), -50, 50 },
-        { "digital_contrast", offsetof(CRT_AUTO_SETTINGS, digital_contrast), -50, 50 },
-        { "saturation", offsetof(CRT_AUTO_SETTINGS, saturation), -50, 50 },
-        { "color_temperature_luma_preserve", offsetof(CRT_AUTO_SETTINGS, color_temperature_luma_preserve), 0, 100 },
-        { "red_gain", offsetof(CRT_AUTO_SETTINGS, red_gain), 0, 200 },
-        { "green_gain", offsetof(CRT_AUTO_SETTINGS, green_gain), 0, 200 },
-        { "blue_gain", offsetof(CRT_AUTO_SETTINGS, blue_gain), 0, 200 },
+        { "brightness", offsetof(CRT_AUTO_SETTINGS, brightness) },
+        { "contrast", offsetof(CRT_AUTO_SETTINGS, contrast) },
+        { "gamma", offsetof(CRT_AUTO_SETTINGS, gamma) },
+        { "digital_contrast", offsetof(CRT_AUTO_SETTINGS, digital_contrast) },
+        { "saturation", offsetof(CRT_AUTO_SETTINGS, saturation) },
+        { "color_temperature_luma_preserve", offsetof(CRT_AUTO_SETTINGS, color_temperature_luma_preserve) },
+        { "red_gain", offsetof(CRT_AUTO_SETTINGS, red_gain) },
+        { "green_gain", offsetof(CRT_AUTO_SETTINGS, green_gain) },
+        { "blue_gain", offsetof(CRT_AUTO_SETTINGS, blue_gain) },
     };
 
     for (size_t i = 0; i < sizeof(ints) / sizeof(ints[0]); i++)
     {
         if (str_ieq(name, ints[i].name))
-            return parse_int_in_range(v, ints[i].min, ints[i].max, (int*)((char*)s + ints[i].offset));
+            return parse_setting_int(name, v, (int*)((char*)s + ints[i].offset));
     }
 
     return 0;
@@ -1004,22 +1042,16 @@ CRT_AUTO_SETTINGS crt_auto_default_settings(void)
     memset(&s, 0, sizeof(s));
 
     for (int i = 0; i < crt_auto_setting_count(); i++)
-        parse_setting(&s, g_setting_names[i], g_setting_defaults[i]);
+        parse_setting(&s, g_settings[i].name, g_settings[i].value);
 
     return s;
 }
 
 int crt_auto_set(CRT_AUTO_SETTINGS* settings, const char* name, const char* value)
 {
-    int i;
+    int i = setting_index(name);
 
-    for (i = 0; i < crt_auto_setting_count(); i++)
-    {
-        if (str_ieq(name, g_setting_names[i]))
-            break;
-    }
-
-    if (i == crt_auto_setting_count())
+    if (i < 0)
         return 0;
 
     /* Leading and trailing spaces don't count */
@@ -1036,11 +1068,11 @@ int crt_auto_set(CRT_AUTO_SETTINGS* settings, const char* name, const char* valu
         memcpy(buf, value, len);
         buf[len] = '\0';
 
-        if (parse_setting(settings, g_setting_names[i], buf))
+        if (parse_setting(settings, g_settings[i].name, buf))
             return 1;
     }
 
-    parse_setting(settings, g_setting_names[i], g_setting_defaults[i]);
+    parse_setting(settings, g_settings[i].name, g_settings[i].value);
     return 0;
 }
 
@@ -1066,8 +1098,14 @@ static float remap(float in_min, float in_max, float out_min, float out_max, flo
 
 CRT_AUTO_COLOR crt_auto_vga_color(const CRT_AUTO_SETTINGS* settings)
 {
-    CRT_AUTO_SETTINGS defaults = crt_auto_default_settings();
-    const CRT_AUTO_SETTINGS* s = settings ? settings : &defaults;
+    CRT_AUTO_SETTINGS defaults;
+    const CRT_AUTO_SETTINGS* s = settings;
+
+    if (!s)
+    {
+        defaults = crt_auto_default_settings();
+        s = &defaults;
+    }
     CRT_AUTO_COLOR c;
 
     c.color_space = 0; /* color_space = srgb */
@@ -1102,4 +1140,27 @@ CRT_AUTO_COLOR crt_auto_vga_color(const CRT_AUTO_SETTINGS* settings)
     c.blue_gain = remap(0, 200, 0, 2, (float)s->blue_gain);
 
     return c;
+}
+
+const CRT_AUTO_UNIFORM* crt_auto_color_uniform(int i)
+{
+    static const CRT_AUTO_UNIFORM uniforms[] = {
+        { "COLOR_SPACE", CRT_AUTO_UNIFORM_INT, offsetof(CRT_AUTO_COLOR, color_space) },
+        { "ENABLE_ADJUSTMENTS", CRT_AUTO_UNIFORM_INT, offsetof(CRT_AUTO_COLOR, enable_adjustments) },
+        { "COLOR_PROFILE", CRT_AUTO_UNIFORM_INT, offsetof(CRT_AUTO_COLOR, color_profile) },
+        { "BRIGHTNESS", CRT_AUTO_UNIFORM_FLOAT, offsetof(CRT_AUTO_COLOR, brightness) },
+        { "CONTRAST", CRT_AUTO_UNIFORM_FLOAT, offsetof(CRT_AUTO_COLOR, contrast) },
+        { "GAMMA", CRT_AUTO_UNIFORM_FLOAT, offsetof(CRT_AUTO_COLOR, gamma) },
+        { "DIGITAL_CONTRAST", CRT_AUTO_UNIFORM_FLOAT, offsetof(CRT_AUTO_COLOR, digital_contrast) },
+        { "BLACK_LEVEL_COLOR", CRT_AUTO_UNIFORM_VEC3, offsetof(CRT_AUTO_COLOR, black_level_color) },
+        { "BLACK_LEVEL", CRT_AUTO_UNIFORM_FLOAT, offsetof(CRT_AUTO_COLOR, black_level) },
+        { "SATURATION", CRT_AUTO_UNIFORM_FLOAT, offsetof(CRT_AUTO_COLOR, saturation) },
+        { "COLOR_TEMPERATURE_KELVIN", CRT_AUTO_UNIFORM_FLOAT, offsetof(CRT_AUTO_COLOR, color_temperature_kelvin) },
+        { "COLOR_TEMPERATURE_LUMA_PRESERVE", CRT_AUTO_UNIFORM_FLOAT, offsetof(CRT_AUTO_COLOR, color_temperature_luma_preserve) },
+        { "RED_GAIN", CRT_AUTO_UNIFORM_FLOAT, offsetof(CRT_AUTO_COLOR, red_gain) },
+        { "GREEN_GAIN", CRT_AUTO_UNIFORM_FLOAT, offsetof(CRT_AUTO_COLOR, green_gain) },
+        { "BLUE_GAIN", CRT_AUTO_UNIFORM_FLOAT, offsetof(CRT_AUTO_COLOR, blue_gain) },
+    };
+
+    return i >= 0 && i < (int)(sizeof(uniforms) / sizeof(uniforms[0])) ? &uniforms[i] : NULL;
 }

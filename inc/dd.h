@@ -22,6 +22,9 @@ HRESULT dd_SetCooperativeLevel(HWND hwnd, DWORD dwFlags);
 HRESULT dd_SetDisplayMode(DWORD dwWidth, DWORD dwHeight, DWORD dwBPP, DWORD dwFlags);
 BOOL dd_fullscreen_stays(void); /* fullscreen as a borderless window, shown when the game loses the focus */
 void dd_reload_settings(BOOL now); /* live reload; now = without waiting for the file to settle */
+BOOL dd_opengl_waits(void); /* renderer=opengl waits for the game to start again */
+float dd_display_scale(void); /* the game window's display scale (its DPI / 96) */
+CRT_AUTO_DISPLAY dd_crt_auto_display(void); /* the desktop and its display scale, as crt-auto sees them */
 HRESULT dd_WaitForVerticalBlank(DWORD dwFlags, HANDLE hEvent);
 HRESULT dd_GetAvailableVidMem(LPDDSCAPS lpDDCaps, LPDWORD lpdwTotal, LPDWORD lpdwFree);
 HRESULT dd_TestCooperativeLevel();
