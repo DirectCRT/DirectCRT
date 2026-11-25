@@ -761,6 +761,15 @@ static void ogl_uniform2f(GLuint program, const char* name, float x, float y)
     }
 }
 
+/* The picture's y for glViewport, from the bottom of the window (one row
+ * more with opengl_y_align). render.viewport.y is from the top, as the mouse
+ * and the hooks use it; the two differ once viewport_offset moves the
+ * picture up or down */
+static int ogl_viewport_bottom()
+{
+    return g_ddraw.render.height - g_ddraw.render.viewport.y - g_ddraw.render.viewport.height;
+}
+
 static void ogl_uniform3f(GLuint program, const char* name, const float v[3])
 {
     GLint loc = glGetUniformLocation(program, name);
@@ -816,7 +825,7 @@ static void ogl_init_crt_auto_uniforms()
         p,
         "OUTPUT_START_OFFSET",
         (float)g_ddraw.render.viewport.x,
-        (float)(g_ddraw.render.viewport.y + g_ddraw.render.opengl_y_align));
+        (float)ogl_viewport_bottom());
 
     ogl_uniform2f(
         p,
@@ -1128,7 +1137,7 @@ static void ogl_render()
             {
                 glViewport(
                     g_ddraw.render.viewport.x,
-                    g_ddraw.render.viewport.y + g_ddraw.render.opengl_y_align,
+                    ogl_viewport_bottom(),
                     g_ddraw.render.viewport.width,
                     g_ddraw.render.viewport.height);
             }

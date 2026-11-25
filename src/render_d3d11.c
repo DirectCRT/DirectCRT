@@ -603,6 +603,15 @@ static void d3d11_uniform1i(D3D11_PASS* p, const char* name, int i)
     d3d11_uniform(p, name, NULL, i);
 }
 
+/* The picture's y in OpenGL window coordinates (bottom-left origin), as the
+ * shaders see gl_FragCoord. render.viewport.y is from the top, as the mouse
+ * and the hooks use it; the two differ once viewport_offset moves the
+ * picture up or down */
+static int d3d11_viewport_bottom()
+{
+    return g_ddraw.render.height - g_ddraw.render.viewport.y - g_ddraw.render.viewport.height;
+}
+
 static void d3d11_upload_pass(D3D11_PASS* p)
 {
     if (p->vs_cb)
@@ -689,7 +698,7 @@ static BOOL d3d11_create_crt_auto()
 
     /* OpenGL window coordinates (bottom-left origin), as DOSBox passes its
      * draw rectangle to glViewport */
-    d3d11_uniform2f(p, "OUTPUT_START_OFFSET", (float)g_ddraw.render.viewport.x, (float)g_ddraw.render.viewport.y);
+    d3d11_uniform2f(p, "OUTPUT_START_OFFSET", (float)g_ddraw.render.viewport.x, (float)d3d11_viewport_bottom());
     d3d11_uniform2f(p, "OUTPUT_SIZE", (float)g_ddraw.render.viewport.width, (float)g_ddraw.render.viewport.height);
 
     for (int i = 0; i < g_d3d11.crt_params.count; i++)
@@ -1064,7 +1073,7 @@ static void d3d11_draw_frame()
         else
         {
             x = g_ddraw.render.viewport.x;
-            y = g_ddraw.render.viewport.y;
+            y = d3d11_viewport_bottom();
             w = g_ddraw.render.viewport.width;
             h = g_ddraw.render.viewport.height;
         }
