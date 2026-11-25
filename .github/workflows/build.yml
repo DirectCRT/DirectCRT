@@ -67,24 +67,25 @@ jobs:
       # another, so the one most people get is small. DebugLog and DebugLogMini
       # build ddtest as Release, into bin/Release
       # The names carry the version as the DLL does (tools/git-version.ps1):
-      # 0.2.0 on a tag, 0.2.0-3-g1a2b3c4 three commits after it. The readmes
-      # are named for what they cover, as the zips are unpacked into the
-      # game's folder, next to the game's own readme
+      # 0.2.0 on a tag, 0.2.0-3-g1a2b3c4 three commits after it. The readme
+      # and the licences are named for DirectCRT, as the zips are unpacked
+      # into the game's folder, next to the game's own readme and licence
       - name: Collect files
         shell: bash
         run: |
           version="$(git describe --tags --match='v[0-9]*' --exclude='v*.*.*.*' --always)"
           version="${version#v}"
           echo "VERSION=$version" >> "$GITHUB_ENV"
+          bash tools/licence-file.sh DirectCRT-LICENSE.txt
           bin="bin/${{ matrix.configuration }}"
           out="DirectCRT-$version-${{ matrix.configuration }}"
           mkdir "$out"
-          cp "$bin/ddraw.dll" LICENSE LICENSE-cnc-ddraw.txt "$out"
+          cp "$bin/ddraw.dll" DirectCRT-LICENSE.txt "$out"
           sed "s/@VERSION@/$version/" docs/DirectCRT-README.txt > "$out/DirectCRT-README.txt"
           if [[ "${{ matrix.configuration }}" == Release ]]; then
             mkdir "DirectCRT-$version-Release-symbols" "DirectCRT-$version-ddtest"
             cp "$bin/ddraw.pdb" "DirectCRT-$version-Release-symbols"
-            cp "$bin/ddtest.exe" LICENSE LICENSE-cnc-ddraw.txt "DirectCRT-$version-ddtest"
+            cp "$bin/ddtest.exe" DirectCRT-LICENSE.txt "DirectCRT-$version-ddtest"
             cp tools/ddtest/README.md "DirectCRT-$version-ddtest/ddtest-README.md"
           else
             ddtest_bin="$bin"

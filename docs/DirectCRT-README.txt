@@ -55,16 +55,16 @@ https://github.com/DirectCRT/DirectCRT/issues
 REMOVING IT
 
 Delete ddraw.dll and directcrt.ini from the game's folder, along with
-the files that came with them: DirectCRT-README.txt, LICENSE and
-LICENSE-cnc-ddraw.txt.
+the files that came with them: DirectCRT-README.txt and
+DirectCRT-LICENSE.txt.
 
 
 LICENCE
 
 DirectCRT is licensed under the GNU General Public License, version 2
-or (at your option) any later version; see LICENSE. It's a fork of
-cnc-ddraw by FunkyFr3sh, and the code that comes from cnc-ddraw is also
-available under its original MIT licence, in LICENSE-cnc-ddraw.txt.
-The scaling, colour and CRT shading are ported from DOSBox Staging
-(GPL-2.0-or-later). The third-party code it includes, and its licences,
-are listed in the README on GitHub.
+or (at your option) any later version. It's a fork of cnc-ddraw by
+FunkyFr3sh, and the code that comes from cnc-ddraw is also available
+under its original MIT licence. The scaling, colour and CRT shading are
+ported from DOSBox Staging (GPL-2.0-or-later). DirectCRT-LICENSE.txt
+has these licences and those of the third-party code and fonts in
+ddraw.dll.
