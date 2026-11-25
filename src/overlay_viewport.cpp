@@ -280,6 +280,17 @@ void menu_viewport(int setting, const SETTING* s, float F)
         line[sizeof(line) - 1] = 0;
         ui_note(line, F);
 
+        /* Reset gives the default, fit; this gives the whole desktop */
+        ImGui::BeginDisabled(a == 100 && b == 100);
+
+        if (ui_button("Reset to 100%", 0.0f, false))
+        {
+            write_mode = mode;
+            wa = wb = 100;
+        }
+
+        ImGui::EndDisabled();
+
         /* Another shape */
         int aspect = settings_index("aspect");
 
