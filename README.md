@@ -135,6 +135,8 @@ code keeps its own licence:
 - Dear ImGui, for the OSDs: MIT (`third_party/imgui/LICENSE.txt`)
 - Source Sans 3, the OSDs' font: SIL Open Font License 1.1
   (`third_party/fonts/source-sans-3/LICENSE.md`)
+- Material Icons, the OSDs' icons: Apache License 2.0
+  (`third_party/fonts/material-icons/LICENSE`)
 
 The screenshot in `docs/images/` isn't covered by these licences. It shows
 Baldur's Gate, © 1998 BioWare Corp.; Baldur's Gate is a trademark of Wizards
