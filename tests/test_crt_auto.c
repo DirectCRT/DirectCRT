@@ -273,6 +273,10 @@ static void test_settings_parse()
     CHECK(crt_auto_set(&s, "crt_color_profile", "none") && s.crt_color_profile == 0);
     CHECK(crt_auto_set(&s, "crt_color_profile", "off") && s.crt_color_profile == 0);
     CHECK(!crt_auto_set(&s, "crt_color_profile", "pvm") && s.crt_color_profile == CRT_AUTO_SETTING_AUTO);
+    CHECK(s.color_space == 0);
+    CHECK(crt_auto_set(&s, "color_space", "DCI-P3-D65") && s.color_space == 2);
+    CHECK(crt_auto_set(&s, "color_space", "rec-2020") && s.color_space == 6);
+    CHECK(!crt_auto_set(&s, "color_space", "p3") && s.color_space == 0);
 
     CHECK(crt_auto_set(&s, "black_level", "20") && s.black_level == 20);
     CHECK(!crt_auto_set(&s, "black_level", "101") && s.black_level == CRT_AUTO_SETTING_AUTO);
@@ -313,6 +317,7 @@ static void test_color()
     CHECK(c.red_gain == 1.0f && c.green_gain == 1.0f && c.blue_gain == 1.0f);
 
     CRT_AUTO_SETTINGS s = crt_auto_default_settings();
+    crt_auto_set(&s, "color_space", "display-p3");
     crt_auto_set(&s, "image_adjustments", "off");
     crt_auto_set(&s, "crt_color_profile", "ebu");
     crt_auto_set(&s, "gamma", "25");
@@ -325,7 +330,7 @@ static void test_color()
     crt_auto_set(&s, "blue_gain", "0");
 
     c = crt_auto_vga_color(&s);
-    CHECK(c.enable_adjustments == 0 && c.color_profile == 1);
+    CHECK(c.color_space == 3 && c.enable_adjustments == 0 && c.color_profile == 1);
     CHECK(c.gamma == 0.5f && c.digital_contrast == -2.0f);
     CHECK(fabsf(c.black_level - 0.2f) < 1e-6f && c.saturation == 1.0f);
     CHECK(c.color_temperature_kelvin == 6500.0f && c.color_temperature_luma_preserve == 1.0f);

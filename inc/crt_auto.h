@@ -114,6 +114,7 @@ typedef struct CRT_AUTO_SETTINGS
     CRT_ASPECT aspect;
     CRT_INTEGER_SCALING integer_scaling;
     CRT_VIEWPORT viewport;
+    int color_space; /* 0 srgb, 1 dci-p3, 2 dci-p3-d65, 3 display-p3, 4 modern-p3, 5 adobe-rgb, 6 rec-2020 */
 
     /* Image adjustments, in the settings' own ranges. CRT_AUTO_SETTING_AUTO
      * where 'auto' is allowed */
@@ -219,7 +220,7 @@ float crt_auto_params_get(const CRT_AUTO_PARAMS* params, const char* name, float
  * uniform names are in the comments */
 typedef struct CRT_AUTO_COLOR
 {
-    int color_space;                       /* COLOR_SPACE: 0 sRGB */
+    int color_space;                       /* COLOR_SPACE: as CRT_AUTO_SETTINGS' */
     int enable_adjustments;                /* ENABLE_ADJUSTMENTS */
     int color_profile;                     /* COLOR_PROFILE: 0 none, 1 EBU, 2 P22, 3 SMPTE-C, 4 Philips, 5 Trinitron */
     float brightness;                      /* BRIGHTNESS: 0 to 100 */

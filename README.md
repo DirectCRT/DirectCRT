@@ -30,7 +30,8 @@ turned on, aren't part of DirectCRT: a setting a game needs goes in its own
   and a viewport of any size, with every shader.
 - **Colour adjustments as in DOSBox Staging:** CRT colour profiles,
   brightness, contrast, gamma, colour temperature and gain, saturation and
-  black level, with every shader.
+  black level, with every shader, and wide gamut colour spaces (Display P3,
+  DCI-P3, Adobe RGB, Rec. 2020) for monitors that show them.
 - **Fullscreen or a window.** `display=auto` follows the game. Fullscreen is
   at the desktop resolution, so the shading has room to work; `original`
   switches the monitor to the game's resolution instead, for real CRTs and

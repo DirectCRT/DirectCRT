@@ -161,6 +161,19 @@ static const SETTING g_settings[] = {
         "  window's edges, like a CRT's stretch controls. Use it with 'aspect=stretch' for other shapes",
         T_PICTURE, "Viewport", "fit", 0, 0, SETTING_PICTURE, .icon = ICON_CROP_FREE },
 
+    { SETTING_CHOICE, "color_space", "srgb",
+        "The colour space of your monitor; the others need a wide gamut monitor in that mode\n"
+        "srgb = sRGB, 6500K white point, sRGB gamma: the usual one\n"
+        "display-p3 = Display P3, 6500K, sRGB gamma\n"
+        "dci-p3 = DCI-P3, DCI white point (about 6300K), 2.6 gamma; try dci-p3-d65 if whites look greenish\n"
+        "dci-p3-d65 = DCI-P3, 6500K, 2.6 gamma; try dci-p3 if whites look yellowish\n"
+        "modern-p3 = for monitors that cover about 90% of DCI-P3, 6500K, sRGB gamma\n"
+        "adobe-rgb = Adobe RGB, 6500K, 2.2 gamma\n"
+        "rec-2020 = Rec. 2020, 6500K, 2.4 gamma",
+        T_COLOUR, "Colour space", "srgb=sRGB|display-p3=Display P3|dci-p3=DCI-P3|dci-p3-d65=DCI-P3 D65|"
+        "modern-p3=Modern P3|adobe-rgb=Adobe RGB|rec-2020=Rec. 2020", 0, 0, SETTING_PICTURE,
+        .icon = ICON_DESKTOP_WINDOWS },
+
     { SETTING_BOOL, "image_adjustments", "on",
         "Colour adjustments, as on a CRT monitor; off = the game's raw colours",
         T_COLOUR, "Colour adjustments", BOOL_ONOFF, 0, 0, SETTING_PICTURE, .flags = SETTING_GATE, .icon = ICON_TONALITY },

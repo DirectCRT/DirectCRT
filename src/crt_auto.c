@@ -844,6 +844,7 @@ static const struct
     { "aspect", "auto" },
     { "integer_scaling", "auto" },
     { "viewport", "fit" },
+    { "color_space", "srgb" },
     { "image_adjustments", "on" },
     { "crt_color_profile", "auto" },
     { "brightness", "45", 0, 100 },
@@ -955,6 +956,25 @@ static int parse_setting(CRT_AUTO_SETTINGS* s, const char* name, const char* v)
 
     if (str_ieq(name, "viewport"))
         return crt_auto_parse_viewport(v, &s->viewport);
+
+    if (str_ieq(name, "color_space"))
+    {
+        /* In the shader's order (DOSBox's ColorSpace enum) */
+        static const char* const spaces[] = {
+            "srgb", "dci-p3", "dci-p3-d65", "display-p3", "modern-p3", "adobe-rgb", "rec-2020"
+        };
+
+        for (int i = 0; i < (int)(sizeof(spaces) / sizeof(spaces[0])); i++)
+        {
+            if (str_ieq(v, spaces[i]))
+            {
+                s->color_space = i;
+                return 1;
+            }
+        }
+
+        return 0;
+    }
 
     if (str_ieq(name, "image_adjustments"))
         return parse_bool(v, &s->image_adjustments);
@@ -1108,7 +1128,7 @@ CRT_AUTO_COLOR crt_auto_vga_color(const CRT_AUTO_SETTINGS* settings)
     }
     CRT_AUTO_COLOR c;
 
-    c.color_space = 0; /* color_space = srgb */
+    c.color_space = s->color_space;
     c.enable_adjustments = s->image_adjustments ? 1 : 0;
 
     /* 'auto' for VGA (auto_image_adjustments.cpp): P22 phosphors */
@@ -1124,8 +1144,8 @@ CRT_AUTO_COLOR crt_auto_vga_color(const CRT_AUTO_SETTINGS* settings)
     c.black_level_color[1] = 40 / 255.0f;
     c.black_level_color[2] = 40 / 255.0f;
 
-    /* 'auto' for VGA: no black level boost (0, which halving for sRGB's 2.2
-     * gamma leaves at 0) */
+    /* 'auto' for VGA: no black level boost (0, which DOSBox's halving for
+     * the colour spaces below 2.6 gamma leaves at 0) */
     c.black_level = s->black_level == CRT_AUTO_SETTING_AUTO ? 0.0f : remap(0, 100, 0, 1, (float)s->black_level);
 
     c.saturation = remap(-50, 50, -1, 1, (float)s->saturation);
