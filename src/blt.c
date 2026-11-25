@@ -253,22 +253,35 @@ void blt_colorkey(
 
         if (key_l == key_h)
         {
-            for (unsigned char* h_end = dst + dst_h * (dst_w + d_a); dst < h_end;)
+            /* 32 pixels a step, without a branch: the key's pixels write back
+               what's there. Both halves load before either stores; one half a
+               step, or a store between the loads, measured a third slower */
+            __m128i key = _mm_set1_epi8((char)key_l);
+
+            for (int y = 0; y < dst_h; y++)
             {
-                for (unsigned char* w_end = dst + dst_w; dst < w_end;)
+                unsigned char* d = dst + y * dst_p;
+                const unsigned char* s = src + y * src_p;
+                int x = 0;
+
+                for (; x + 32 <= dst_w; x += 32)
                 {
-                    unsigned char c = *src++;
+                    __m128i c0 = _mm_loadu_si128((const __m128i*)(s + x));
+                    __m128i c1 = _mm_loadu_si128((const __m128i*)(s + x + 16));
+                    __m128i old0 = _mm_loadu_si128((const __m128i*)(d + x));
+                    __m128i old1 = _mm_loadu_si128((const __m128i*)(d + x + 16));
+                    __m128i hit0 = _mm_cmpeq_epi8(c0, key);
+                    __m128i hit1 = _mm_cmpeq_epi8(c1, key);
 
-                    if (c != key_l)
-                    {
-                        *dst = c;
-                    }
-
-                    dst++;
+                    _mm_storeu_si128((__m128i*)(d + x), _mm_or_si128(_mm_and_si128(hit0, old0), _mm_andnot_si128(hit0, c0)));
+                    _mm_storeu_si128((__m128i*)(d + x + 16), _mm_or_si128(_mm_and_si128(hit1, old1), _mm_andnot_si128(hit1, c1)));
                 }
-                
-                src += s_a;
-                dst += d_a;
+
+                for (; x < dst_w; x++)
+                {
+                    if (s[x] != key_l)
+                        d[x] = s[x];
+                }
             }
         }
         else
@@ -302,22 +315,33 @@ void blt_colorkey(
 
         if (key_l == key_h)
         {
-            for (unsigned short* h_end = d + dst_h * (dst_w + d_a); d < h_end;)
+            /* 16 pixels a step, as for 8 bpp */
+            __m128i key = _mm_set1_epi16((short)key_l);
+
+            for (int y = 0; y < dst_h; y++)
             {
-                for (unsigned short* w_end = d + dst_w; d < w_end;)
+                unsigned short* dr = (unsigned short*)(dst + y * dst_p);
+                const unsigned short* sr = (const unsigned short*)(src + y * src_p);
+                int x = 0;
+
+                for (; x + 16 <= dst_w; x += 16)
                 {
-                    unsigned short c = *s++;
+                    __m128i c0 = _mm_loadu_si128((const __m128i*)(sr + x));
+                    __m128i c1 = _mm_loadu_si128((const __m128i*)(sr + x + 8));
+                    __m128i old0 = _mm_loadu_si128((const __m128i*)(dr + x));
+                    __m128i old1 = _mm_loadu_si128((const __m128i*)(dr + x + 8));
+                    __m128i hit0 = _mm_cmpeq_epi16(c0, key);
+                    __m128i hit1 = _mm_cmpeq_epi16(c1, key);
 
-                    if (c != key_l)
-                    {
-                        *d = c;
-                    }
-
-                    d++;
+                    _mm_storeu_si128((__m128i*)(dr + x), _mm_or_si128(_mm_and_si128(hit0, old0), _mm_andnot_si128(hit0, c0)));
+                    _mm_storeu_si128((__m128i*)(dr + x + 8), _mm_or_si128(_mm_and_si128(hit1, old1), _mm_andnot_si128(hit1, c1)));
                 }
 
-                s += s_a;
-                d += d_a;
+                for (; x < dst_w; x++)
+                {
+                    if (sr[x] != key_l)
+                        dr[x] = sr[x];
+                }
             }
         }
         else
