@@ -215,9 +215,10 @@ static RECTF restricted_viewport(const CRT_VIEWPORT* v, const CRT_AUTO_DISPLAY* 
 /* RENDER_CalcDrawRectInPixels, before rounding. Unlike DOSBox, whose 'auto'
  * snaps only the shaders under 'crt/' (ShaderDescriptor::
  * EnforceAutoIntegerScaling), 'auto' snaps every shader: sharp, nearest and
- * bilinear too */
+ * bilinear too. snap_past_5x: 'auto' keeps its half steps from 5x too */
 static RECTF calc_draw_rect(
     CRT_INTEGER_SCALING integer_scaling,
+    int snap_past_5x,
     RECTF viewport,
     int canvas_w,
     int canvas_h,
@@ -259,13 +260,13 @@ static RECTF calc_draw_rect(
         {
             factor = floorf(factor);
         }
-        else if (factor >= 5.0f)
+        else if (factor >= 5.0f && !snap_past_5x)
         {
             /* No snapping from 5x */
         }
         else if (factor >= 3.0f)
         {
-            /* Half steps from 3x to 5x */
+            /* Half steps from 3x (to 5x, as DOSBox does) */
             factor = floorf(factor * 2) / 2;
         }
         else
@@ -336,6 +337,12 @@ CRT_AUTO_LAYOUT crt_auto_calc_layout(
 
     RECTF viewport = restricted_viewport(&vp_setting, &d, canvas_width, canvas_height);
 
+    /* A relative viewport grows past the screen, where the free scaling from
+     * 5x would leave the slider with no effect up to 5x and then a picture
+     * at any scale; it snaps all the way. Not only past 100%, so the picture
+     * doesn't jump there */
+    int snap_past_5x = vp_setting.mode == CRT_VIEWPORT_RELATIVE;
+
     FRACTION aspect =
         display_aspect(s->aspect, mode_width, mode_height, iroundf(viewport.w), iroundf(viewport.h));
 
@@ -356,6 +363,7 @@ CRT_AUTO_LAYOUT crt_auto_calc_layout(
 
         RECTF r = calc_draw_rect(
             s->integer_scaling,
+            snap_past_5x,
             viewport,
             canvas_width,
             canvas_height,
@@ -422,6 +430,7 @@ CRT_AUTO_LAYOUT crt_auto_calc_layout(
     {
         RECTF r = calc_draw_rect(
             s->integer_scaling,
+            snap_past_5x,
             viewport,
             canvas_width,
             canvas_height,

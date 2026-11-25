@@ -144,7 +144,8 @@ static const SETTING g_settings[] = {
 
     { SETTING_CHOICE, "integer_scaling", "auto",
         "Keep the scaling factor a whole number, so the picture still fits in the viewport\n"
-        "auto = vertical, with 3.5x and 4.5x also allowed, and none above 5x\n"
+        "auto = vertical, with 3.5x and 4.5x also allowed, and none above 5x (with 'viewport=relative',\n"
+        "  half steps above 5x too)\n"
         "vertical = whole numbers vertically\n"
         "horizontal = whole numbers horizontally\n"
         "off = fill the viewport",

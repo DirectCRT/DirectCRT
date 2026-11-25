@@ -250,6 +250,17 @@ static void test_viewport()
     s = settings_with("viewport", "relative 200% 200%");
     LAYOUT_WITH(s, NULL, 640, 480, 1920, 1080, CRT_SHADER_HYLLIAN_VGA_4K, 4, 640, 480, -480, -540, 2880, 2160);
 
+    /* auto doesn't snap from 5x, but relative does, in half steps: 5.4x is
+     * 5.4x with fit, 5x with relative, at 100% or past it */
+    s = settings_with("viewport", "fit");
+    LAYOUT_WITH(s, &d, 640, 400, 3840, 2160, CRT_SHADER_HYLLIAN_VGA_4K, 5, 640, 400, 480, 0, 2880, 2160);
+
+    s = settings_with("viewport", "relative 100% 100%");
+    LAYOUT_WITH(s, &d, 640, 400, 3840, 2160, CRT_SHADER_HYLLIAN_VGA_4K, 5, 640, 400, 587, 80, 2667, 2000);
+
+    s = settings_with("viewport", "relative 120% 120%");
+    LAYOUT_WITH(s, &d, 640, 480, 3840, 2160, CRT_SHADER_HYLLIAN_VGA_4K, 5, 640, 480, 320, -120, 3200, 2400);
+
     /* viewport_offset moves the 1280x960 picture by fractions of its size,
      * and changes nothing else */
     s = settings_with("viewport_offset", "10% 5%");

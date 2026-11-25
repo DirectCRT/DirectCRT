@@ -46,7 +46,9 @@ Source: dosbox-staging, mainly `src/gui/render/auto_shader_switcher.cpp`,
   game's line count.
 - **`integer_scaling = auto`**: whole steps below 3x, half steps (3.5x, 4.5x)
   from 3x to 5x, no snapping at 5x and above. Unlike DOSBox, which applies it
-  only with the CRT shaders, it applies with every shader (sharp too).
+  only with the CRT shaders, it applies with every shader (sharp too). With
+  `viewport = relative`, which goes past the screen, the half steps go on
+  past 5x.
 - **The main shader is chosen per video mode and window size:**
 
   | Screen pixels per game line | Main shader |
