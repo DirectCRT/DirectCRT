@@ -12,13 +12,13 @@ PRODUCTVERSION VERSION
         {
             VALUE "CompanyName", "github.com/DirectCRT/DirectCRT"
             VALUE "FileDescription", "DirectCRT - DirectDraw with CRT shading"
-            VALUE "FileVersion", VERSION_STRING " (git~" GIT_COMMIT ", " GIT_BRANCH ")"
+            VALUE "FileVersion", VERSION_STRING
             VALUE "InternalName", "ddraw"
             VALUE "LegalCopyright", "GPL-2.0-or-later. Based on cnc-ddraw, Copyright (c) 2010-2025 FunkyFr3sh"
             VALUE "LegalTrademarks", ""
             VALUE "OriginalFileName", "ddraw.dll"
             VALUE "ProductName", "DirectCRT"
-            VALUE "ProductVersion", VERSION_STRING " (git~" GIT_COMMIT ", " GIT_BRANCH ")"
+            VALUE "ProductVersion", VERSION_STRING
             VALUE "Comments", "https://github.com/DirectCRT/DirectCRT"
         }
     }

@@ -20,6 +20,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@v7
+        with:
+          # The history and the tags, for the DLL's version (tools/git-version.ps1)
+          fetch-depth: 0
 
       - name: Find MSBuild
         shell: bash

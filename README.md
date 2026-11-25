@@ -117,6 +117,9 @@ file). It loads the DLL without running a game.
 GitHub Actions builds all four configurations and runs the unit tests on every
 push to `master` and on pull requests.
 
+The DLL's version comes from the last version tag: `v0.2.0` makes it 0.2.0,
+and three commits later 0.2.0.3 (`tools\git-version.ps1`).
+
 ## Licence
 
 DirectCRT as a whole is licensed under the GNU General Public License, version 2

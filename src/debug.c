@@ -212,11 +212,8 @@ void dbg_init()
         }
 
         TRACE(
-            "DirectCRT version = %d.%d.%d.%d (git~%s, %s)\n",
-            VERSION_MAJOR,
-            VERSION_MINOR,
-            VERSION_BUILD,
-            VERSION_REVISION,
+            "DirectCRT version = %s (git~%s, %s)\n",
+            VERSION_STRING,
             GIT_COMMIT,
             GIT_BRANCH);
 
