@@ -322,6 +322,25 @@ bool ui_button(const char* label, float w, bool accent)
     return pressed;
 }
 
+/* An icon in a square button, lit when active or under the mouse */
+bool ui_icon_button(const char* id, const char* icon, float size, float icon_size, bool active)
+{
+    bool pressed = ImGui::InvisibleButton(id, ImVec2(size, size));
+    bool hovered = ImGui::IsItemHovered();
+    bool held = ImGui::IsItemActive();
+    ImVec2 a = ImGui::GetItemRectMin();
+    ImVec2 b = ImGui::GetItemRectMax();
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+
+    if (hovered || held)
+        dl->AddRectFilled(a, b, ui_col(held ? COL_ROW_ACTIVE : COL_ROW_HOVER), size * 0.22f);
+
+    ui_icon(dl, icon, ImVec2((a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f), icon_size,
+        ui_col(active || hovered ? COL_TEXT : COL_DIM));
+
+    return pressed;
+}
+
 /* Text in the help's grey, wrapped, a little smaller */
 void ui_note(const char* text, float F, const ImVec4& col)
 {

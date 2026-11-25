@@ -72,6 +72,7 @@ void ui_take_focus(ImGuiID id);
 /* The controls */
 int ui_segmented(const char* str_id, const char* const* labels, int n, int selected, float F);
 bool ui_button(const char* label, float w, bool accent);
+bool ui_icon_button(const char* id, const char* icon, float size, float icon_size, bool active);
 void ui_note(const char* text, float F, const ImVec4& col = COL_DIM);
 bool ui_int_field(const char* str_id, int v, int lo, int hi, float w, int* out);
 bool ui_slider_box(const char* str_id, const char* label, int v, int lo, int hi, float F, int* out,

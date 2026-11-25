@@ -25,7 +25,7 @@ ICONS = """
     insights format_size notes picture_in_picture opacity
     visibility_off slow_motion_video timelapse hourglass_bottom fullscreen_exit
     developer_board view_list filter_none center_focus_strong colorize
-    lock_open photo_camera settings
+    lock lock_open photo_camera settings
     close chevron_right check restart_alt unfold_more help_outline
 """.split()
 
@@ -83,7 +83,7 @@ def main():
 
     lines += ["", "#endif", ""]
 
-    with open(OUT_HEADER, "w", newline="\r\n") as f:
+    with open(OUT_HEADER, "w", newline="\n") as f:
         f.write("\n".join(lines))
 
     print("%d icons, %d bytes" % (len(ICONS), os.path.getsize(OUT_FONT)))

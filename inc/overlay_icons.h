@@ -59,6 +59,7 @@
 #define ICON_FILTER_NONE "\xee\x8f\xa0"
 #define ICON_CENTER_FOCUS_STRONG "\xee\x8e\xb4"
 #define ICON_COLORIZE "\xee\x8e\xb8"
+#define ICON_LOCK "\xee\xa2\x97"
 #define ICON_LOCK_OPEN "\xee\xa2\x98"
 #define ICON_PHOTO_CAMERA "\xee\x90\x92"
 #define ICON_SETTINGS "\xee\xa2\xb8"

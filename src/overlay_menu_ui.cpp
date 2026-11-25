@@ -549,24 +549,6 @@ static const char* menu_tab_icon(int tab)
 }
 
 /* A square button with an icon on it, hovered or 'active' brighter */
-static bool menu_icon_button(const char* id, const char* icon, float size, float icon_size, bool active)
-{
-    bool pressed = ImGui::InvisibleButton(id, ImVec2(size, size));
-    bool hovered = ImGui::IsItemHovered();
-    bool held = ImGui::IsItemActive();
-    ImVec2 a = ImGui::GetItemRectMin();
-    ImVec2 b = ImGui::GetItemRectMax();
-    ImDrawList* dl = ImGui::GetWindowDrawList();
-
-    if (hovered || held)
-        dl->AddRectFilled(a, b, ui_col(held ? COL_ROW_ACTIVE : COL_ROW_HOVER), size * 0.22f);
-
-    ui_icon(dl, icon, ImVec2((a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f), icon_size,
-        ui_col(active || hovered ? COL_TEXT : COL_DIM));
-
-    return pressed;
-}
-
 /* The help of a setting in a tooltip, when its row has been under the mouse a while */
 static void menu_tooltip(int setting, float F)
 {
@@ -1877,7 +1859,7 @@ void menu_draw(int width, int canvas_height, float F, bool first)
 
         ImGui::SetCursorPos(ImVec2(x, by));
 
-        if (menu_icon_button("##close", ICON_CLOSE, bs, 1.4f * F, false))
+        if (ui_icon_button("##close", ICON_CLOSE, bs, 1.4f * F, false))
             open = false;
 
         ImGui::SetItemTooltip("Close");
@@ -1900,7 +1882,7 @@ void menu_draw(int width, int canvas_height, float F, bool first)
             ImGui::SetCursorPos(ImVec2(x, by));
             ImGui::PushID(t);
 
-            if (menu_icon_button("##group", menu_tab_icon(t), bs, 1.45f * F, t == g_group))
+            if (ui_icon_button("##group", menu_tab_icon(t), bs, 1.45f * F, t == g_group))
                 menu_go_to_group(t, false);
 
             ImGui::SetItemTooltip("%s", settings_tab(t));
