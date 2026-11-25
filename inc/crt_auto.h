@@ -10,6 +10,10 @@
  * (shader choice), render.cpp RENDER_CalcDrawRectInPixels (picture size) and
  * auto_image_adjustments.cpp (colour). No Windows or OpenGL code, so it can be
  * unit tested on its own (tests/test_crt_auto.c).
+ *
+ * Copyright (C) 2019-2026 The DOSBox Staging Team
+ * Copyright (C) 2002-2021 The DOSBox Team
+ * Translated to C and changed for DirectCRT (C) 2026 Vedran Vekić
  */
 
 typedef enum CRT_SHADER

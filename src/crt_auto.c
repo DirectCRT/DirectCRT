@@ -1,5 +1,9 @@
 /* crt-auto for VGA, ported from DOSBox Staging (GPL-2.0-or-later):
  *
+ *   Copyright (C) 2019-2026 The DOSBox Staging Team
+ *   Copyright (C) 2002-2021 The DOSBox Team
+ *   Translated to C and changed for DirectCRT (C) 2026 Vedran Vekić
+ *
  *   - shader choice: src/gui/render/auto_shader_switcher.cpp,
  *     AutoShaderSwitcher::NotifyRenderParametersChanged and GetVgaShader
  *   - picture size: src/gui/render/render.cpp,
