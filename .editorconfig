@@ -1,0 +1,14 @@
+# Line endings as in .gitattributes: LF, except the files Visual Studio and
+# cmd.exe write with CRLF
+root = true
+
+[*]
+end_of_line = lf
+insert_final_newline = true
+
+[*.{sln,vcxproj,filters,rc,cmd,bat}]
+end_of_line = crlf
+
+[third_party/**]
+end_of_line = unset
+insert_final_newline = unset

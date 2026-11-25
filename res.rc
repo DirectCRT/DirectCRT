@@ -10,7 +10,7 @@ PRODUCTVERSION VERSION
     {
         BLOCK "040904B0"
         {
-            VALUE "CompanyName", "github.com/vvekic/DirectCRT"
+            VALUE "CompanyName", "github.com/DirectCRT/DirectCRT"
             VALUE "FileDescription", "DirectCRT - DirectDraw with CRT shading"
             VALUE "FileVersion", VERSION_STRING " (git~" GIT_COMMIT ", " GIT_BRANCH ")"
             VALUE "InternalName", "ddraw"
@@ -19,7 +19,7 @@ PRODUCTVERSION VERSION
             VALUE "OriginalFileName", "ddraw.dll"
             VALUE "ProductName", "DirectCRT"
             VALUE "ProductVersion", VERSION_STRING " (git~" GIT_COMMIT ", " GIT_BRANCH ")"
-            VALUE "Comments", "https://github.com/vvekic/DirectCRT"
+            VALUE "Comments", "https://github.com/DirectCRT/DirectCRT"
         }
     }
 

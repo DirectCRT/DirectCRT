@@ -1,4 +1,20 @@
+# Line endings, the same on every machine whatever its core.autocrlf:
+# LF in the repository and in the working copy, except the files that
+# Visual Studio and cmd.exe write with CRLF. .editorconfig tells the editors.
+* text=auto eol=lf
+
+*.sln     text eol=crlf
+*.vcxproj text eol=crlf
+*.filters text eol=crlf
+*.rc      text eol=crlf
+*.cmd     text eol=crlf
+*.bat     text eol=crlf
+
+*.png binary
+*.ico binary
+*.ttf binary
+
+# Vendored: kept byte for byte as it came
 third_party/dosbox-staging/resources/** -text
-*.sh text eol=lf
 third_party/imgui/** -text
 third_party/fonts/** -text

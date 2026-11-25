@@ -32,7 +32,7 @@ static const char* const g_tabs[] = {
 
 static const SETTING g_settings[] = {
     INI_TEXT(
-        "; DirectCRT - https://github.com/vvekic/DirectCRT\n"
+        "; DirectCRT - https://github.com/DirectCRT/DirectCRT\n"
         "\n"
         "[directcrt]\n"
         "; ### Optional settings ###\n"
