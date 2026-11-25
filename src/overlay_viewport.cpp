@@ -20,6 +20,12 @@ extern "C" {
 #include "settings.h"
 }
 
+/* While a slider or the picture is dragged, how often it's written: the
+ * picture follows, without setting it up again every frame */
+#define DRAG_WRITE_MS 40
+
+static DWORD g_slider_written_ms;
+
 /* A viewport's kind, as crt_auto.c reads it, and its numbers: the size, or
  * the percentages; what crt_auto.c doesn't take is "fit" */
 static int menu_viewport_mode(const char* v, int* a, int* b)
@@ -185,12 +191,17 @@ void menu_viewport(int setting, const SETTING* s, float F)
     }
     else if (mode == CRT_VIEWPORT_DESKTOP)
     {
-        int n;
+        int n, live = -1;
 
-        if (ui_slider_box("##desktop", "Percentage", a, 1, 100, F, &n))
+        if (ui_slider_box("##desktop", "Percentage", a, 1, 100, F, &n, 0, &live))
         {
             write_mode = mode;
             wa = n;
+        }
+        else if (live >= 0 && GetTickCount() - g_slider_written_ms >= DRAG_WRITE_MS)
+        {
+            write_mode = mode;
+            wa = live;
         }
 
         _snprintf(line, sizeof(line) - 1, "%d%% of the desktop is %d\xc3\x97%d pixels", a, (int)(dw * a / 100.0f), (int)(dh * a / 100.0f));
@@ -220,6 +231,15 @@ void menu_viewport(int setting, const SETTING* s, float F)
             wb = n;
         }
 
+        int drag = live_h >= 0 ? live_h : live_v;
+
+        if (write_mode < 0 && drag >= 0 && GetTickCount() - g_slider_written_ms >= DRAG_WRITE_MS)
+        {
+            write_mode = mode;
+            wa = linked || live_h >= 0 ? drag : a;
+            wb = linked || live_v >= 0 ? drag : b;
+        }
+
         if (ImGui::Checkbox("Same for both", &linked) && linked && a != b)
         {
             write_mode = mode;
@@ -244,13 +264,14 @@ void menu_viewport(int setting, const SETTING* s, float F)
         menu_viewport_value(write_mode, wa, wb, v, sizeof(v));
 
         if (strcmp(v, value))
+        {
             overlay_menu_write(setting, v);
+            g_slider_written_ms = GetTickCount();
+        }
     }
 }
 
 /* ---------------------------------------- viewport_offset: moving the picture */
-
-#define PAN_WRITE_MS 40 /* while it's dragged, how often it's written */
 
 static int g_pan = -1;              /* the setting being moved, or -1 */
 static char g_pan_start[MENU_TEXT]; /* its value before, for Cancel */
@@ -427,7 +448,7 @@ void menu_pan_draw(int width, int canvas_height, float F)
         if (!ImGui::IsMouseDown(ImGuiMouseButton_Left))
             g_pan_dragging = false;
 
-        if (g_pan_unwritten && (!g_pan_dragging || GetTickCount() - g_pan_written_ms >= PAN_WRITE_MS))
+        if (g_pan_unwritten && (!g_pan_dragging || GetTickCount() - g_pan_written_ms >= DRAG_WRITE_MS))
             pan_write();
     }
 
