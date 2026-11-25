@@ -48,7 +48,6 @@ static int g_text = -1;        /* the text being edited, and its text */
 static char g_text_value[MENU_TEXT];
 static int g_custom = -1;      /* the setting whose "A number" or "Other" was picked */
 static bool g_custom_focus;
-static bool g_ui_take_focus;      /* give the row just opened with the keyboard its control */
 static bool g_key_down[256];   /* the keys ImGui saw pressed */
 
 static void menu_capture(int setting)
@@ -1708,7 +1707,8 @@ static void menu_list(float F)
     {
         g_group = nav_group;
     }
-    else if (ui_keyboard() && open_group >= 0 && !nav_on_row && g.NavWindow == window)
+    else if (ui_keyboard() && open_group >= 0 && !nav_on_row && g.NavWindow &&
+             ImGui::IsWindowChildOf(g.NavWindow, window, false)) /* the list, or an open row's body */
     {
         g_group = open_group;
     }
