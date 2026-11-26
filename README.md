@@ -145,3 +145,5 @@ The screenshot in `docs/images/` isn't covered by these licences. It shows
 Baldur's Gate, © 1998 BioWare Corp.; Baldur's Gate is a trademark of Wizards
 of the Coast LLC. It's here only to show what DirectCRT does; DirectCRT isn't
 affiliated with or endorsed by either.
+
+<!-- Test change for checking the CodeRabbit integration; safe to discard. -->
